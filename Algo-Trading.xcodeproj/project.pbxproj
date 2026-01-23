@@ -23,13 +23,31 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		1E6893B02F23B695006AE86A /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = /usr/share/man/man1/;
+			dstSubfolderSpec = 0;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 1;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		1E6893B22F23B695006AE86A /* ArgusRunner */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = ArgusRunner; sourceTree = BUILT_PRODUCTS_DIR; };
 		D96F62A52EDF565D00406CF0 /* Algo-Trading.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Algo-Trading.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		D96F62B22EDF565F00406CF0 /* Algo-TradingTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Algo-TradingTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		D96F62BC2EDF565F00406CF0 /* Algo-TradingUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Algo-TradingUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		1E6893B32F23B695006AE86A /* ArgusRunner */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = ArgusRunner;
+			sourceTree = "<group>";
+		};
 		D96F62A72EDF565D00406CF0 /* Algo-Trading */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = "Algo-Trading";
@@ -48,6 +66,13 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		1E6893AF2F23B695006AE86A /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		D96F62A22EDF565C00406CF0 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -78,6 +103,7 @@
 				D96F62A72EDF565D00406CF0 /* Algo-Trading */,
 				D96F62B52EDF565F00406CF0 /* Algo-TradingTests */,
 				D96F62BF2EDF565F00406CF0 /* Algo-TradingUITests */,
+				1E6893B32F23B695006AE86A /* ArgusRunner */,
 				D96F62A62EDF565D00406CF0 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -88,6 +114,7 @@
 				D96F62A52EDF565D00406CF0 /* Algo-Trading.app */,
 				D96F62B22EDF565F00406CF0 /* Algo-TradingTests.xctest */,
 				D96F62BC2EDF565F00406CF0 /* Algo-TradingUITests.xctest */,
+				1E6893B22F23B695006AE86A /* ArgusRunner */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -95,6 +122,28 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		1E6893B12F23B695006AE86A /* ArgusRunner */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1E6893B82F23B695006AE86A /* Build configuration list for PBXNativeTarget "ArgusRunner" */;
+			buildPhases = (
+				1E6893AE2F23B695006AE86A /* Sources */,
+				1E6893AF2F23B695006AE86A /* Frameworks */,
+				1E6893B02F23B695006AE86A /* CopyFiles */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				1E6893B32F23B695006AE86A /* ArgusRunner */,
+			);
+			name = ArgusRunner;
+			packageProductDependencies = (
+			);
+			productName = ArgusRunner;
+			productReference = 1E6893B22F23B695006AE86A /* ArgusRunner */;
+			productType = "com.apple.product-type.tool";
+		};
 		D96F62A42EDF565C00406CF0 /* Algo-Trading */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = D96F62C62EDF565F00406CF0 /* Build configuration list for PBXNativeTarget "Algo-Trading" */;
@@ -170,9 +219,12 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
-				LastSwiftUpdateCheck = 2610;
+				LastSwiftUpdateCheck = 2620;
 				LastUpgradeCheck = 2620;
 				TargetAttributes = {
+					1E6893B12F23B695006AE86A = {
+						CreatedOnToolsVersion = 26.2;
+					};
 					D96F62A42EDF565C00406CF0 = {
 						CreatedOnToolsVersion = 26.1.1;
 					};
@@ -206,6 +258,7 @@
 				D96F62A42EDF565C00406CF0 /* Algo-Trading */,
 				D96F62B12EDF565F00406CF0 /* Algo-TradingTests */,
 				D96F62BB2EDF565F00406CF0 /* Algo-TradingUITests */,
+				1E6893B12F23B695006AE86A /* ArgusRunner */,
 			);
 		};
 /* End PBXProject section */
@@ -235,6 +288,13 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		1E6893AE2F23B695006AE86A /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		D96F62A12EDF565C00406CF0 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -272,6 +332,32 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		1E6893B62F23B695006AE86A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		1E6893B72F23B695006AE86A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
 		D96F62C42EDF565F00406CF0 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -548,6 +634,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		1E6893B82F23B695006AE86A /* Build configuration list for PBXNativeTarget "ArgusRunner" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1E6893B62F23B695006AE86A /* Debug */,
+				1E6893B72F23B695006AE86A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		D96F62A02EDF565C00406CF0 /* Build configuration list for PBXProject "Algo-Trading" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

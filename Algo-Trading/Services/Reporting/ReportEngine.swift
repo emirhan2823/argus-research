@@ -89,7 +89,6 @@ actor ReportEngine {
 └─────────────────────────────────────────────────────────────┘
 
 """
-"""
         let insights = await AlkindusInsightGenerator.shared.getTodaysInsights()
         print("📊 ReportEngine: Daily - Alkindus Insights count: \(insights.count)")
         if insights.isEmpty {
@@ -276,7 +275,6 @@ actor ReportEngine {
 │  📚 BU HAFTA ÖĞRENDIKLERIN (ALKİNDUS)                       │
 └─────────────────────────────────────────────────────────────┘
 
-"""
 """
         let recentInsights = await AlkindusInsightGenerator.shared.getRecentInsights(days: 7)
         print("📊 ReportEngine: Weekly - Alkindus Insights count: \(recentInsights.count)")
