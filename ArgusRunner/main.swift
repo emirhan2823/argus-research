@@ -246,228 +246,192 @@ let args = parseArgs()
 log("=== ARGUS RUNNER START ===")
 log("mode=\(args.mode.rawValue) symbol=\(args.symbol) tfs=\(args.tfs.joined(separator: ",")) tradeTF=\(args.tradeTF) loop=\(args.loopSeconds)s")
 
-do {
-    let base = try DataStore.baseDir()
-    log("dataDir=\(base.path)")
-} catch {
-    log("dataDir error: \(error)")
-}
-
-switch args.mode {
-
-case .health:
-    log("health=ok")
-    exit(0)
-
-case .backtest:
-    log("backtest: TODO")
-    exit(0)
-
-case .paper:
-    log("paper: starting loop (Ctrl+C to stop)")
-
-    let client = BinanceClient()
-    let DEBUG_LOWER_UPPER_LOGS = true
-
-    // Restore paper state if present (so restarts don't reset portfolio/risk)
-    let loaded = PaperStateStore.load(symbol: args.symbol)
-
-    let portfolio = PaperPortfolio(cash: loaded?.cash ?? args.startingBalance)
-    if let p = loaded?.position {
-        let side = PositionSide(rawValue: p.side) ?? .none
-        if side != .none {
-            portfolio.position = Position(
-                side: side,
-                qty: p.qty,
-                entry: p.entry,
-                entryTime: ArgusTime.isoToDate(p.entryTimeISO) ?? Date()
-            )
-        }
-    }
-
+    // --- PIPELINE SETUP ---
+    
+    // 1. Risk Setup (Conservative)
     let riskCfg = ArgusRisk.Config(
         perTradeNotionalPct: 0.10,
         dailyLossCapPct: 0.03,
-        cooldownSeconds: 60 * 10,
-        maxTradesPerDay: 6,
-        requireQualityAtLeast: SetupQuality.ok   // <- .good yerine .ok
+        maxDrawdownPct: 0.15,
+        maxConsecutiveLosses: 3,
+        cooldownSeconds: 60 * 5,
+        maxTradesPerDay: 5,
+        requireQualityAtLeast: .ok
     )
+    let risk = ArgusRisk.Engine(cfg: riskCfg, now: Date(), startingEquity: 30000) // Default start if no state
 
-    let risk = ArgusRisk.Engine(cfg: riskCfg, now: Date(), startingEquity: portfolio.cash)
-    if let r = loaded?.risk {
-        let today = ArgusRisk.State.utcDayKey(Date())
-        if r.dayKeyUTC == today {
-            var st = ArgusRisk.State(now: Date(), dayStartEquity: r.dayStartEquity)
-            st.dayKeyUTC = r.dayKeyUTC
-            st.realizedPnl = r.realizedPnl
-            st.tradesToday = r.tradesToday
-            st.lastTradeTime = r.lastTradeTimeISO.flatMap { ArgusTime.isoToDate($0) }
-            risk.restore(state: st)
-        }
+    // 2. Load History for Backtest
+    // For MVP, we load the current month's file. user can expand to load multiple months.
+    log("Loading bars for \(args.symbol) \(args.tradeTF)...")
+    let marketData = RunnerCSVMarketData.shared
+    let allBars = marketData.loadAllBars(symbol: args.symbol, tf: args.tradeTF, date: Date())
+    
+    log("Loaded \(allBars.count) bars.")
+    guard !allBars.isEmpty else {
+        log("No data found. Exiting.")
+        exit(0)
     }
 
-    func persistPaperState() {
-        let posSnap: PaperStateStore.PositionSnapshot? = portfolio.position.map { pos in
-            PaperStateStore.PositionSnapshot(
-                side: pos.side.rawValue,
-                qty: pos.qty,
-                entry: pos.entry,
-                entryTimeISO: ISO8601DateFormatter().string(from: pos.entryTime)
-            )
-        }
-
-        let riskState = risk.state
-        let riskSnap = PaperStateStore.RiskSnapshot(
-            dayKeyUTC: riskState.dayKeyUTC,
-            dayStartEquity: riskState.dayStartEquity,
-            realizedPnl: riskState.realizedPnl,
-            tradesToday: riskState.tradesToday,
-            lastTradeTimeISO: riskState.lastTradeTime.map { ISO8601DateFormatter().string(from: $0) }
+    // 3. Adapter & State Helper
+    func toServiceCandle(_ b: RunnerCSVMarketData.OHLCV) -> Candle {
+        // Mapping Runner OHLCV to Algo-Trading Candle (shared name ambiguity fixed by context or matching struct)
+        // Assuming 'Candle' in this context resolves to the one Orion expects. 
+        // If 'Candle' is ambiguous, we'd need module prefix. 
+        // Since we are in Main, we assume implicit visibility.
+        return Candle(
+            date: Date(timeIntervalSince1970: Double(b.closeTimeMs) / 1000.0),
+            open: b.open, high: b.high, low: b.low, close: b.close, volume: b.volume
         )
-
-        let snap = PaperStateStore.Snapshot(
-            schemaVersion: 1,
-            symbol: args.symbol.uppercased(),
-            updatedAtISO: ArgusTime.nowISO(),
-            cash: portfolio.cash,
-            position: posSnap,
-            risk: riskSnap
+    }
+    
+    func toBinanceCandle(_ b: RunnerCSVMarketData.OHLCV) -> BinanceClient.Candle {
+        return BinanceClient.Candle(
+            openTime: b.closeTimeMs - (15*60*1000), // Approx
+            open: String(b.open),
+            high: String(b.high),
+            low: String(b.low),
+            close: String(b.close),
+            volume: String(b.volume),
+            closeTime: b.closeTimeMs,
+            quoteAssetVolume: "0", trades: 0, takerBuyBaseAssetVolume: "0", takerBuyQuoteAssetVolume: "0"
         )
-
-        PaperStateStore.save(snap, symbol: args.symbol)
     }
 
-    // ensure state file exists after boot
-    persistPaperState()
-
-    log("risk: perTradeNotional=\(Int(riskCfg.perTradeNotionalPct*100))% dailyLossCap=\(Int(riskCfg.dailyLossCapPct*100))% cooldown=\(riskCfg.cooldownSeconds)s maxTrades=\(riskCfg.maxTradesPerDay) require>=\(riskCfg.requireQualityAtLeast.rawValue)")
-
-    var lastSignals: [String: TFSignal] = [:]
-    let (lowerTFs, tradeTF, upperTFs) = classifyTFs(all: args.tfs, tradeTF: args.tradeTF)
-    log("TF split -> lower=\(lowerTFs.joined(separator: ",")) trade=\(tradeTF) upper=\(upperTFs.joined(separator: ","))")
-
-    Task {
-        while true {
-            for tf in args.tfs {
-                do {
-                    let candles = try await client.fetchKlines(symbol: args.symbol, interval: tf, limit: 300)
-                    let newRows = try DataStore.appendCandlesCSV(symbol: args.symbol, tf: tf, candles: candles)
-                    guard newRows > 0, let last = candles.last else { continue }
-
-                    guard let out = AegeanIndicator.compute(candles: candles) else {
-                        if tf == tradeTF {
-                            log("TRADE_TF NEW \(args.symbol) \(tradeTF) (Aegean: insufficient bars)")
-                        } else if DEBUG_LOWER_UPPER_LOGS {
-                            log("TF NEW \(args.symbol) \(tf) (Aegean: insufficient bars)")
-                        }
-                        continue
-                    }
-
-                    let sig = TFSignal(
-                        tf: tf,
-                        signal: out.signal,
-                        expRsi: out.expRsi,
-                        upper: out.upper,
-                        lower: out.lower,
-                        pos: out.pos,
-                        zone: out.zone,
-                        slope: out.slope,
-                        slopeDir: out.slopeDir,
-                        lastClose: last.close,
-                        lastCloseTime: last.closeTime
+    // 4. Time Loop
+    var serviceHistory: [Candle] = []
+    
+    // Warmup period
+    let WARMUP = 50
+    
+    for (idx, bar) in allBars.enumerated() {
+        // A. Update "Now"
+        let now = Date(timeIntervalSince1970: Double(bar.closeTimeMs) / 1000.0)
+        marketData.setCurrentBar(bar)
+        
+        let sc = toServiceCandle(bar)
+        serviceHistory.append(sc)
+        if serviceHistory.count > 300 { serviceHistory.removeFirst() }
+        
+        if idx < WARMUP { continue }
+        
+        // B. Orion Analysis
+        // We need explicit Task context for async calls
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask {
+                let orionDecision = await OrionCouncil.shared.convene(symbol: args.symbol, candles: serviceHistory, engine: .pulse)
+                
+                // C. Aegean Analysis
+                // Aegean works on [BinanceClient.Candle] usually, let's adapt a buffer
+                // For efficiency, we can just use the latest values OR maintain a parallel buffer
+                // Re-using serviceHistory map is valid
+                let aegeanInput = (serviceHistory.suffix(100)).map { c in
+                    BinanceClient.Candle(
+                        openTime: Int64(c.date.timeIntervalSince1970 * 1000) - 900000,
+                        open: String(c.open), high: String(c.high), low: String(c.low), close: String(c.close), volume: String(c.volume),
+                        closeTime: Int64(c.date.timeIntervalSince1970 * 1000),
+                        quoteAssetVolume: "0", trades: 0, takerBuyBaseAssetVolume: "0", takerBuyQuoteAssetVolume: "0"
                     )
-                    lastSignals[tf] = sig
-
-                    if tf != tradeTF {
-                        if DEBUG_LOWER_UPPER_LOGS {
-                            log("TF NEW \(args.symbol) \(tf) sig=\(sig.signal.rawValue.uppercased()) close=\(fmtPrice(sig.lastClose)) expRsi=\(fmt2(sig.expRsi)) upper=\(fmt2(sig.upper)) lower=\(fmt2(sig.lower)) pos=\(fmt3(sig.pos)) zone=\(sig.zone.rawValue.uppercased()) slope=\(fmt2(sig.slope)) \(sig.slopeDir) at \(ArgusTime.msToISO(sig.lastCloseTime))")
+                }
+                
+                guard let aegeanOut = AegeanIndicator.compute(candles: aegeanInput) else { return }
+                
+                // D. Prepare Votes
+                // 1. Orion Vote
+                let orionDir: CouncilAggregator.Direction
+                if orionDecision.action == .buy { orionDir = .buy }
+                else if orionDecision.action == .sell { orionDir = .sell }
+                else { orionDir = .none }
+                
+                let voteOrion = CouncilAggregator.ModelVote(
+                    modelId: "Orion",
+                    dir: orionDir,
+                    modelConf: orionDecision.netSupport, // already normalized? netSupport is -1 to 1? verify. netSupport 70% -> 0.7
+                    trust: 1.0,
+                    baseWeight: 0.4
+                )
+                
+                // 2. Aegean Vote
+                let aegeanDir: CouncilAggregator.Direction
+                if aegeanOut.signal == .buy { aegeanDir = .buy }
+                else if aegeanOut.signal == .sell { aegeanDir = .sell }
+                else { aegeanDir = .none }
+                
+                let voteAegean = CouncilAggregator.ModelVote(
+                    modelId: "Aegean",
+                    dir: aegeanDir,
+                    modelConf: (aegeanOut.signal == .none) ? 0.0 : 0.8, // Fixed confidence for signal
+                    trust: 1.0,
+                    baseWeight: 0.4
+                )
+                
+                // E. Aggregate
+                let ensemble = CouncilAggregator.decide(
+                    votes: [voteOrion, voteAegean],
+                    statsByModel: [:], // Empty stats for now (cold start)
+                    perfCfg: CouncilAggregator.PerformanceWeightConfig(rankingWindow: 10, minWeight: 0.1, maxWeight: 0.6, winBonus: 0.05, lossPenalty: 0.1)
+                )
+                
+                // F. Risk Gateway
+                let equity = await PaperBroker.shared.getAccountInfo().equity
+                risk.onNewTick(now: now, equity: equity) // Update HWM
+                
+                // Paper Broker Execution
+                // Manage Exits first (Trailing Stops handled by Broker? Or us?)
+                // PaperBroker doesn't auto-manage stops yet. We must trigger exits.
+                
+                let positions = (try? await PaperBroker.shared.getPositions()) ?? []
+                for p in positions {
+                    // Simple Exit Logic: If ensemble flips against us
+                    if p.quantity > 0 && ensemble.finalDir == .sell {
+                        _ = try? await PaperBroker.shared.placeMarketOrder(symbol: args.symbol, side: .sell, quantity: p.quantity)
+                        risk.recordRealizedPnl((p.marketValue - (p.avgCost * p.quantity)))
+                        risk.recordTrade(now: now)
+                        log("⚠️ EXIT LONG (Ensemble SELL) \(args.symbol) @ \(bar.close)")
+                    }
+                    else if p.quantity < 0 && ensemble.finalDir == .buy {
+                        _ = try? await PaperBroker.shared.placeMarketOrder(symbol: args.symbol, side: .buy, quantity: abs(p.quantity))
+                        risk.recordRealizedPnl(((p.avgCost * abs(p.quantity)) - p.marketValue))
+                        risk.recordTrade(now: now)
+                        log("⚠️ EXIT SHORT (Ensemble BUY) \(args.symbol) @ \(bar.close)")
+                    }
+                }
+                
+                // Entry Logic
+                if ensemble.finalDir != .none && positions.isEmpty {
+                    // Check Risk
+                    let quality: SetupQuality = (ensemble.finalConfidence > 0.7) ? .great : .ok
+                    let decision = risk.canEnter(now: now, equity: equity, quality: quality)
+                    
+                    if decision.allowed {
+                        let qty = (equity * riskCfg.perTradeNotionalPct) / bar.close
+                        let side: BrokerProtocol.OrderSide = (ensemble.finalDir == .buy) ? .buy : .sell
+                        
+                        log("🚀 ENTER \(side) \(args.symbol) Conf=\(fmt2(ensemble.finalConfidence)) Reason=\(decision.reason)")
+                        
+                        do {
+                            _ = try await PaperBroker.shared.placeMarketOrder(symbol: args.symbol, side: side, quantity: qty)
+                            risk.recordTrade(now: now)
+                        } catch {
+                            log("Entry Failed: \(error)")
                         }
-                        continue
+                    } else {
+                         // log("Blocked: \(decision.reason)")
                     }
-
-                    let lower = lowerTFs.compactMap { lastSignals[$0] }
-                    let upper = upperTFs.compactMap { lastSignals[$0] }
-                    let quality = rateSetup(tradeSig: sig.signal, lower: lower, upper: upper)
-
-                    func compact(_ xs: [TFSignal]) -> String {
-                        xs.map { "\($0.tf)=\($0.signal.rawValue.uppercased())/\($0.zone.rawValue.uppercased())/\($0.slopeDir)" }
-                          .joined(separator: " ")
-                    }
-
-                    let mark = sig.lastClose
-                    let eq = portfolio.equity(mark: mark)
-                    risk.onNewTick(now: Date(), equity: eq)
-
-                    log("TRADE_TF NEW \(args.symbol) \(tradeTF) sig=\(sig.signal.rawValue.uppercased()) q=\(quality.rawValue) close=\(fmtPrice(sig.lastClose)) expRsi=\(fmt2(sig.expRsi)) upper=\(fmt2(sig.upper)) lower=\(fmt2(sig.lower)) pos=\(fmt3(sig.pos)) zone=\(sig.zone.rawValue.uppercased()) slope=\(fmt2(sig.slope)) \(sig.slopeDir) equity=\(fmt2(eq)) at \(ArgusTime.msToISO(sig.lastCloseTime))")
-                    // --- DEBUG: explain SKIP reasons (why no trade) ---
-                    let riskDecision = risk.canEnter(now: Date(), equity: eq, quality: quality)
-                    var reasons: [String] = []
-                    if sig.signal.rawValue.uppercased() == "NONE" { reasons.append("SIGNAL_NONE") }
-                    if quality == .skip { reasons.append("SETUP_QUALITY_SKIP") }
-                    if !riskDecision.allowed { reasons.append("RISK:\(riskDecision.reason)") }
-                    if !reasons.isEmpty {
-                        log("  SKIP_REASONS -> \(reasons.joined(separator: ", "))")
-                    }
-if !lower.isEmpty { log("  lower: \(compact(lower))") }
-                    if !upper.isEmpty { log("  upper: \(compact(upper))") }
-
-                    // NEW: Eğer tradeTF NONE ama altlar hazırsa, bunu açıkça logla.
-                    if sig.signal == .none {
-                        let longReady = setupReadyForLong(lower: lower, upper: upper)
-                        if !longReady.blocked && longReady.readyCount >= Int(ceil(Double(longReady.lowerCount) * 0.75)) {
-                            log("SETUP READY (LONG) -> lowerReady=\(longReady.readyCount)/\(longReady.lowerCount) upperBlocked=false  waitingFor=15m BUY")
-                        }
-                        let shortReady = setupReadyForShort(lower: lower, upper: upper)
-                        if !shortReady.blocked && shortReady.readyCount >= Int(ceil(Double(shortReady.lowerCount) * 0.75)) {
-                            log("SETUP READY (SHORT) -> lowerReady=\(shortReady.readyCount)/\(shortReady.lowerCount) upperBlocked=false  waitingFor=15m SELL")
-                        }
-                    }
-
-                    // Close on opposite signal
-                    if let pos = portfolio.position {
-                        if pos.side == .long && sig.signal == .sell {
-                            if let pnl = portfolio.close(price: mark, now: Date()) {
-                                risk.recordRealizedPnl(pnl)
-                                risk.recordTrade(now: Date())
-                                log("paper: CLOSE LONG @\(fmtPrice(mark)) pnl=\(fmt2(pnl)) cash=\(fmt2(portfolio.cash)) dayPnl=\(fmt2(risk.state.realizedPnl)) tradesToday=\(risk.state.tradesToday)")
-                                persistPaperState()
-                            }
-                        } else if pos.side == .short && sig.signal == .buy {
-                            if let pnl = portfolio.close(price: mark, now: Date()) {
-                                risk.recordRealizedPnl(pnl)
-                                risk.recordTrade(now: Date())
-                                log("paper: CLOSE SHORT @\(fmtPrice(mark)) pnl=\(fmt2(pnl)) cash=\(fmt2(portfolio.cash)) dayPnl=\(fmt2(risk.state.realizedPnl)) tradesToday=\(risk.state.tradesToday)")
-                                persistPaperState()
-                            }
-                        }
-                    }
-
-                    // Entry
-                    if portfolio.position == nil && sig.signal != .none && quality != .skip {
-                        let decision = risk.canEnter(now: Date(), equity: portfolio.equity(mark: mark), quality: quality)
-                        if decision.allowed {
-                            let notional = portfolio.equity(mark: mark) * riskCfg.perTradeNotionalPct
-                            let side: PositionSide = (sig.signal == .buy) ? .long : .short
-                            if portfolio.open(side: side, price: mark, notional: notional, now: Date()) {
-                                risk.recordTrade(now: Date())
-                                log("paper: OPEN \(side.rawValue) @\(fmtPrice(mark)) notional=\(fmt2(notional)) cash=\(fmt2(portfolio.cash)) reason=\(decision.reason)")
-                            } else {
-                                log("paper: OPEN FAILED reason=PORTFOLIO_BUSY")
-                            }
-                        } else {
-                            log("paper: ENTRY_BLOCKED reason=\(decision.reason)")
-                        }
-                    }
-
-                } catch {
-                    log("ERROR \(args.symbol) \(tf) -> \(error)")
+                }
+                
+                // Log periodic status
+                if idx % 96 == 0 { // Every day approx (96 * 15m = 24h)
+                    log("STATS Day=\(idx/96) Eq=\(fmt2(equity)) DD=\(fmt2((risk.state.highWaterMark - equity)/risk.state.highWaterMark * 100))%")
                 }
             }
-
-            try? await Task.sleep(nanoseconds: UInt64(args.loopSeconds) * 1_000_000_000)
         }
     }
-
-    RunLoop.main.run()
-}
+    
+    // End report
+    let finalEq = await PaperBroker.shared.getAccountInfo().equity
+    log("=== BACKTEST FINISHED ===")
+    log("Final Equity: \(fmt2(finalEq))")
+    
+    // Helper
+    func fmt2(_ v: Double) -> String { String(format: "%.2f", v) }
 

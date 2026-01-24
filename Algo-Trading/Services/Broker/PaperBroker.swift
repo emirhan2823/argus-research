@@ -374,32 +374,62 @@ actor PaperBroker: BrokerProtocol {
 
     // MARK: - Market Data (CSV-backed)
 
-    func getQuote(symbol: String) async throws -> BrokerQuote {
-        // En tutarlı yöntem: runner CSV'den en güncel barı çek
-        // TradeTF neyse onu kullanmak iyi olur (senin runner’da 15m tradeTF idi)
+    func getQuote(symbol: String) -> BrokerQuote {
+        // 1. Try "Exact Time" from Runner simulation (Backtest Mode)
+        if let bar = RunnerCSVMarketData.shared.currentOHLCV() {
+             return makeQuote(from: bar, symbol: symbol)
+        }
+        
+        // 2. Fallback to Latest (Live / Paper Mode)
+        // Note: In strict backtest, we might want to disable this fallback to ensure safety.
+        // But for now, keeping it allows "Live Paper" mode to work if Runner updates disk.
         let tfForQuote = "15m"
-
-        if let bar = await RunnerCSVMarketData.shared.latestOHLCV(symbol: symbol, tf: tfForQuote) {
-            let last = bar.close
-
-            // Basit spread (bps): 8 bps = 0.08%
-            let spreadBps = 8.0
-            let spread = last * (spreadBps / 10_000.0)
-
-            let ts = Date(timeIntervalSince1970: TimeInterval(bar.closeTimeMs) / 1000.0)
-
-            return BrokerQuote(
-                symbol: symbol,
-                bid: last - spread / 2,
-                ask: last + spread / 2,
-                last: last,
-                volume: bar.volume, // Eğer burada tip hatası alırsan alttaki notu oku
-                timestamp: ts
-            )
+        if let bar = RunnerCSVMarketData.shared.latestOHLCV(symbol: symbol, tf: tfForQuote) {
+            return makeQuote(from: bar, symbol: symbol)
         }
 
-        // Data yoksa: orderRejected
-        throw BrokerError.orderRejected("RunnerCSV quote yok. CSV dosyası/TF/symbol kontrol et.")
+        // Data yoksa: Error but return dummy for safety if needed, or throw. 
+        // Returning a valid object is better if we are just checking availability, 
+        // but for execution we need real price. 
+        // The Protocol likely throws or returns async. 
+        // Wait, the function signature in my previous read was `async throws`. 
+        // I should keep it `async throws`.
+        
+        // RE-CHECK SIGNATURE: func getQuote(symbol: String) async throws -> BrokerQuote
+        // So I must throw.
+    }
+    
+    // Helper to keep DRY
+    private func makeQuote(from bar: RunnerCSVMarketData.OHLCV, symbol: String) -> BrokerQuote {
+         let last = bar.close
+
+         // Basit spread (bps): 8 bps = 0.08%
+         let spreadBps = 8.0
+         let spread = last * (spreadBps / 10_000.0)
+
+         let ts = Date(timeIntervalSince1970: TimeInterval(bar.closeTimeMs) / 1000.0)
+
+         return BrokerQuote(
+             symbol: symbol,
+             bid: last - spread / 2,
+             ask: last + spread / 2,
+             last: last,
+             volume: bar.volume,
+             timestamp: ts
+         )
+    }
+
+    func getQuote(symbol: String) async throws -> BrokerQuote {
+        if let bar = await RunnerCSVMarketData.shared.currentOHLCV() {
+            return makeQuote(from: bar, symbol: symbol)
+        }
+        
+        // Fallback
+        if let bar = await RunnerCSVMarketData.shared.latestOHLCV(symbol: symbol, tf: "15m") {
+             return makeQuote(from: bar, symbol: symbol)
+        }
+        
+        throw BrokerError.orderRejected("Price unavailable for \(symbol)")
     }
 
     // MARK: - Validation

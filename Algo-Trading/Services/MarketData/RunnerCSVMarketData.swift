@@ -110,6 +110,45 @@ actor RunnerCSVMarketData {
         return OHLCV(closeTimeMs: ms, open: open, high: high, low: low, close: close, volume: vol)
     }
 
+    // MARK: - History / Backtest Support
+
+    /// Loads all bars from the CSV for the given symbol/TF and month (derived from `now` or just load all if improved later)
+    /// For this MVP, we assume we want to load the SPECIFIC month relevant to the backtest or just the file addressed by `now`.
+    /// To load *multiple* months, we'd need a more complex strategy, but let's start with loading the file target by `now`.
+    func loadAllBars(symbol: String, tf: String, date: Date) -> [OHLCV] {
+        let path = csvPath(symbol: symbol, tf: tf, now: date).path
+        guard let content = try? String(contentsOfFile: path, encoding: .utf8) else { return [] }
+        
+        var results: [OHLCV] = []
+        let lines = content.split(whereSeparator: \.isNewline)
+        
+        for line in lines {
+            let s = String(line).trimmingCharacters(in: .whitespaces)
+            if s.isEmpty || s.lowercased().hasPrefix("close") { continue }
+            if let bar = parseLine(s) {
+                results.append(bar)
+            }
+        }
+        
+        return results.sorted { $0.closeTimeMs < $1.closeTimeMs }
+    }
+
+    // MARK: - Current State (Simulation Pointer)
+    
+    private var _currentBar: OHLCV?
+    
+    /// Sets the "current" bar for simulation purposes.
+    /// Broker and other services should read this when in .backtest mode.
+    func setCurrentBar(_ bar: OHLCV) {
+        self._currentBar = bar
+    }
+    
+    /// Returns the active bar. In live mode, this might still access disk,
+    /// but in backtest mode, it should return what was set via `setCurrentBar`.
+    func currentOHLCV() -> OHLCV? {
+        return _currentBar
+    }
+
     private func readLastNonEmptyLine(path: String) -> String? {
         guard let fh = FileHandle(forReadingAtPath: path) else { return nil }
         defer { try? fh.close() }

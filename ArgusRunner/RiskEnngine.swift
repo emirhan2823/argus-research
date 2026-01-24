@@ -5,6 +5,8 @@ enum ArgusRisk {
     struct Config {
         let perTradeNotionalPct: Double     // equity'nin kaç %'si ile işlem açacağız (paper sizing)
         let dailyLossCapPct: Double         // gün içi max kayıp (equity bazlı)
+        let maxDrawdownPct: Double          // toplam drawown limiti (HWM'den düşüş)
+        let maxConsecutiveLosses: Int       // üst üste max zarar
         let cooldownSeconds: Int            // trade arası minimum süre
         let maxTradesPerDay: Int            // günlük max trade sayısı
         let requireQualityAtLeast: SetupQuality
@@ -12,12 +14,16 @@ enum ArgusRisk {
         init(
             perTradeNotionalPct: Double = 0.10,   // %10 notional (paper)
             dailyLossCapPct: Double = 0.03,       // %3 daily cap
+            maxDrawdownPct: Double = 0.10,        // %10 max drawdown
+            maxConsecutiveLosses: Int = 3,        // 3 ardışık stop
             cooldownSeconds: Int = 60 * 10,       // 10 dk cooldown
             maxTradesPerDay: Int = 6,             // günde max 6 trade
             requireQualityAtLeast: SetupQuality = .good
         ) {
             self.perTradeNotionalPct = perTradeNotionalPct
             self.dailyLossCapPct = dailyLossCapPct
+            self.maxDrawdownPct = maxDrawdownPct
+            self.maxConsecutiveLosses = maxConsecutiveLosses
             self.cooldownSeconds = cooldownSeconds
             self.maxTradesPerDay = maxTradesPerDay
             self.requireQualityAtLeast = requireQualityAtLeast
@@ -30,6 +36,10 @@ enum ArgusRisk {
         var realizedPnl: Double             // gün içi realized pnl (USD)
         var tradesToday: Int
         var lastTradeTime: Date?
+        
+        // Extended History
+        var highWaterMark: Double           // Görülen en yüksek equity
+        var consecutiveLosses: Int          // Ardışık zarar sayısı
 
         init(now: Date, dayStartEquity: Double) {
             self.dayKeyUTC = State.utcDayKey(now)
@@ -37,6 +47,8 @@ enum ArgusRisk {
             self.realizedPnl = 0
             self.tradesToday = 0
             self.lastTradeTime = nil
+            self.highWaterMark = dayStartEquity
+            self.consecutiveLosses = 0
         }
 
         static func utcDayKey(_ d: Date) -> String {
@@ -68,10 +80,17 @@ enum ArgusRisk {
         /// Restore persisted risk state (paper/backtest). Caller should validate dayKeyUTC.
         func restore(state newState: State) {
             self.state = newState
+            // Ensure HWM is at least current equity if corrupted/missing
+            if self.state.highWaterMark < self.state.dayStartEquity {
+                self.state.highWaterMark = self.state.dayStartEquity
+            }
         }
 
         func onNewTick(now: Date, equity: Double) {
             rollDayIfNeeded(now: now, equity: equity)
+            if equity > state.highWaterMark {
+                state.highWaterMark = equity
+            }
         }
 
         func canEnter(now: Date, equity: Double, quality: SetupQuality) -> Decision {
@@ -83,9 +102,20 @@ enum ArgusRisk {
             }
 
             // Daily loss cap (realized)
-            let cap = -abs(state.dayStartEquity * cfg.dailyLossCapPct)
-            if state.realizedPnl <= cap {
-                return Decision(allowed: false, reason: "DAILY_LOSS_CAP_HIT(pnl=\(fmt2(state.realizedPnl)) cap=\(fmt2(cap)))")
+            let dailyCap = -abs(state.dayStartEquity * cfg.dailyLossCapPct)
+            if state.realizedPnl <= dailyCap {
+                return Decision(allowed: false, reason: "DAILY_LOSS_CAP_HIT(pnl=\(fmt2(state.realizedPnl)) cap=\(fmt2(dailyCap)))")
+            }
+            
+            // Max Drawdown Check (Equity vs HWM)
+            let ddPct = (state.highWaterMark > 0) ? (equity - state.highWaterMark) / state.highWaterMark : 0.0
+            if ddPct < -cfg.maxDrawdownPct {
+                return Decision(allowed: false, reason: "MAX_DRAWDOWN_HIT(dd=\(fmt2(ddPct*100))% limit=\(fmt2(cfg.maxDrawdownPct*100))%)")
+            }
+            
+            // Consecutive Limit
+            if state.consecutiveLosses >= cfg.maxConsecutiveLosses {
+                 return Decision(allowed: false, reason: "CONSECUTIVE_LOSS_LIMIT(\(state.consecutiveLosses))")
             }
 
             // Trade limit
@@ -111,6 +141,11 @@ enum ArgusRisk {
 
         func recordRealizedPnl(_ pnl: Double) {
             state.realizedPnl += pnl
+            if pnl < 0 {
+                state.consecutiveLosses += 1
+            } else if pnl > 0 {
+                state.consecutiveLosses = 0
+            }
         }
 
         private func rollDayIfNeeded(now: Date, equity: Double) {
@@ -121,6 +156,7 @@ enum ArgusRisk {
                 state.realizedPnl = 0
                 state.tradesToday = 0
                 state.lastTradeTime = nil
+                // HWM and consecutive losses carry over! (don't reset)
             }
         }
 

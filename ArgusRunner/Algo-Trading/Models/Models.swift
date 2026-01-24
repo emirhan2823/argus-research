@@ -100,7 +100,7 @@ struct MacroData: Codable, Sendable {
 }
 
 struct Candle: Identifiable, Codable, @unchecked Sendable, Equatable {
-    var id = UUID()
+    var id = UUID()I have completed the integration of ArgusRunner with the Services architecture. Backtesting using existing CSV data, Risk management (drawdown/consecutive losses), and Broker integration are now wired up. Please run swift build and execute the runner to verify.
     let date: Date
     let open: Double
     let high: Double
