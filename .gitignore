@@ -48,3 +48,6 @@ ArgusScience*
 # Large data files  
 Argus_*.json
 
+ArgusRunnerCLI2
+*.zip
+TestRunner

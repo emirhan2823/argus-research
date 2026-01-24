@@ -2,8 +2,8 @@ import Foundation
 
 enum DataStore {
 
-    // MARK: - Base Directory (Stable)
-    static func baseDir() throws -> URL {
+    // MARK: - Root Directory (Stable)
+    static func rootDir() throws -> URL {
         let fm = FileManager.default
 
         let appSupport = fm.urls(
@@ -13,10 +13,37 @@ enum DataStore {
 
         let dir = appSupport
             .appendingPathComponent("ArgusRunner", isDirectory: true)
+
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    // MARK: - Base Directory (Market Data)
+    static func baseDir() throws -> URL {
+        let fm = FileManager.default
+        let dir = try rootDir()
             .appendingPathComponent("data", isDirectory: true)
 
         try fm.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
+    }
+
+    // MARK: - State Directory
+    static func stateDir() throws -> URL {
+        let fm = FileManager.default
+        let dir = try rootDir()
+            .appendingPathComponent("state", isDirectory: true)
+
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    static func paperStatePath(symbol: String) throws -> URL {
+        let dir = try stateDir()
+            .appendingPathComponent("paper", isDirectory: true)
+
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("\(symbol.uppercased()).json")
     }
 
     // MARK: - Paths

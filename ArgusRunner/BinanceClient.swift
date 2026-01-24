@@ -1,15 +1,5 @@
 import Foundation
 
-struct Candle: Sendable {
-    let openTime: Int64
-    let open: Double
-    let high: Double
-    let low: Double
-    let close: Double
-    let volume: Double
-    let closeTime: Int64
-}
-
 enum BinanceError: Error {
     case badURL
     case http(Int)
@@ -56,14 +46,14 @@ final class BinanceClient {
                 let volume = Double(volStr)
             else { continue }
 
-            out.append(.init(
+            out.append(Candle(
                 openTime: openTime,
+                closeTime: closeTime,
                 open: open,
                 high: high,
                 low: low,
                 close: close,
-                volume: volume,
-                closeTime: closeTime
+                volume: volume
             ))
         }
         return out

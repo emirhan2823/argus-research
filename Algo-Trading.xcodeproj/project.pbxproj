@@ -33,19 +33,55 @@
 			);
 			runOnlyForDeploymentPostprocessing = 1;
 		};
+		1E774E0A2F2506E4001A8F0F /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = /usr/share/man/man1/;
+			dstSubfolderSpec = 0;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 1;
+		};
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		1E6893B22F23B695006AE86A /* ArgusRunner */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = ArgusRunner; sourceTree = BUILT_PRODUCTS_DIR; };
+		1E774E0C2F2506E4001A8F0F /* ArgusRunnerCLI2 */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = ArgusRunnerCLI2; sourceTree = BUILT_PRODUCTS_DIR; };
 		D96F62A52EDF565D00406CF0 /* Algo-Trading.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Algo-Trading.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		D96F62B22EDF565F00406CF0 /* Algo-TradingTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Algo-TradingTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		D96F62BC2EDF565F00406CF0 /* Algo-TradingUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Algo-TradingUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		1E774E192F25090E001A8F0F /* Exceptions for "ArgusRunner" folder in "ArgusRunnerCLI2" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				AegeanIndicator.swift,
+				"Algo-Trading/Models/Models.swift",
+				"Algo-Trading/Services/Risk/PortfolioRiskService.swift",
+				ArgusTime.swift,
+				BinanceClient.swift,
+				Candle.swift,
+				DataStore.swift,
+				main.swift,
+				RiskEnngine.swift,
+			);
+			target = 1E774E0B2F2506E4001A8F0F /* ArgusRunnerCLI2 */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		1E6893B32F23B695006AE86A /* ArgusRunner */ = {
+		1E7747782F24E800001A8F0F /* ArgusRunner */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				1E774E192F25090E001A8F0F /* Exceptions for "ArgusRunner" folder in "ArgusRunnerCLI2" target */,
+			);
 			path = ArgusRunner;
+			sourceTree = "<group>";
+		};
+		1E774E0D2F2506E4001A8F0F /* ArgusRunnerCLI2 */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = ArgusRunnerCLI2;
 			sourceTree = "<group>";
 		};
 		D96F62A72EDF565D00406CF0 /* Algo-Trading */ = {
@@ -67,6 +103,13 @@
 
 /* Begin PBXFrameworksBuildPhase section */
 		1E6893AF2F23B695006AE86A /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1E774E092F2506E4001A8F0F /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -97,13 +140,22 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		1E77477F2F24E911001A8F0F /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		D96F629C2EDF565C00406CF0 = {
 			isa = PBXGroup;
 			children = (
 				D96F62A72EDF565D00406CF0 /* Algo-Trading */,
 				D96F62B52EDF565F00406CF0 /* Algo-TradingTests */,
 				D96F62BF2EDF565F00406CF0 /* Algo-TradingUITests */,
-				1E6893B32F23B695006AE86A /* ArgusRunner */,
+				1E7747782F24E800001A8F0F /* ArgusRunner */,
+				1E774E0D2F2506E4001A8F0F /* ArgusRunnerCLI2 */,
+				1E77477F2F24E911001A8F0F /* Frameworks */,
 				D96F62A62EDF565D00406CF0 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -115,6 +167,7 @@
 				D96F62B22EDF565F00406CF0 /* Algo-TradingTests.xctest */,
 				D96F62BC2EDF565F00406CF0 /* Algo-TradingUITests.xctest */,
 				1E6893B22F23B695006AE86A /* ArgusRunner */,
+				1E774E0C2F2506E4001A8F0F /* ArgusRunnerCLI2 */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -126,7 +179,6 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 1E6893B82F23B695006AE86A /* Build configuration list for PBXNativeTarget "ArgusRunner" */;
 			buildPhases = (
-				1E6893AE2F23B695006AE86A /* Sources */,
 				1E6893AF2F23B695006AE86A /* Frameworks */,
 				1E6893B02F23B695006AE86A /* CopyFiles */,
 			);
@@ -135,13 +187,35 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				1E6893B32F23B695006AE86A /* ArgusRunner */,
+				1E7747782F24E800001A8F0F /* ArgusRunner */,
 			);
 			name = ArgusRunner;
 			packageProductDependencies = (
 			);
 			productName = ArgusRunner;
 			productReference = 1E6893B22F23B695006AE86A /* ArgusRunner */;
+			productType = "com.apple.product-type.tool";
+		};
+		1E774E0B2F2506E4001A8F0F /* ArgusRunnerCLI2 */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1E774E102F2506E4001A8F0F /* Build configuration list for PBXNativeTarget "ArgusRunnerCLI2" */;
+			buildPhases = (
+				1E774E082F2506E4001A8F0F /* Sources */,
+				1E774E092F2506E4001A8F0F /* Frameworks */,
+				1E774E0A2F2506E4001A8F0F /* CopyFiles */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				1E774E0D2F2506E4001A8F0F /* ArgusRunnerCLI2 */,
+			);
+			name = ArgusRunnerCLI2;
+			packageProductDependencies = (
+			);
+			productName = ArgusRunnerCLI2;
+			productReference = 1E774E0C2F2506E4001A8F0F /* ArgusRunnerCLI2 */;
 			productType = "com.apple.product-type.tool";
 		};
 		D96F62A42EDF565C00406CF0 /* Algo-Trading */ = {
@@ -225,6 +299,9 @@
 					1E6893B12F23B695006AE86A = {
 						CreatedOnToolsVersion = 26.2;
 					};
+					1E774E0B2F2506E4001A8F0F = {
+						CreatedOnToolsVersion = 26.2;
+					};
 					D96F62A42EDF565C00406CF0 = {
 						CreatedOnToolsVersion = 26.1.1;
 					};
@@ -259,6 +336,7 @@
 				D96F62B12EDF565F00406CF0 /* Algo-TradingTests */,
 				D96F62BB2EDF565F00406CF0 /* Algo-TradingUITests */,
 				1E6893B12F23B695006AE86A /* ArgusRunner */,
+				1E774E0B2F2506E4001A8F0F /* ArgusRunnerCLI2 */,
 			);
 		};
 /* End PBXProject section */
@@ -288,7 +366,7 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		1E6893AE2F23B695006AE86A /* Sources */ = {
+		1E774E082F2506E4001A8F0F /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -346,6 +424,32 @@
 			name = Debug;
 		};
 		1E6893B72F23B695006AE86A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		1E774E112F2506E4001A8F0F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		1E774E122F2506E4001A8F0F /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
@@ -639,6 +743,15 @@
 			buildConfigurations = (
 				1E6893B62F23B695006AE86A /* Debug */,
 				1E6893B72F23B695006AE86A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		1E774E102F2506E4001A8F0F /* Build configuration list for PBXNativeTarget "ArgusRunnerCLI2" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1E774E112F2506E4001A8F0F /* Debug */,
+				1E774E122F2506E4001A8F0F /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
