@@ -78,10 +78,10 @@ enum DataStore {
 
     /// Appends candles to CSV and returns how many NEW rows were written (dedup by closeTimeMs).
     @discardableResult
-    static func appendCandlesCSV(
+    static func appendRunnerCandlesCSV(
         symbol: String,
         tf: String,
-        candles: [Candle]
+        candles: [RunnerCandle]
     ) throws -> Int {
 
         guard let last = candles.last else { return 0 }

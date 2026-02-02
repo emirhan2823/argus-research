@@ -100,7 +100,7 @@ struct MacroData: Codable, Sendable {
 }
 
 struct Candle: Identifiable, Codable, @unchecked Sendable, Equatable {
-    var id = UUID()I have completed the integration of ArgusRunner with the Services architecture. Backtesting using existing CSV data, Risk management (drawdown/consecutive losses), and Broker integration are now wired up. Please run swift build and execute the runner to verify.
+    var id = UUID()
     let date: Date
     let open: Double
     let high: Double
@@ -268,11 +268,11 @@ struct Trade: Identifiable, Codable {
     var rationale: String?
     var voiceReport: String? // Cached Argus Voice Report
     var decisionContext: DecisionContext? // Snapshot of the decision (Why/How/Who)
-    var agoraTrace: AgoraTrace? // AGORA V2 Trace
+    // var agoraTrace: AgoraTrace? // AGORA V2 Trace
     
     // NEW: Chiron Öğrenme için Orion Snapshot
-    var entryOrionSnapshot: OrionComponentSnapshot?
-    var exitOrionSnapshot: OrionComponentSnapshot?
+    // var entryOrionSnapshot: OrionComponentSnapshot?
+    // var exitOrionSnapshot: OrionComponentSnapshot?
     
     var profit: Double {
         guard let exit = exitPrice else { return 0.0 }
@@ -287,7 +287,7 @@ struct Trade: Identifiable, Codable {
     }
     
     // Smart Init for Migration
-    init(id: UUID = UUID(), symbol: String, entryPrice: Double, quantity: Double, entryDate: Date, isOpen: Bool, source: TradeSource = .user, engine: AutoPilotEngine? = nil, stopLoss: Double? = nil, takeProfit: Double? = nil, rationale: String? = nil, decisionContext: DecisionContext? = nil, agoraTrace: AgoraTrace? = nil, currency: Currency? = nil) {
+    init(id: UUID = UUID(), symbol: String, entryPrice: Double, quantity: Double, entryDate: Date, isOpen: Bool, source: TradeSource = .user, engine: AutoPilotEngine? = nil, stopLoss: Double? = nil, takeProfit: Double? = nil, rationale: String? = nil, decisionContext: DecisionContext? = nil, currency: Currency? = nil) {
         self.id = id
         self.symbol = symbol
         self.entryPrice = entryPrice
@@ -300,7 +300,7 @@ struct Trade: Identifiable, Codable {
         self.takeProfit = takeProfit
         self.rationale = rationale
         self.decisionContext = decisionContext
-        self.agoraTrace = agoraTrace
+        // self.agoraTrace = agoraTrace
         
         // Auto-Detect Currency if not provided
         if let c = currency {
@@ -318,8 +318,8 @@ struct Trade: Identifiable, Codable {
     enum CodingKeys: String, CodingKey {
         case id, symbol, entryPrice, quantity, entryDate, isOpen, exitPrice, exitDate
         case source, engine, currency, stopLoss, takeProfit, highWaterMark, rationale
-        case voiceReport, decisionContext, agoraTrace
-        case entryOrionSnapshot, exitOrionSnapshot
+        case voiceReport, decisionContext// , agoraTrace
+        // case entryOrionSnapshot, exitOrionSnapshot
     }
     
     init(from decoder: Decoder) throws {
@@ -341,9 +341,9 @@ struct Trade: Identifiable, Codable {
         rationale = try container.decodeIfPresent(String.self, forKey: .rationale)
         voiceReport = try container.decodeIfPresent(String.self, forKey: .voiceReport)
         decisionContext = try container.decodeIfPresent(DecisionContext.self, forKey: .decisionContext)
-        agoraTrace = try container.decodeIfPresent(AgoraTrace.self, forKey: .agoraTrace)
-        entryOrionSnapshot = try container.decodeIfPresent(OrionComponentSnapshot.self, forKey: .entryOrionSnapshot)
-        exitOrionSnapshot = try container.decodeIfPresent(OrionComponentSnapshot.self, forKey: .exitOrionSnapshot)
+        // agoraTrace = try container.decodeIfPresent(AgoraTrace.self, forKey: .agoraTrace)
+        // entryOrionSnapshot = try container.decodeIfPresent(OrionComponentSnapshot.self, forKey: .entryOrionSnapshot)
+        // exitOrionSnapshot = try container.decodeIfPresent(OrionComponentSnapshot.self, forKey: .exitOrionSnapshot)
         
         // Migration Logic: Currency
         if let c = try container.decodeIfPresent(Currency.self, forKey: .currency) {
@@ -388,6 +388,8 @@ struct MarketCategory: Identifiable {
 }
 
 // MARK: - TERMINAL OPTIMIZED MODELS
+// MARK: - TERMINAL OPTIMIZED MODELS
+/*
 struct TerminalItem: Identifiable, Equatable {
     let id: String // Symbol
     let symbol: String
@@ -406,11 +408,12 @@ struct TerminalItem: Identifiable, Equatable {
     let dataQuality: Int // 0-100
     
     // Forecast
-    let forecast: PrometheusForecast?
+    // let forecast: PrometheusForecast?
     
     // Chimera Signal (NEW)
-    let chimeraSignal: ChimeraSignal?
+    // let chimeraSignal: ChimeraSignal?
 }
+*/
 
 // MARK: - Transaction History
 enum TransactionType: String, Codable {
@@ -430,7 +433,7 @@ struct DecisionTraceSnapshot: Codable {
     let guards: GuardsSnapshot
     let blockReason: String?
     let phoenix: PhoenixSnapshot? // Schema V2
-    let standardizedOutputs: [String: StandardModuleOutput]? // Export V2
+    // let standardizedOutputs: [String: StandardModuleOutput]? // Export V2
     
     struct ScoresSnapshot: Codable {
         let atlas: Double?
@@ -462,6 +465,7 @@ struct DecisionTraceSnapshot: Codable {
         let otherBlocked: Bool
     }
 }
+
 
 struct MarketSnapshot: Codable {
     let bid: Double?
@@ -798,6 +802,7 @@ struct DecisionSnapshot: Codable {
     // Detailed Context (Required for Audit/Trace)
     let evidence: [SnapshotEvidence]
     let riskContext: SnapshotRiskContext? 
+    // let standardizedOutputs: [String: StandardModuleOutput]?
     let dominantSignals: [String]
     let conflicts: [DecisionConflict]
     
@@ -805,26 +810,26 @@ struct DecisionSnapshot: Codable {
     let locks: AgoraLocksSnapshot
     
     // Optional / Legacy Support
-    let phoenix: PhoenixSnapshot? 
-    let standardizedOutputs: [String: StandardModuleOutput]?
+    // let phoenix: PhoenixSnapshot? 
+    // let standardizedOutputs: [String: StandardModuleOutput]?
     
     // Helpers
     var reasonOneLiner: String { reason }
     
     // Initializer for convenience mapping
-    init(symbol: String, action: SignalAction, reason: String, evidence: [SnapshotEvidence], riskContext: SnapshotRiskContext?, locks: AgoraLocksSnapshot, phoenix: PhoenixSnapshot?, standardizedOutputs: [String: StandardModuleOutput]?, dominantSignals: [String], conflicts: [DecisionConflict]) {
+    init(symbol: String, action: SignalAction, reason: String, evidence: [SnapshotEvidence], riskContext: SnapshotRiskContext?, locks: AgoraLocksSnapshot, dominantSignals: [String], conflicts: [DecisionConflict]) {
         self.id = UUID()
         self.timestamp = Date()
         self.symbol = symbol
         self.action = action
         self.reason = reason
         self.overallScore = 0.0
-        self.confidence = 1.0
+        self.confidence = 0.0
         self.evidence = evidence
         self.riskContext = riskContext
         self.locks = locks
-        self.phoenix = phoenix
-        self.standardizedOutputs = standardizedOutputs
+        // self.phoenix = phoenix
+        // self.standardizedOutputs = standardizedOutputs
         self.dominantSignals = dominantSignals
         self.conflicts = conflicts
     }

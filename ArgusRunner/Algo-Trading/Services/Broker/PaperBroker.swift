@@ -95,6 +95,7 @@ actor PaperBroker: BrokerProtocol {
         tradeHistory.append(trade)
 
         // Log to audit
+        /*
         Task {
             await AuditLogService.shared.recordTrade(
                 symbol: symbol,
@@ -110,8 +111,10 @@ actor PaperBroker: BrokerProtocol {
                 moduleScoresAtEntry: nil
             )
         }
+        */
 
         // ADD NOTIFICATION (NEW!)
+        /*
         let notification = ArgusNotification(
             symbol: symbol,
             headline: side == .buy ? "📈 \(symbol) ALINDI" : "📉 \(symbol) SATILDI",
@@ -133,8 +136,9 @@ actor PaperBroker: BrokerProtocol {
             type: .tradeExecuted
         )
         NotificationStore.shared.addNotification(notification)
+        */
 
-        print("📝 Paper: \(side.rawValue) \(Int(quantity)) \(symbol) @ \(String(format: "%.2f", executionPrice))")
+        print("📝 Paper: \(side.rawValue) \(String(format: "%.5f", quantity)) \(symbol) @ \(String(format: "%.2f", executionPrice))")
 
         return OrderResult(
             orderId: order.id,
@@ -262,31 +266,31 @@ actor PaperBroker: BrokerProtocol {
                 let exitPrice = price
                 let pnlPercent = entryPrice > 0 ? ((exitPrice - entryPrice) / entryPrice) * 100.0 : 0
 
-                let tradeRecord = TradeOutcomeRecord(
+                // Create Trade Record for Learning (DISABLED for MVP CLI)
+                /*
+                let tradeRecord = TradeRecord(
                     id: UUID(),
                     symbol: symbol,
-                    engine: existing.engine,
-                    entryDate: existing.entryDate,
-                    exitDate: Date(),
-                    entryPrice: entryPrice,
-                    exitPrice: exitPrice,
+                    entryTime: oldPos.entryTime, // Approximation
+                    exitTime: Date(),
+                    entryPrice: oldPos.entry,
+                    exitPrice: executionPrice,
+                    quantity: quantity,
+                    direction: oldPos.side == .long ? "LONG" : "SHORT",
+                    pnl: pnl,
                     pnlPercent: pnlPercent,
-                    exitReason: exitReason,
-                    orionScoreAtEntry: existing.orionScoreAtEntry,
-                    atlasScoreAtEntry: existing.atlasScoreAtEntry,
-                    aetherScoreAtEntry: existing.aetherScoreAtEntry,
-                    phoenixScoreAtEntry: existing.phoenixScoreAtEntry,
-                    allModuleScores: nil,
+                    strategy: "PAPER",
                     systemDecision: nil,
                     ignoredWarnings: nil,
                     regime: nil
                 )
-
+                
                 // Save to Chiron DataLake
                 Task {
                     await ChironDataLakeService.shared.logTrade(tradeRecord)
                     print("🧠 Chiron: Trade logged - \(symbol) PnL: \(String(format: "%.1f", pnlPercent))%")
                 }
+                */
 
                 positions.removeValue(forKey: symbol)
             } else {
@@ -350,6 +354,52 @@ actor PaperBroker: BrokerProtocol {
         }
 
         return result
+    }
+    
+    func getPositions(symbol: String) async throws -> [BrokerPosition] {
+        let all = try await getPositions()
+        return all.filter { $0.symbol == symbol }
+    }
+    
+    func setBrackets(symbol: String, sl: Double, tp: Double) async {
+        if var pos = positions[symbol] {
+            pos.sl = sl
+            pos.tp = tp
+            positions[symbol] = pos
+            print("📝 Paper: Brackets set for \(symbol) SL:\(sl) TP:\(tp)")
+        }
+    }
+    
+    func updatePositions(currentPrice: Double, time: Date) async {
+        for (symbol, pos) in positions {
+            // Check Stop Loss
+            if let sl = pos.sl {
+                let hitSL = (pos.quantity > 0 && currentPrice <= sl) || (pos.quantity < 0 && currentPrice >= sl)
+                if hitSL {
+                    print("🛑 Paper: SL Triggered for \(symbol) @ \(currentPrice)")
+                    do {
+                        _ = try await placeMarketOrder(symbol: symbol, side: pos.quantity > 0 ? .sell : .buy, quantity: abs(pos.quantity))
+                    } catch {
+                        print("❌ Paper: Failed to exec SL: \(error)")
+                    }
+                    continue
+                }
+            }
+            
+            // Check Take Profit
+            if let tp = pos.tp {
+                let hitTP = (pos.quantity > 0 && currentPrice >= tp) || (pos.quantity < 0 && currentPrice <= tp)
+                if hitTP {
+                    print("💰 Paper: TP Triggered for \(symbol) @ \(currentPrice)")
+                    do {
+                         _ = try await placeMarketOrder(symbol: symbol, side: pos.quantity > 0 ? .sell : .buy, quantity: abs(pos.quantity))
+                    } catch {
+                        print("❌ Paper: Failed to exec TP: \(error)")
+                    }
+                    continue
+                }
+            }
+        }
     }
 
     // MARK: - Account Info
@@ -442,12 +492,8 @@ actor PaperBroker: BrokerProtocol {
 
         let totalReturn = (account.equity - initialValue) / initialValue * 100
 
-        let wins = tradeHistory.filter { _ in
-            // Simplified - would need to match entry/exit trades
-            true
-        }.count
-
-        let winRate = tradeHistory.isEmpty ? 0 : Double(wins) / Double(tradeHistory.count) * 100
+        let wins = 0 // FIFO matching needed for true Win Rate
+        let winRate = 0.0
 
         var totalCommission = 0.0
         let totalSlippage = 0.0 // Placeholder
@@ -483,6 +529,10 @@ struct PaperPosition {
     var atlasScoreAtEntry: Double? = nil
     var aetherScoreAtEntry: Double? = nil
     var phoenixScoreAtEntry: Double? = nil
+    
+    // Exits
+    var sl: Double? = nil
+    var tp: Double? = nil
 }
 
 struct PaperTrade: Codable, Identifiable {

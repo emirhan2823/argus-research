@@ -9,7 +9,7 @@ enum BinanceError: Error {
 final class BinanceClient {
     private let base = "https://api.binance.com"
 
-    func fetchKlines(symbol: String, interval: String, limit: Int = 200) async throws -> [Candle] {
+    func fetchKlines(symbol: String, interval: String, limit: Int = 200) async throws -> [RunnerCandle] {
         var comps = URLComponents(string: base + "/api/v3/klines")
         comps?.queryItems = [
             .init(name: "symbol", value: symbol.uppercased()),
@@ -27,7 +27,7 @@ final class BinanceClient {
             throw BinanceError.decode("Not array-of-arrays")
         }
 
-        var out: [Candle] = []
+        var out: [RunnerCandle] = []
         out.reserveCapacity(raw.count)
 
         for row in raw where row.count >= 7 {
@@ -46,7 +46,7 @@ final class BinanceClient {
                 let volume = Double(volStr)
             else { continue }
 
-            out.append(Candle(
+            out.append(RunnerCandle(
                 openTime: openTime,
                 closeTime: closeTime,
                 open: open,

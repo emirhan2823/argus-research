@@ -14,27 +14,52 @@ actor RunnerCSVMarketData {
 
     private let fm = FileManager.default
     private var lastCache: (path: String, fileSize: UInt64, lastLineHash: Int, bar: OHLCV)?
+    private var simulatedBar: OHLCV?
+    
+    // Explicit base directory (set by main.swift)
+    private var explicitBaseDir: URL?
+
+    func setCurrentBar(_ bar: OHLCV) {
+        simulatedBar = bar
+    }
+    
+    func configure(dataDir: String?) {
+        if let d = dataDir {
+            self.explicitBaseDir = URL(fileURLWithPath: d)
+        }
+    }
 
     private var baseDir: URL {
-        let fm = FileManager.default
+        // 1. Explicit Argument
+        if let explicit = explicitBaseDir {
+            return explicit
+        }
+        
+        // 2. Relative ./data
+        let cwd = URL(fileURLWithPath: fm.currentDirectoryPath).appendingPathComponent("data")
+        var isDir: ObjCBool = false
+        if fm.fileExists(atPath: cwd.path, isDirectory: &isDir) && isDir.boolValue {
+           return cwd
+        }
 
+        // 3. MacOS/Default Fallback
         #if os(macOS)
-        // macOS: ~/Library/Application Support/ArgusRunner/data
         let home = fm.homeDirectoryForCurrentUser
         return home
             .appendingPathComponent("Library")
             .appendingPathComponent("Application Support")
             .appendingPathComponent("ArgusRunner")
             .appendingPathComponent("data")
-
         #else
-        // iOS: App sandbox (Documents)
         let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first!
-
         return docs
             .appendingPathComponent("ArgusRunner")
             .appendingPathComponent("data")
         #endif
+    }
+    
+    func printDataPath() {
+        print("Loading data from: \(baseDir.path)")
     }
 
     func latestClose(symbol: String, tf: String, now: Date = Date()) -> Double? {
@@ -42,9 +67,13 @@ actor RunnerCSVMarketData {
     }
 
     func latestOHLCV(symbol: String, tf: String, now: Date = Date()) -> OHLCV? {
+        // Deterministic Mode:
+        if let s = simulatedBar { return s }
+        
+        // Live/Watcher Mode:
         let path = csvPath(symbol: symbol, tf: tf, now: now).path
         guard fm.fileExists(atPath: path) else {
-            print("⚠️ RunnerCSV: file not found: \(path)")
+            // print("⚠️ RunnerCSV: file not found: \(path)") // noisy
             return nil
         }
 
@@ -57,7 +86,6 @@ actor RunnerCSVMarketData {
         }
 
         guard let lastLine = readLastNonEmptyLine(path: path) else {
-            print("⚠️ RunnerCSV: could not read last line: \(path)")
             return nil
         }
 
@@ -67,7 +95,6 @@ actor RunnerCSVMarketData {
         }
 
         guard let bar = parseLine(lastLine) else {
-            print("⚠️ RunnerCSV: parse failed for last line: \(lastLine)")
             return nil
         }
 
@@ -111,37 +138,7 @@ actor RunnerCSVMarketData {
     }
 
     private func readLastNonEmptyLine(path: String) -> String? {
-        guard let fh = FileHandle(forReadingAtPath: path) else { return nil }
-        defer { try? fh.close() }
-
-        let chunkSize = 64 * 1024
-
-        do {
-            let size = try fh.seekToEnd()
-            if size == 0 { return nil }
-
-            let start = max(Int64(0), Int64(size) - Int64(chunkSize))
-            try fh.seek(toOffset: UInt64(start))
-
-            let data = try fh.readToEnd() ?? Data()
-            guard let text = String(data: data, encoding: .utf8) else {
-                return readLastLineFallback(path: path)
-            }
-
-            let lines = text.split(whereSeparator: \.isNewline).map { String($0) }
-            for line in lines.reversed() {
-                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-                if trimmed.isEmpty { continue }
-                if trimmed.lowercased().hasPrefix("closetimems") { continue }
-                return trimmed
-            }
-            return nil
-        } catch {
-            return readLastLineFallback(path: path)
-        }
-    }
-
-    private func readLastLineFallback(path: String) -> String? {
+        // Simple full read fallback for MVP stability
         guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
         let lines = text.split(whereSeparator: \.isNewline).map { String($0) }
         for line in lines.reversed() {
@@ -151,5 +148,53 @@ actor RunnerCSVMarketData {
             return trimmed
         }
         return nil
+    }
+
+    func loadAllBars(symbol: String, tf: String, date: Date = Date()) -> [OHLCV] {
+        let dir = baseDir
+            .appendingPathComponent(symbol.uppercased())
+            .appendingPathComponent(tf)
+
+        // 1. Check if directory exists
+        var isDir: ObjCBool = false
+        if !fm.fileExists(atPath: dir.path, isDirectory: &isDir) || !isDir.boolValue {
+            print("⚠️ RunnerCSV: Directory not found: \(dir.path)")
+            return []
+        }
+
+        // 2. List all .csv files
+        guard let files = try? fm.contentsOfDirectory(atPath: dir.path) else {
+            print("⚠️ RunnerCSV: Could not list files in: \(dir.path)")
+            return []
+        }
+
+        let csvFiles = files.filter { $0.hasSuffix(".csv") }.sorted() // Sort by name (YYYY-MM)
+
+        // 3. Read and parse
+        var allBars: [OHLCV] = []
+
+        for file in csvFiles {
+            let path = dir.appendingPathComponent(file).path
+            guard let content = try? String(contentsOfFile: path, encoding: .utf8) else {
+                continue
+            }
+
+            let lines = content.split(whereSeparator: \.isNewline)
+            for line in lines {
+                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.isEmpty { continue }
+                if trimmed.lowercased().hasPrefix("closetimems") { continue } // Skip header
+
+                if let bar = parseLine(trimmed) {
+                    allBars.append(bar)
+                }
+            }
+        }
+
+        // 4. Sort by time (just to be safe)
+        allBars.sort { $0.closeTimeMs < $1.closeTimeMs }
+
+        // print("✅ RunnerCSV: Loaded \(allBars.count) bars for \(symbol) \(tf)")
+        return allBars
     }
 }

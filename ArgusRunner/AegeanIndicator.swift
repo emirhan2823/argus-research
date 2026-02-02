@@ -64,7 +64,7 @@ enum AegeanIndicator {
         }
     }
 
-    static func compute(candles: [Candle], cfg: Config = Config()) -> AegeanOutput? {
+    static func compute(candles: [RunnerCandle], cfg: Config = Config()) -> AegeanOutput? {
         // Need enough bars for EMA and percentChange window
         let minBars = max(cfg.emaPeriod + cfg.rsiLength + cfg.linearRegSmoothing + 5, 260)
         guard candles.count >= minBars else { return nil }

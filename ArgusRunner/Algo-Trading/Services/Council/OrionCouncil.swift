@@ -19,7 +19,7 @@ actor OrionCouncil {
     }
     
     // Weight store reference
-    private let weightStore = ChironWeightStore.shared
+    // private let weightStore = ChironWeightStore.shared
     
     // MARK: - Public API
     
@@ -116,29 +116,32 @@ actor OrionCouncil {
         symbol: String,
         engine: AutoPilotEngine
     ) async -> [CouncilVote] {
+        // var votes: [CouncilVote] = []
         var votes: [CouncilVote] = []
         
-        // Get Chiron weights for this symbol+engine (non-blocking)
-        let weights = weightStore.getCouncilWeights(symbol: symbol, engine: engine)
+        // Get Chiron weights (DISABLED for MVP CLI to avoid UI dependencies)
+        // let weights = weightStore.getCouncilWeights(symbol: symbol, engine: engine)
         
         for member in members {
             // Skip the proposer (they don't vote on their own proposal)
             if member.id == proposal.proposer { continue }
             
-            var vote = member.vote(on: proposal, candles: candles, symbol: symbol)
+            let vote = member.vote(on: proposal, candles: candles, symbol: symbol)
             
             // Apply Chiron weight
-            let memberWeight = weights.weight(for: member.id)
-            vote = CouncilVote(
+            // let memberWeight = weights.weight(for: member.id)
+            let memberWeight = 1.0 // Default weight
+            
+            let finalVote = CouncilVote(
                 voter: vote.voter,
                 voterName: vote.voterName,
                 decision: vote.decision,
                 reasoning: vote.reasoning,
-                weight: memberWeight * vote.weight // Combine member's vote strength with Chiron weight
+                weight: memberWeight * vote.weight 
             )
             
-            votes.append(vote)
-            print("      \(vote.decision.emoji) \(vote.voterName): \(vote.decision.rawValue) (Ağırlık: \(String(format: "%.0f", vote.weight * 100))%) - \(vote.reasoning ?? "")")
+            votes.append(finalVote)
+            print("      \(finalVote.decision.emoji) \(finalVote.voterName): \(finalVote.decision.rawValue) (Ağırlık: \(String(format: "%.0f", finalVote.weight * 100))%) - \(finalVote.reasoning ?? "")")
         }
         
         return votes
@@ -237,7 +240,7 @@ actor OrionCouncil {
 }
 
 // MARK: - ChironWeightStore Extension (Council Weights)
-
+/*
 extension ChironWeightStore {
     /// Get council member weights for a symbol+engine (non-blocking)
     nonisolated func getCouncilWeights(symbol: String, engine: AutoPilotEngine) -> CouncilMemberWeights {
@@ -251,3 +254,4 @@ extension ChironWeightStore {
         print("🧠 Chiron: Konsey ağırlıkları güncellendi - \(symbol) (\(engine.rawValue))")
     }
 }
+*/
