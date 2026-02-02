@@ -1,0 +1,14 @@
+[2026-01-27T11:04:31Z] === ARGUS RUNNER START ===
+[2026-01-27T11:04:31Z] mode=backtest symbol=BTCUSDT tfs=15m tradeTF=15m loop=0s
+Loading data from: /Users/emirhan/deneme2 kopyası/argus-terminal/data
+[2026-01-27T11:04:31Z] Brokers Configured. Initial Cash: 30.00
+[2026-01-27T11:04:31Z] Loading bars for BTCUSDT 15m...
+[2026-01-27T11:04:31Z] Loaded 297 bars.
+[2026-01-27T11:04:31Z] Warmup set to: 59 bars
+[2026-01-27T11:04:31Z] Starting Loop. Risk: DayLoss=3.0%, DD=6.0%
+[2026-01-27T11:04:32Z] === BACKTEST FINISHED ===
+[2026-01-27T11:04:32Z] Total Trades: 0
+[2026-01-27T11:04:32Z] Win Rate:     0.00%
+[2026-01-27T11:04:32Z] Final Equity: 30.00
+[2026-01-27T11:04:32Z] Total Comm:   0.00
+[2026-01-27T11:04:32Z] Max Drawdown: 0.00%

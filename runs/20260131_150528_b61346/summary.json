@@ -1,0 +1,14 @@
+{
+    "start_balance": 30.0,
+    "final_equity": 215.78626882788026,
+    "total_return_pct": 619.2875627596009,
+    "max_drawdown_pct": 0.2249999879440369,
+    "total_trades": 33,
+    "win_rate": 1.0,
+    "profit_factor": 999.0,
+    "signals": {
+        "total_go": 401,
+        "go_trend": 401,
+        "go_chop": 0
+    }
+}

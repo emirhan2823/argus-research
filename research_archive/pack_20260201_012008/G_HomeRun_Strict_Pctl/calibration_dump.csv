@@ -1,0 +1,2 @@
+Scenario,PositionId,EntryTs,ExitTs,Direction,EntryPrice,ExitPrice,ExpMove,Cost,Realized,Net,Slope,ADX,Regime,Score,SafetyFactor
+G_HomeRun_Strict_Pctl,f6445346,1704283260.0,1704283800.0,SELL,42531.05637,40870.64392931519,,20.0,390.4000000000014,370.4000000000014,-138.772458,69.05,TREND,,

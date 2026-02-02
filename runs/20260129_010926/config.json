@@ -1,0 +1,6 @@
+{
+    "mode": "paper",
+    "symbol": "BTCUSDT",
+    "data_dir": "argus_py/data/",
+    "start_balance": 30.0
+}

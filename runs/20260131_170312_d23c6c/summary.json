@@ -1,0 +1,20 @@
+{
+    "start_balance": 1000.0,
+    "final_equity": 1925.8769100176492,
+    "total_return_pct": 92.58769100176491,
+    "max_drawdown_pct": 0.0937781385008469,
+    "total_trades": 48,
+    "win_rate": 0.9791666666666666,
+    "profit_factor": 513.1717911562167,
+    "total_pnl": 925.8769100176494,
+    "total_fees": 49.24480878947548,
+    "trade_counts": {
+        "open": 48,
+        "close": 48
+    },
+    "signals": {
+        "total_go": 401,
+        "go_trend": 401,
+        "go_chop": 0
+    }
+}

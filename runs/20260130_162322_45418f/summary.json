@@ -1,0 +1,14 @@
+{
+    "start_balance": 30.0,
+    "final_equity": 30.0,
+    "total_return_pct": 0.0,
+    "max_drawdown_pct": 0.0,
+    "total_trades": 0,
+    "win_rate": 0.0,
+    "profit_factor": 999.0,
+    "signals": {
+        "total_go": 901,
+        "go_trend": 901,
+        "go_chop": 0
+    }
+}

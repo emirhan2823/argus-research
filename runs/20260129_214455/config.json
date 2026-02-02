@@ -1,0 +1,10 @@
+{
+    "mode": "adaptive",
+    "symbol": "BTCUSDT",
+    "data_dir": "argus_py/data/",
+    "start_balance": 30.0,
+    "leverage_max": 1.0,
+    "sniper": false,
+    "close_at_end": true,
+    "debug": true
+}
