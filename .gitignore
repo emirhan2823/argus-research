@@ -29,6 +29,7 @@ DerivedData
 *.log
 *.txt
 crash_logs/
+logs/
 
 # Secrets & Keys (User Specific)
 Secrets.xcconfig
@@ -47,7 +48,26 @@ ArgusScience*
 
 # Large data files  
 Argus_*.json
+argus_py/data/cache/
+argus_py/data/*.csv
+!argus_py/data/BTCUSDT.csv 
+# Keep BTCUSDT.csv if it was already tracked, but user said "unless intentionally versioned". 
+# Usually we ignore all csvs in data if they are downloaded.
+# Let's ignore all csvs in data/ for now to be safe, unless force added.
+argus_py/data/*.csv
 
 ArgusRunnerCLI2
 *.zip
 TestRunner
+# --- Argus runtime ---
+runs/
+# Keep runs/phase19_launch_runbook.md if it exists (force add later)
+
+# --- Python cache ---
+__pycache__/
+*.pyc
+
+# Virtual Env
+venv/
+env/
+.venv/
