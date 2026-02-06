@@ -22,7 +22,7 @@ from argus_py.models.orion.orion import OrionEngine
 from argus_py.council.aggregator import Council
 from argus_py.strategy.router import ModeRouter
 from argus_py.risk.regime import RegimeDetector
-from argus_py.broker.paper import PaperBroker
+from argus_py.broker.paper import PaperBroker, TradeFill
 from argus_py.data.reporting import Reporter
 from argus_py.data.market_state import Bar
 from argus_py.telemetry.schema import TelemetryEvent
@@ -563,6 +563,7 @@ class PaperDaemon:
              self.append_trade(exit_fill)
         
         if verdict.decision == "GO":
+            print(f"ENTER_EXEC_BRANCH: decision={verdict.decision} direction={verdict.direction}")
             # Risk calc matching CLI (approx)
             risk_pct = self.cfg["max_risk_trade_pct"] * r_risk_mult
             
@@ -573,9 +574,8 @@ class PaperDaemon:
                      risk_pct = min_r # Bump to floor
             
             # Execute Strategy (Entry)
-            # LOG DEBUG
-            # print(f"DEBUG EXEC: RiskMult={r_risk_mult} RiskPct={risk_pct:.4f}")
-            
+            print(f"EXEC_ATTEMPT: ts={bar.timestamp} daemon={self.cfg['daemon_id']} decision={verdict.decision} dir={verdict.direction} risk={risk_pct:.4f} price={bar.close} bal={self.broker.balance:.2f} score={edge_score:.2f}")
+
             success, reason = self.broker.execute_strategy(
                 symbol=self.cfg["symbol"],
                 decision=verdict.decision,
@@ -592,8 +592,20 @@ class PaperDaemon:
                 if self.broker.trades: self.append_trade(self.broker.trades[-1])
             else:
                 print(f"TRADE REJECTED: {reason} [RiskPct:{risk_pct*100:.2f}%]")
-                # Also log to rejects for visibility
-                self.append_reject(bar, "EXEC_FAIL", reason)
+                # Log to rejects
+                self.append_reject(bar, "EXEC_REJECT", reason)
+                # Log to trades as REJECTED (Audit Trail)
+                rej_fill = TradeFill(
+                    timestamp=bar.timestamp,
+                    symbol=self.cfg["symbol"],
+                    side=verdict.direction,
+                    price=bar.close,
+                    quantity=0.0, # Rejected, so 0
+                    commission=0.0,
+                    pnl=0.0,
+                    event="REJECTED"
+                )
+                self.append_trade(rej_fill)
 
         # elif verdict.decision == "EXIT":
         #    # CLI/Council does not generate EXIT signals currently.
