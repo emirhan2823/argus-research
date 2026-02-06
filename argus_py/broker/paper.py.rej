@@ -1,0 +1,76 @@
+diff a/argus_py/broker/paper.py b/argus_py/broker/paper.py	(rejected hunks)
+@@ -333,50 +333,19 @@ class PaperBroker:
+                 closed_trades.append(t_fill)
+         return closed_trades
+ 
+-    def place_order(self, symbol: str, side: str, price: float, quantity: float, sl: float = None, tp: float = None, timestamp: float = 0):
+-        # Use dynamic fee
+-        fee_bps = self.realism.get("fee_bps", 4.0)
+-        cost = price * quantity
+-        comm = cost * (fee_bps / 10000.0)
+-        
+-        if side == "BUY":
+-            self.balance -= (cost + comm)
+-        elif side == "SELL":
+-            self.balance -= comm # Short opening: Margin isolation handled via balance deduction or margin lock?
+-            # Simplified Paper Broker: We just deduct fee. Cost (Margin) is tracked in Equity?
+-            # For simpler math in paper mode: Balance tracks realized + initial cash.
+-            # buying: pay cash. selling: receive cash (short logic usually requires margin model).
+-            # Argus Paper Mode simplified:
+-            # Long: Balance decreases by cost+comm. Equity same.
+-            # Short: Balance decreases by comm. Equity same.
+-            # Let's keep existing logic but update comm calc.
+-            pass
+-
+-        # Generate unique Position ID for new positions
+-        pid = str(uuid.uuid4())[:8]
+-            
+-        pos = Position(symbol, side, price, quantity, pid, sl, tp, timestamp)
+-        self.details[symbol] = pos
+-        self.trades.append(TradeFill(timestamp, symbol, side, price, quantity, comm, 0.0, pid, "OPEN"))
+-        
+-        # Immediate Equity Update (PnL 0)
+-        self.equity = self.balance + self.unrealized_pnl
+-        return True
++    def _generate_stable_pid(self, symbol: str, timestamp: float, direction: str, price: float, unique_seq: int) -> str:
++        """
++        Generates a deterministic 8-char PositionID based on entry details + sequence counter.
++        Uses SHA1 hash of (Symbol, IntTimestamp, Direction, RoundedPrice, Seq).
++        """
++        import hashlib
++        # Round price to 4 decimals to avoid float jitter
++        price_str = f"{price:.4f}"
++        # Use int timestamp to avoid microsecond jitter
++        ts_int = int(timestamp)
+         
+-    def _create_fill(self, timestamp, symbol, side, fill_price, quantity, comm, pnl, pid, event):
+-        # Helper to create proper TradeFill with mark price info
+-        # Wait, we need the "Mark Price" (original price passed to place_order?)
+-        # place_order receives 'exec_price' from execute_strategy?
+-        # execute_strategy calculates 'exec_price' from 'price' (Mark).
+-        # We need to pass Mark Price to place_order/close_position?
+-        # Or place_order acts on Fill Price?
+-        # In execute_strategy: `self.place_order(..., exec_price, ...)`
+-        # So `price` argument in place_order IS Fill Price.
+-        # We lost Mark Price.
+-        # I need to update signature of `place_order` to accept `mark_price` or infer it.
+-        # Since I can't easily change signature everywhere if it's used elsewhere (it's internal though).
+-        # Let's add `mark_price` arg.
+-        pass
++        raw = f"{symbol}|{ts_int}|{direction}|{price_str}|{unique_seq}"
++        return hashlib.sha1(raw.encode()).hexdigest()[:8]
+ 
+     def place_order(self, symbol: str, side: str, price: float, quantity: float, sl: float = None, tp: float = None, timestamp: float = 0, mark_price: float = 0.0):
+         # Use dynamic fee
+@@ -391,8 +360,9 @@ class PaperBroker:
+         elif side == "SELL":
+             self.balance -= comm 
+ 
+-        # Generate unique Position ID for new positions
+-        pid = str(uuid.uuid4())[:8]
++        # Generate Deterministic Position ID with Sequence Counter to prevent collisions
++        seq = len(self.trades)
++        pid = self._generate_stable_pid(symbol, timestamp, side, price, seq)
+             
+         pos = Position(symbol, side, price, quantity, pid, sl, tp, timestamp)
+         self.details[symbol] = pos

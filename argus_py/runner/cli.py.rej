@@ -1,0 +1,548 @@
+diff a/argus_py/runner/cli.py b/argus_py/runner/cli.py	(rejected hunks)
+@@ -14,6 +14,8 @@ from argus_py.risk.mode_engine import ModeEngine
+ from argus_py.risk.regime import RegimeDetector
+ from argus_py.broker.paper import PaperBroker
+ from argus_py.data.reporting import Reporter
++from argus_py.strategy.mrie import MRIE
++from argus_py.strategy.router import ModeRouter
+ 
+ # Phase P2.8 Modules
+ from argus_py.risk.capital_engine import CapitalEngine
+@@ -25,6 +27,25 @@ from argus_py.reporting.run_report import generate_report
+ def run(args):
+     print(f"--- Argus Phase C: {args.symbol} (${args.start_balance}) Mode:{args.mode} ---")
+     
++    # EFFECTIVE_CONFIG Audit Log
++    eff_config = {
++        "symbol": args.symbol,
++        "start": args.start_date,
++        "end": args.end_date,
++        "data_dir": args.data_dir,
++        "fee_bps": args.fee_bps,
++        "slippage_bps": args.slippage_bps,
++        "spread_bps": args.spread_bps,
++        "min_adx": getattr(args, 'min_adx', 45.0),
++        "max_exp_move_bps": getattr(args, 'max_exp_move_bps', 0.0),
++        "vol_trap_mult": getattr(args, 'vol_trap_mult', 0.0),
++        "vol_trap_thresh": getattr(args, 'vol_trap_threshold', 0.0),
++        "vol_trap_v2": getattr(args, 'vol_trap_v2', False),
++        "mode": args.mode,
++        "router_enabled": True # Implicit in Phase C
++    }
++    print(f"EFFECTIVE_CONFIG: {json.dumps(eff_config)}")
++
+     # 1. Setup
+     try:
+         # Download if requested
+@@ -34,7 +55,8 @@ def run(args):
+                 return
+             os.makedirs(args.data_dir, exist_ok=True)
+             BinanceDownloader.download_binance_klines(args.symbol, args.start_date, args.end_date, args.data_dir)
+-            print(f"Downloaded -> {os.path.join(args.data_dir, args.symbol + '.csv')}")
++            expected_file = os.path.join(args.data_dir, f"{args.symbol}_1m_{args.start_date}_{args.end_date}.csv")
++            print(f"Downloaded -> {expected_file}")
+             return # EXIT after download (Mega Prompt)
+             
+         max_bars = getattr(args, 'max_bars', None)
+@@ -52,7 +74,23 @@ def run(args):
+         # Actually, let's just make it simpler: enable it by default if user supplied symbol explicitly.
+         # Wait, previous behavior was loose.
+         # I'll pass strict_symbol=True.
+-        market = DataLoader.load_from_dir(args.data_dir, max_bars=max_bars, symbol=args.symbol, strict_symbol=True)
++        # 0. Cache Priority Loading
++        # Try to find specific cached range file: {SYMBOL}_1m_{START}_{END}.csv
++        cache_loaded = False
++        if args.start_date and args.end_date:
++            cache_file = f"{args.symbol}_1m_{args.start_date}_{args.end_date}.csv"
++            cache_path = os.path.join(args.data_dir, cache_file)
++            if os.path.exists(cache_path):
++                 if not getattr(args, 'quiet', False):
++                     print(f"Loading Cached Range: {cache_path}")
++                 bars = DataLoader.load_csv(cache_path)
++                 from argus_py.data.market_state import MarketState
++                 # Use first filename as source
++                 market = MarketState(bars, source_files=[cache_file], symbol_requested=args.symbol, symbol_resolved=args.symbol)
++                 cache_loaded = True
++
++        if not cache_loaded:
++            market = DataLoader.load_from_dir(args.data_dir, max_bars=max_bars, symbol=args.symbol, strict_symbol=True)
+         
+         # Observability
+         min_close = min([b.close for b in market._all_bars]) if market._all_bars else 0
+@@ -61,6 +99,27 @@ def run(args):
+         if not getattr(args, 'quiet', False):
+              print(f"DataSource: {src_files} | requested_symbol={market.symbol_requested} | resolved_symbol={market.symbol_resolved} | bars={len(market._all_bars)} | close_min/max={min_close:.2f}/{max_close:.2f}")
+         
++        # Preflight Guard: Range Coverage
++        # Ensure loaded data covers requested range (within tolerance)
++        if args.start_date and args.end_date and market._all_bars:
++             req_s_ts = time.mktime(datetime.strptime(args.start_date, "%Y-%m-%d").timetuple())
++             req_e_ts = time.mktime(datetime.strptime(args.end_date, "%Y-%m-%d").timetuple())
++             
++             data_min_ts = market._all_bars[0].timestamp
++             data_max_ts = market._all_bars[-1].timestamp
++             
++             # Tolerance: 48h (allow some missing data at start/end, but major mismatches are fatal)
++             # If Data Start is > Requested Start + 48h -> Error (Missing Start Data)
++             # If Data End is < Requested End - 48h -> Error (Missing End Data)
++             TOLERANCE_SEC = 48 * 3600
++             
++             if (data_min_ts > req_s_ts + TOLERANCE_SEC) or (data_max_ts < req_e_ts - TOLERANCE_SEC):
++                 print(f"ERROR: Dataset Range Mismatch!")
++                 print(f"  Requested: {args.start_date} ({req_s_ts}) -> {args.end_date} ({req_e_ts})")
++                 print(f"  Dataset:   {market._all_bars[0].dt} ({data_min_ts}) -> {market._all_bars[-1].dt} ({data_max_ts})")
++                 import sys
++                 sys.exit(1) # Force Exit for Backtest Script Checks
++        
+         if getattr(args, 'verify_data', False):
+              print(f"--- DATA VERIFICATION ---")
+              print(f"Symbol: {args.symbol}")
+@@ -116,6 +175,8 @@ def run(args):
+     orion = OrionEngine()
+     council = Council()
+     regime_detector = RegimeDetector()
++    mrie = MRIE()
++    router = ModeRouter(cooldown_defense=30, cooldown_caution=15)
+     
+     mode_engine = ModeEngine(max_daily_dd_pct=0.04, max_total_dd_pct=0.10, profile_override=args.profile) 
+     capital_engine = CapitalEngine()
+@@ -236,6 +297,29 @@ def run(args):
+             chop_floor=args.chop_floor
+         )
+         
++        # D. MRIE Update (Passive)
++        _atr = or_vote.metadata.get('atr', 0.0)
++        _adx = or_vote.metadata.get('adx', 0.0)
++        mrie_features = mrie.update(_atr, current_bar.volume, _adx, current_bar.high, current_bar.low, current_bar.close)
++        verdict.metadata['mrie'] = mrie_features
++        
++        # E. Mode Router Update
++        router_res = router.update(mrie_features['mode_suggest'], mrie_features['shift_score'])
++        verdict.metadata['router'] = router_res
++        
++        # Policy Enforcement (Local Variables)
++        # Default: ATTACK (Base V5)
++        r_risk_mult = 1.0
++        r_adx_add = 0.0
++        r_policy = router_res['policy']
++        
++        if r_policy == "caution_v5":
++            r_risk_mult = 0.7
++            r_adx_add = 10.0 # Increase MinADX by 10
++        elif r_policy == "defense_flat":
++            r_risk_mult = 0.0 # Block trades via risk
++            r_adx_add = 999.0 # Block via ADX
++        
+         # Candidate Score Collection (Stabilization)
+         # Capture on EVERY bar where conviction is high (>= 0.10)
+         # regardless of filters, mode, or existing positions.
+@@ -391,51 +475,53 @@ def run(args):
+                   # Ideally:
+                   verdict.metadata['safety_factor'] = final_safety
+              
+-             reporter.log_decision(verdict, mode_process=mode_snap, capital_profile=cap_prof_str)
++             # Initialize Gates
++             gates = {
++                 'min_adx_pass': 1,
++                 'max_exp_pass': 1,
++                 'vol_trap_pass': 1,
++                 'blocked_reason': "N/A"
++             }
++             verdict.metadata['gates'] = gates
+              
++             # --- FILTER LOGIC (Applied to Verdict directly) ---
+              if verdict.decision == "GO":
+                  if is_lockdown:
++                     verdict.decision = "BLOCK"
++                     gates['blocked_reason'] = "LOCKDOWN"
+                      reporter.log_reject(current_bar.timestamp, args.symbol, "LOCKDOWN", safety_report['status'])
+                  else:
+-                     final_risk = effective_max_risk * mode_snap.risk_multiplier
+-                     effective_leverage = min(mode_snap.leverage_allowed, effective_lev_cap)
+-                     
+-                     final_risk = effective_max_risk * mode_snap.risk_multiplier
++                     # ROUTER: Defense Block
++                     if r_risk_mult == 0.0:
++                         verdict.decision = "BLOCK"
++                         gates['blocked_reason'] = "ROUTER_DEFENSE"
++                         reporter.log_reject(current_bar.timestamp, args.symbol, "ROUTER_DEFENSE", "Risk=0.0")
++
++                     final_risk = effective_max_risk * mode_snap.risk_multiplier * r_risk_mult
+                      effective_leverage = min(mode_snap.leverage_allowed, effective_lev_cap)
+                      
+-                     # Edge Score Logic (Moved Up)
+-                     # edge_score = 0.0
+-                     # slope_raw = ae_vote.metadata.get('slope', 0.0)
+-                     # adx = or_vote.metadata.get('adx', 0.0)
+-                     # slope_bps = (abs(slope_raw) / current_bar.close) * 10000.0
+-                     # adx_bps = adx * 0.4
+-                     # edge_score = (0.6 * slope_bps) + (0.4 * adx_bps)
++                     # 1. Min ADX Filter (V5 AdxGate)
++                     base_min_adx = getattr(args, 'min_adx', 0.0)
++                     if base_min_adx is None: base_min_adx = 0.0
++                     min_adx = base_min_adx + r_adx_add
++                     curr_adx = or_vote.metadata.get('adx', 0.0)
+                      
+-                     if verdict.decision == "GO":
+-                         go_scores.append(edge_score)
++                     if not getattr(args, 'quiet', False):
++                          print(f"[{current_bar.dt}] GUARD CHECK | Regime:{regime} ADX:{curr_adx:.1f} Gate:{'FAIL' if curr_adx < min_adx else 'PASS'} (Thresh:{min_adx:.1f})")
+ 
+-
+-                          # --- NEW FILTERS (Phase 2 & 3 & 5) ---
+-                          
+-                          # 1. Min ADX Filter (V5 AdxGate) - Production Standard
+-                          min_adx = getattr(args, 'min_adx', 45.0)
+-                          curr_adx = or_vote.metadata.get('adx', 0.0)
++                     if min_adx > 0 and curr_adx < min_adx:
++                          verdict.decision = "BLOCK"
++                          gates['min_adx_pass'] = 0
++                          gates['blocked_reason'] = "MIN_ADX"
++                          reporter.log_reject(current_bar.timestamp, args.symbol, "REJECT_WEAK_TREND", f"ADX {curr_adx:.1f} < {min_adx:.1f}")
+                           
+-                          # Log Production Guards
+-                          if not getattr(args, 'quiet', False):
+-                               print(f"[{current_bar.dt}] GUARD CHECK | Regime:{regime} ADX:{curr_adx:.1f} Gate:{'FAIL' if curr_adx < min_adx else 'PASS'}")
+-
+-                          if min_adx > 0 and curr_adx < min_adx:
+-                               reporter.log_reject(current_bar.timestamp, args.symbol, "REJECT_WEAK_TREND", f"ADX {curr_adx:.1f} < {min_adx:.1f}")
+-                               continue
+-                              
+-                         # 2. Volatility Trap (V3/V4/VolTrapV2)
+-                         # Logic: If ATR Spike -> Check if Trend Quality is bad (Low ADX or Low Slope)
+-                         vt_mult = getattr(args, 'vol_trap_mult', 0.0) # V3 Legacy
+-                         vt_thresh = getattr(args, 'vol_trap_threshold', 0.0) # V2 New
+-                         
+-                         # Use either legacy or new. If both, specific takes precedence? 
+-                         # Let's say Mult is the "Threshold".
++                     # 2. Volatility Trap (V3/V4/VolTrapV2)
++                     # Only check if still GO
++                     if verdict.decision == "GO":
++                         vt_mult = getattr(args, 'vol_trap_mult', 0.0) 
++                         vt_thresh = getattr(args, 'vol_trap_threshold', 0.0) 
++                         if vt_mult is None: vt_mult = 0.0
++                         if vt_thresh is None: vt_thresh = 0.0 
+                          effective_vt_thresh = vt_thresh if vt_thresh > 0 else vt_mult
+ 
+                          if effective_vt_thresh > 0.0 and len(atr_history) >= 10:
+@@ -443,154 +529,170 @@ def run(args):
+                              atr_curr = or_vote.metadata.get('atr', 0.0)
+                              
+                              if atr_avg > 0 and (atr_curr / atr_avg) > effective_vt_thresh:
+-                                  # Volatility Spike Detected.
+-                                  # Check Allow Conditions (Smart Filter)
++                                  # Check Allow Conditions
++                                  blocked = True
+                                   if getattr(args, 'vol_trap_v2', False):
+-                                      # Conditional Reject
+-                                      # Allow if: ADX > 25 AND AbsSlope > 2.0 (Strong Trend)
+                                       adx_v = or_vote.metadata.get('adx', 0.0)
+                                       slope_v = abs(ae_vote.metadata.get('slope', 0.0) / current_bar.close * 10000.0)
+-                                      
+                                       is_strong_trend = (adx_v > 25) and (slope_v > 2.0)
+-                                      if not is_strong_trend:
+-                                           reporter.log_reject(current_bar.timestamp, args.symbol, "REJECT_VOL_TRAP_V2", f"ATR {atr_curr:.2f} > {effective_vt_thresh}x. Weak Trend (ADX:{adx_v:.1f} Sl:{slope_v:.1f})")
+-                                           continue
+-                                  else:
+-                                      # Hard Reject (V3 Legacy)
+-                                      reporter.log_reject(current_bar.timestamp, args.symbol, "REJECT_VOL_TRAP", f"ATR {atr_curr:.2f} > {effective_vt_thresh}*{atr_avg:.2f}")
+-                                      continue
+-
++                                      if is_strong_trend: blocked = False
++                                      
++                                  if blocked:
++                                      verdict.decision = "BLOCK"
++                                      gates['vol_trap_pass'] = 0
++                                      gates['blocked_reason'] = "VOL_TRAP"
++                                      reporter.log_reject(current_bar.timestamp, args.symbol, "REJECT_VOL_TRAP", f"ATR {atr_curr:.2f} > {effective_vt_thresh}x")
++ 
+                          # Update ATR History (Safest spot: update if we have data)
+                          curr_atr = or_vote.metadata.get('atr', 0.0)
+                          if curr_atr > 0:
+                              atr_history.append(curr_atr)
+                              
+-                         # 3. Max ExpMove Filter (V2)
+-                         # Requires 'expected_move' to be calculated via 'verdict.metadata'
++                     # 3. Max ExpMove Filter (V2)
++                     if verdict.decision == "GO":
+                          max_exp = getattr(args, 'max_exp_move_bps', 0.0)
++                         if max_exp is None: max_exp = 0.0
+                          em_check = verdict.metadata.get('expected_move', 0.0)
+                          if max_exp > 0 and em_check > max_exp:
+-                             reporter.log_reject(current_bar.timestamp, args.symbol, "REJECT_MAX_EXP", f"Exp {em_check:.1f} > {max_exp:.1f}")
+-                             continue
+-                     
+-                     # Edge Filter (Diagnose & Home Run)
+-                     min_edge = getattr(args, 'min_expected_move_bps', 0.0)
+-                     min_edge_mult = getattr(args, 'min_expected_move_multiplier', 0.0)
+-                     cost_safety = getattr(args, 'cost_safety_factor', 2.0)
+-                     
+-                     req_threshold = min_edge
+-                     
++                              verdict.decision = "BLOCK"
++                              gates['max_exp_pass'] = 0
++                              gates['blocked_reason'] = "MAX_EXP"
++                              reporter.log_reject(current_bar.timestamp, args.symbol, "REJECT_MAX_EXP", f"Exp {em_check:.1f} > {max_exp:.1f}")
++
+                      if verdict.decision == "GO":
+-                         # --- Filter Logic Setup (Cont'd) ---
+-                         
+-                         # Filter Logic Setup
+-                         req_threshold = min_edge
+-                         if min_edge_mult > 0:
+-                             cfg_fee = args.fee_bps + args.slippage_bps + args.spread_bps
+-                             req_threshold = max(req_threshold, cfg_fee * min_edge_mult)
+-                         
+-                         # --- 1. Split Logic ---
+-                         # Determine if we use "Baseline Safety" (Strict) or "HomeRun Safety" (Relaxed)
+-                         # Rule: If filtered scenario (req_threshold > 0) AND score >= threshold -> Relaxed.
+-                         #       Else -> Strict.
+-                         
+-                         is_filtered_run = (req_threshold > 0.1) # Non-zero threshold
+-                         passes_score_filter = (edge_score >= req_threshold)
+-                         
+-                         # Order:
+-                         # Start with Cost Check?
+-                         # User: "Baseline: Apply early." "HomeRun: Apply after score >= threshold".
+-                         
+-                         should_reject_cost = False
+-                         cost_safety_used = cost_safety
+-                         
+-                         if not is_filtered_run:
+-                              # Baseline Mode: Strict Cost Check Early
+-                              if expected_move < total_cost_bps * cost_safety:
+-                                  should_reject_cost = True
+-                         else:
+-                              # HomeRun Mode:
+-                              # First check Score
+-                              if not passes_score_filter:
+-                                   # We will reject by Score anyway.
+-                                   pass 
+-                              else:
+-                                   # High Score Trade -> Use Relaxed Safety
+-                                   safety_h = getattr(args, 'cost_safety_homerun', 1.3)
+-                                   cost_safety_used = safety_h
+-                                   if expected_move < total_cost_bps * safety_h:
+-                                        should_reject_cost = True
+-                         
+-                         # Execute Cost Reject
+-                         if should_reject_cost:
+-                             metrics_str = f"Exp:{expected_move:.1f} (Sl:{slope_bps_abs:.1f}/ATR:{atr_bps:.1f}) < Cost:{total_cost_bps:.1f}*{cost_safety_used:.1f} Score:{edge_score:.1f}"
+-                             reporter.log_reject(current_bar.timestamp, args.symbol, "REJECT_EDGE_COST", metrics_str, meta=f"{edge_score:.1f}")
+-                             continue
+-
+-                         # --- 2. Score Filter (Legacy/HomeRun) ---
+-                         if is_filtered_run:
+-                             if not passes_score_filter:
+-                                 # Context stats (Rolling)
+-                                 stats_ctx = ""
+-                                 if len(candidate_scores) > 20:
+-                                     p95_r = np.percentile(candidate_scores, 95)
+-                                     p99_r = np.percentile(candidate_scores, 99)
+-                                     stats_ctx = f"(p95={p95_r:.1f}, p99={p99_r:.1f})"
+-                                     
+-                                 reporter.log_reject(current_bar.timestamp, args.symbol, "REJECT_EDGE_TOO_LOW", f"Score {edge_score:.1f} < {req_threshold:.1f} {stats_ctx}")
+-                                 continue
+-                     
+-                     success, reason = broker.execute_strategy(
+-                         args.symbol,
+-                         verdict.decision,
+-                         verdict.direction,
+-                         current_bar.close,
+-                         current_bar.timestamp,
+-                         risk_pct=final_risk,
+-                         leverage=effective_leverage
+-                     )
++                         go_scores.append(edge_score)
++
++             # LOG DECISION AFTER FILTERS
++             reporter.log_decision(verdict, mode_process=mode_snap, capital_profile=cap_prof_str)
++             
++             # Continue if Blocked
++             if verdict.decision != "GO":
++                 continue
+                      
+-                     if success:
+-                         if not getattr(args, 'quiet', False):
+-                             print(f"[{current_bar.dt}] ENTRY {verdict.direction} ({regime}) Mode:{mode_snap.mode.value} Lev:{effective_leverage}x Risk:{final_risk*100:.2f}% | {verdict.rationale}")
+-                         
+-                         # Store Meta for Calibration
+-                         if broker.trades:
+-                             last_trade = broker.trades[-1]
+-                             position_meta[last_trade.position_id] = {
+-                                 "entry_price": last_trade.price,
+-                                 "exp_move_bps": expected_move,
+-                                 "direction": verdict.direction,
+-                                 "total_cost_bps": total_cost_bps
+-                             }
+-                         
+-                         # Cooldown Logic
+-                         trade_cooldown_counter = args.cooldown_bars
+-                         metrics.append(broker.get_state(current_bar.timestamp, snapshot_type="POST_TRADE"))
+-                         
+-                         # Explainability Log (HomeRun)
+-                         if (min_edge > 0 or min_edge_mult > 0):
+-                             explanation = {
+-                                 "timestamp": current_bar.timestamp,
+-                                 "dt": str(current_bar.dt),
+-                                 "score": edge_score,
+-                                 "threshold": req_threshold,
+-                                 "conviction": verdict.conviction,
+-                                 "regime": regime,
+-                                 "slope_net": ae_vote.metadata.get('slope', 0.0),
+-                                 "adx": or_vote.metadata.get('adx', 0.0),
+-                                 "rationale": verdict.rationale,
+-                                 "direction": verdict.direction,
+-                                 "expected_move_bps": expected_move, 
+-                                 "atr_bps": atr_bps,
+-                                 "slip_bps": args.slippage_bps,
+-                                 "spread_bps": args.spread_bps,
+-                                 "fee_bps": args.fee_bps,
+-                                 "safety_factor": adaptive_safety if getattr(args, 'adaptive_cost_safety', False) else getattr(args, 'cost_safety_factor', 2.0)
+-                             }
+-                             trade_explanations.append(explanation)
+-                     else:
+-                         reporter.log_reject(current_bar.timestamp, args.symbol, "Exec Failed", reason, f"Prof:{mode_snap.profile.value} Lev:{effective_leverage}")
++             # Edge Filter (Diagnose & Home Run)
++             min_edge = getattr(args, 'min_expected_move_bps', 0.0)
++             min_edge_mult = getattr(args, 'min_expected_move_multiplier', 0.0)
++             cost_safety = getattr(args, 'cost_safety_factor', 2.0)
++             
++             req_threshold = min_edge
++             
++             if verdict.decision == "GO":
++                 # --- Filter Logic Setup (Cont'd) ---
++                 
++                 # Filter Logic Setup
++                 req_threshold = min_edge
++                 if min_edge_mult > 0:
++                     cfg_fee = args.fee_bps + args.slippage_bps + args.spread_bps
++                     req_threshold = max(req_threshold, cfg_fee * min_edge_mult)
++                 
++                 # --- 1. Split Logic ---
++                 # Determine if we use "Baseline Safety" (Strict) or "HomeRun Safety" (Relaxed)
++                 # Rule: If filtered scenario (req_threshold > 0) AND score >= threshold -> Relaxed.
++                 #       Else -> Strict.
++                 
++                 is_filtered_run = (req_threshold > 0.1) # Non-zero threshold
++                 passes_score_filter = (edge_score >= req_threshold)
++                 
++                 # Order:
++                 # Start with Cost Check?
++                 # User: "Baseline: Apply early." "HomeRun: Apply after score >= threshold".
++                 
++                 should_reject_cost = False
++                 cost_safety_used = cost_safety
++                 
++                 if not is_filtered_run:
++                      # Baseline Mode: Strict Cost Check Early
++                      if expected_move < total_cost_bps * cost_safety:
++                          should_reject_cost = True
++                 else:
++                      # HomeRun Mode:
++                      # First check Score
++                      if not passes_score_filter:
++                           # We will reject by Score anyway.
++                           pass 
++                      else:
++                           # High Score Trade -> Use Relaxed Safety
++                           safety_h = getattr(args, 'cost_safety_homerun', 1.3)
++                           cost_safety_used = safety_h
++                           if expected_move < total_cost_bps * safety_h:
++                                should_reject_cost = True
++                 
++                 # Execute Cost Reject
++                 if should_reject_cost:
++                     verdict.decision = "BLOCK"
++                     gates['blocked_reason'] = "COST"
++                     metrics_str = f"Exp:{expected_move:.1f} (Sl:{slope_bps_abs:.1f}/ATR:{atr_bps:.1f}) < Cost:{total_cost_bps:.1f}*{cost_safety_used:.1f} Score:{edge_score:.1f}"
++                     reporter.log_reject(current_bar.timestamp, args.symbol, "REJECT_EDGE_COST", metrics_str, meta=f"{edge_score:.1f}")
++                     reporter.log_decision(verdict, mode_process=mode_snap, capital_profile=cap_prof_str)
++                     continue
++
++                 # --- 2. Score Filter (Legacy/HomeRun) ---
++                 if is_filtered_run:
++                     if not passes_score_filter:
++                         # Context stats (Rolling)
++                         stats_ctx = ""
++                         if len(candidate_scores) > 20:
++                             p95_r = np.percentile(candidate_scores, 95)
++                             p99_r = np.percentile(candidate_scores, 99)
++                             stats_ctx = f"(p95={p95_r:.1f}, p99={p99_r:.1f})"
++                             
++                         verdict.decision = "BLOCK"
++                         gates['blocked_reason'] = "LOW_SCORE"
++                         reporter.log_reject(current_bar.timestamp, args.symbol, "REJECT_EDGE_TOO_LOW", f"Score {edge_score:.1f} < {req_threshold:.1f} {stats_ctx}")
++                         reporter.log_decision(verdict, mode_process=mode_snap, capital_profile=cap_prof_str)
++                         continue
++             
++             success, reason = broker.execute_strategy(
++                 args.symbol,
++                 verdict.decision,
++                 verdict.direction,
++                 current_bar.close,
++                 current_bar.timestamp,
++                 risk_pct=final_risk,
++                 leverage=effective_leverage
++             )
++             
++             if success:
++                 if not getattr(args, 'quiet', False):
++                     print(f"[{current_bar.dt}] ENTRY {verdict.direction} ({regime}) Mode:{mode_snap.mode.value} Lev:{effective_leverage}x Risk:{final_risk*100:.2f}% | {verdict.rationale}")
++                 
++                 # Store Meta for Calibration
++                 if broker.trades:
++                     last_trade = broker.trades[-1]
++                     position_meta[last_trade.position_id] = {
++                         "entry_price": last_trade.price,
++                         "exp_move_bps": expected_move,
++                         "direction": verdict.direction,
++                         "total_cost_bps": total_cost_bps
++                     }
++                 
++                 # Cooldown Logic
++                 trade_cooldown_counter = args.cooldown_bars
++                 metrics.append(broker.get_state(current_bar.timestamp, snapshot_type="POST_TRADE"))
++                 
++                 # Explainability Log (HomeRun)
++                 if (min_edge > 0 or min_edge_mult > 0):
++                     explanation = {
++                         "timestamp": current_bar.timestamp,
++                         "dt": str(current_bar.dt),
++                         "score": edge_score,
++                         "threshold": req_threshold,
++                         "conviction": verdict.conviction,
++                         "regime": regime,
++                         "slope_net": ae_vote.metadata.get('slope', 0.0),
++                         "adx": or_vote.metadata.get('adx', 0.0),
++                         "rationale": verdict.rationale,
++                         "direction": verdict.direction,
++                         "expected_move_bps": expected_move, 
++                         "atr_bps": atr_bps,
++                         "slip_bps": args.slippage_bps,
++                         "spread_bps": args.spread_bps,
++                         "fee_bps": args.fee_bps,
++                         "safety_factor": adaptive_safety if getattr(args, 'adaptive_cost_safety', False) else getattr(args, 'cost_safety_factor', 2.0)
++                     }
++                     trade_explanations.append(explanation)
++             else:
++                 reporter.log_reject(current_bar.timestamp, args.symbol, "Exec Failed", reason, f"Prof:{mode_snap.profile.value} Lev:{effective_leverage}")
+ 
+         # Metrics Capture
+         metrics.append(broker.get_state(current_bar.timestamp, snapshot_type="BAR"))
+@@ -757,11 +859,11 @@ if __name__ == "__main__":
+     
+     # Phase 2 Filters (Strategy Upgrade)
+     # parser.add_argument("--disable_buy", action="store_true", help="[DEPRECATED] Reject all BUY signals")
+-    parser.add_argument("--max_exp_move_bps", type=float, default=80.0, help="Reject signals with ExpMove > N bps")
+-    parser.add_argument("--vol_trap_mult", type=float, default=0.0, help="Reject if ATR > Mult * AvgATR(20) (Legacy)")
+-    parser.add_argument("--vol_trap_threshold", type=float, default=0.0, help="VolTrap Threshold (V2)")
++    parser.add_argument("--max_exp_move_bps", type=float, default=None, help="Reject signals with ExpMove > N bps (Default: Disabled)")
++    parser.add_argument("--vol_trap_mult", type=float, default=None, help="Reject if ATR > Mult * AvgATR(20) (Legacy)")
++    parser.add_argument("--vol_trap_threshold", type=float, default=None, help="VolTrap Threshold (V2)")
+     parser.add_argument("--vol_trap_v2", action="store_true", help="Enable VolTrap V2 (Smart Conditional Filter)")
+-    parser.add_argument("--min_adx", type=float, default=45.0, help="Reject signals if ADX < N (Weak Trend)")
++    parser.add_argument("--min_adx", type=float, default=None, help="Reject signals if ADX < N (Weak Trend) (Default: Disabled)")
+ 
+     args = parser.parse_args()
+     

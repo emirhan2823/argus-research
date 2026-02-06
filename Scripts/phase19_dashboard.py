@@ -3,12 +3,11 @@ import streamlit as st
 import pandas as pd
 import time
 import sys
+import json
 from datetime import datetime
 from pathlib import Path
 
 # Fix Path
-# Fix Path: Add REPO_ROOT (parents[1]) to sys.path[0]
-# ensures 'from Scripts.phase19_readers' works from anywhere
 REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -17,7 +16,6 @@ if str(REPO_ROOT) not in sys.path:
 try:
     from Scripts.phase19_readers import Phase19Readers
 except ImportError:
-    # Fallback to local import if run directly inside Scripts/
     try:
         from phase19_readers import Phase19Readers
     except ImportError:
@@ -26,96 +24,142 @@ except ImportError:
 
 # Config
 st.set_page_config(
-    page_title="Argus Phase 19 Dashboard",
+    page_title="Argus Twin Engine Dashboard",
     layout="wide",
     page_icon="🤖"
 )
 
-RUN_DIR = REPO_ROOT / "runs/phase19_paper/live_test"
-readers = Phase19Readers(RUN_DIR)
+TWIN_ROOT = REPO_ROOT / "runs/phase19_twin"
+readers_strict = Phase19Readers(TWIN_ROOT / "STRICT")
+readers_soft = Phase19Readers(TWIN_ROOT / "SOFT")
 
 # --- HEADER ---
-st.title("Argus Phase 19 Paper Daemon")
+st.title("Argus Twin Engine (Strict vs Soft)")
+st.caption(f"Twin Root: {TWIN_ROOT}")
 
 # Load Data
-hb = readers.get_heartbeat()
+hb_strict = readers_strict.get_heartbeat()
+hb_soft = readers_soft.get_heartbeat()
 
-if hb:
-    # 1. KPIs
-    req_age = 999
-    if "ts_iso" in hb:
-        last_ts = datetime.fromisoformat(hb["ts_iso"])
-        req_age = (datetime.now() - last_ts).total_seconds()
+# --- KPI DISPLAY HELPER ---
+def display_kpi(col, label, hb):
+    if not hb:
+        col.metric(label, "OFFLINE")
+        return
         
-    # Banner
-    if req_age > 180:
-        st.error(f"⚠️ HEARTBEAT STALE: Last update {req_age:.1f}s ago!")
-    elif req_age > 30:
-        st.warning(f"⚠️ Heartbeat Slow: {req_age:.1f}s ago.")
-    else:
-        st.success(f"🟢 Online (Last update: {req_age:.1f}s ago)")
-
-    # Metrics Row
-    col1, col2, col3, col4, col5 = st.columns(5)
+    ts = hb.get("ts_iso")
+    age = 999
+    if ts:
+        age = (datetime.now() - datetime.fromisoformat(ts)).total_seconds()
+        
+    status = "🟢" if age < 30 else ("⚠️" if age < 180 else "🔴")
     
-    col1.metric("Equity", f"${hb.get('equity', 0):.2f}")
-    col2.metric("Balance", f"${hb.get('balance', 0):.2f}")
-    col3.metric("Drawdown", f"{hb.get('dd_pct', 0):.2f}%")
-    
-    last_price = hb.get("last_price", 0)
-    col4.metric("Last Price", f"${last_price:,.2f}")
-    
-    counters = hb.get("counters", {})
-    bars = counters.get("bars_seen", 0)
-    col5.metric("Bars Seen", bars)
+    col.metric(f"{label} {status}", f"${hb.get('equity', 0):.2f}", delta=f"{hb.get('dd_pct', 0):.2f}% DD")
+    col.caption(f"Lag: {age:.1f}s | Bars: {hb.get('counters', {}).get('bars_seen', 0)}")
 
-    # 2. Position
-    st.subheader("Current Position")
-    pos = hb.get("position")
-    if pos:
-        # Create a single row dataframe for nicer display
-        pos_df = pd.DataFrame([pos])
-        # Add current value calc
-        if last_price > 0:
-             pos_df["current_val"] = pos_df["qty"] * last_price
-             pos_df["pnl_calc"] = (last_price - pos_df["entry"]) * pos_df["qty"] 
-             if pos["side"] == "SELL":
-                 pos_df["pnl_calc"] = (pos_df["entry"] - last_price) * pos_df["qty"]
-        st.dataframe(pos_df, hide_index=True)
-    else:
-        st.info("No Open Position")
+# --- KPIS ---
+c1, c2, c3, c4 = st.columns(4)
+display_kpi(c1, "STRICT", hb_strict)
+display_kpi(c2, "SOFT", hb_soft)
 
-else:
-    st.warning("Waiting for Heartbeat...")
+if hb_strict and hb_strict.get("last_price"):
+    c3.metric("Last Price", f"${hb_strict['last_price']:,.2f}")
 
 st.divider()
 
 # --- TABS ---
-tab1, tab2, tab3 = st.tabs(["Decisions", "Rejects", "Trades"])
+tab1, tab2, tab3, tab4 = st.tabs(["Decisions (Twin)", "Trades", "Rejects", "Counterfactual Lab"])
 
 with tab1:
-    st.subheader("Latest Decisions")
-    df_dec = readers.get_csv_tail("decisions.csv", 100)
-    if not df_dec.empty:
-        st.dataframe(df_dec, hide_index=True, height=400)
-    else:
-        st.write("No decisions yet.")
+    st.subheader("Latest Decisions (Strict vs Soft)")
+    c1, c2 = st.columns(2)
+    
+    with c1:
+        st.caption("STRICT")
+        df_s = readers_strict.get_jsonl_tail("decisions.jsonl", 20)
+        if not df_s.empty:
+            cols = ["bar_ts_iso", "decision", "edge_score", "expected_move_bps", "block_reason_primary"]
+            st.dataframe(df_s[cols], hide_index=True)
+        else:
+            # Fallback csv
+            df_csv = readers_strict.get_csv_tail("decisions.csv", 20)
+            if not df_csv.empty: st.dataframe(df_csv, hide_index=True)
+            else: st.info("No Data")
+
+    with c2:
+        st.caption("SOFT")
+        df_o = readers_soft.get_jsonl_tail("decisions.jsonl", 20)
+        if not df_o.empty:
+            cols = ["bar_ts_iso", "decision", "edge_score", "expected_move_bps", "block_reason_primary"]
+            st.dataframe(df_o[cols], hide_index=True)
+        else:
+            df_csv = readers_soft.get_csv_tail("decisions.csv", 20)
+            if not df_csv.empty: st.dataframe(df_csv, hide_index=True)
+            else: st.info("No Data")
 
 with tab2:
-    st.subheader("Latest Rejects")
-    df_rej = readers.get_csv_tail("rejects.csv", 100)
-    if not df_rej.empty:
-        st.dataframe(df_rej, hide_index=True, height=400)
-    else:
-        st.write("No rejects yet.")
+    st.subheader("Trades")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.caption("STRICT Trades")
+        df_t = readers_strict.get_csv_tail("trades.csv", 50)
+        if not df_t.empty: st.dataframe(df_t, hide_index=True)
+    with c2:
+        st.caption("SOFT Trades")
+        df_t2 = readers_soft.get_csv_tail("trades.csv", 50)
+        if not df_t2.empty: st.dataframe(df_t2, hide_index=True)
 
 with tab3:
-    st.subheader("Trades")
-    df_trades = readers.get_csv_tail("trades.csv", 100)
-    if not df_trades.empty:
-        st.dataframe(df_trades, hide_index=True)
+    st.subheader("Rejects")
+    c1, c2 = st.columns(2)
+    with c1: 
+        st.dataframe(readers_strict.get_csv_tail("rejects.csv", 50), hide_index=True)
+    with c2:
+        st.dataframe(readers_soft.get_csv_tail("rejects.csv", 50), hide_index=True)
+
+with tab4:
+    st.subheader("Reject Audit (Offline Lab)")
+    
+    lab_dir = TWIN_ROOT / "lab"
+    label_file = lab_dir / "counterfactual_labels.csv"
+    summary_file = lab_dir / "tuning_proposals.md"
+    
+    if label_file.exists():
+        df_lab = pd.read_csv(label_file)
+        
+        st.metric("Total Divergences", len(df_lab))
+        
+        if not df_lab.empty:
+            # 1. Reject Accuracy Stacked Bar
+            st.markdown("### Reject Correctness (H15)")
+            if "label_reject_correct_h15" in df_lab.columns:
+                 # Group by Gate
+                 acc = df_lab.groupby("strict_gate_reason")["label_reject_correct_h15"].mean() * 100.0
+                 st.bar_chart(acc)
+                 st.caption("Percentage of properly rejected losses (higher is better).")
+
+            # 2. Opportunity Cost
+            st.markdown("### Opportunity Cost (Missed PnL H15)")
+            if "shadow_pnl_h15" in df_lab.columns:
+                 missed = df_lab[df_lab["shadow_pnl_h15"] > 0]
+                 if not missed.empty:
+                     cost_by_gate = missed.groupby("strict_gate_reason")["shadow_pnl_h15"].sum()
+                     st.bar_chart(cost_by_gate)
+                 else:
+                     st.info("No missed opportunities found.")
+
+            # 3. Tuning Proposals
+            st.divider()
+            if summary_file.exists():
+                with st.expander("Tuning Proposals", expanded=True):
+                    st.markdown(summary_file.read_text())
+            
+            # 4. Raw Data
+            with st.expander("Raw Labels"):
+                st.dataframe(df_lab)
     else:
-        st.write("No trades yet.")
+        st.warning("No Lab Data Found. Run './Scripts/phase19ctl.sh lab-run' to generate.")
+
 
 # Auto Refresh
 time.sleep(2)

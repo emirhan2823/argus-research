@@ -31,21 +31,7 @@ class Phase19Readers:
             return pd.DataFrame()
             
         try:
-            # Read header
-            with open(fpath, "r") as f:
-                header_line = f.readline().strip()
-                if not header_line:
-                    return pd.DataFrame()
-                columns = header_line.split(",")
-
-            # Read tail efficiently? For 100 lines pandas is fine.
-            # Avoid reading huge files if logs grow.
-            # But normally pandas read_csv is mostly optimized.
-            # To be safe against huge files:
-            # mmap or seek? Let's just use pandas for simplicity -> robust against partial writes?
-            # Actually, `pd.read_csv` might fail on malformed lines (interrupted write).
-            # We use `on_bad_lines='skip'`.
-            
+            # Simple robust read
             df = pd.read_csv(fpath, on_bad_lines='skip')
             
             # Sort / Tail
@@ -59,4 +45,37 @@ class Phase19Readers:
         except Exception as e:
             print(f"Error reading {filename}: {e}")
             return pd.DataFrame()
+
+    def get_jsonl_tail(self, filename: str, n: int = 100):
+        """Reads last n lines of a JSONL file."""
+        fpath = self.run_dir / filename
+        if not fpath.exists():
+            return pd.DataFrame()
+            
+        records = []
+        try:
+            # For efficiency on huge logs, seek might be needed, but start simple
+            with open(fpath, "r") as f:
+                # Read all lines? Or deque?
+                # Deque with maxlen is good for tail
+                from collections import deque
+                lines = deque(f, maxlen=n)
+                
+            for line in lines:
+                try:
+                    records.append(json.loads(line))
+                except:
+                    continue
+        except Exception as e:
+            print(f"Error reading {filename}: {e}")
+            return pd.DataFrame()
+            
+        if not records:
+            return pd.DataFrame()
+            
+        df = pd.DataFrame(records)
+        if "ts_iso" in df.columns:
+             df = df.sort_values("ts_iso", ascending=False)
+             
+        return df
 

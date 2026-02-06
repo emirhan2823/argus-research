@@ -1,0 +1,24 @@
+diff a/.gitignore b/.gitignore	(rejected hunks)
+@@ -60,10 +60,19 @@ ArgusRunnerCLI2
+ *.zip
+ TestRunner
+ # --- Argus runtime ---
++# Argus runtime
+ runs/
+-# Keep runs/phase19_launch_runbook.md if it exists (force add later)
+-
+-# --- Python cache ---
++logs/
++cache/
++__pycache__/
++*.pyc
++.ipynb_checkpoints
++.DS_Store
++*.jsonl
++argus_py/data/*.csv
++argus_py/data/cache/
++Scripts/phase19_dashboard.py
++!Scripts/phase19_dashboard.py
+ __pycache__/
+ *.pyc
+ 
