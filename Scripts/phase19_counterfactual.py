@@ -77,6 +77,7 @@ def evaluate():
     # Assuming this runs frequently enough or logs are recent
 
     results = []
+    missing_reasons_count = 0
     
     for ts in common_idx:
         row_s = df_strict.loc[ts]
@@ -89,11 +90,21 @@ def evaluate():
             gate = "OTHER"
             
             # Attribute Gate
-            reason = row_s.get("block_reason_primary", "")
-            # Robust Handle for None/NaN/Float
-            if pd.isna(reason) or reason is None:
+            raw_reason = row_s.get("block_reason_primary")
+            reason = ""
+            
+            # Paranoid Check
+            if raw_reason is None:
                 reason = ""
-            reason = str(reason)
+                missing_reasons_count += 1
+            elif isinstance(raw_reason, float) and np.isnan(raw_reason):
+                reason = ""
+                missing_reasons_count += 1
+            elif pd.isna(raw_reason):
+                reason = ""
+                missing_reasons_count += 1
+            else:
+                reason = str(raw_reason)
 
             if "MIN_ADX" in reason: gate = "MIN_ADX"
             elif "ROUTER" in reason: gate = "ROUTER_DEFENSE"
@@ -136,6 +147,9 @@ def evaluate():
                     eval_row[f"ret_h{h}_net"] = None
                     
             results.append(eval_row)
+
+    if missing_reasons_count > 0:
+        print(f"Sanity: Fixed {missing_reasons_count} rows with None/NaN reasons.")
 
     if not results:
         print("No divergences found yet.")

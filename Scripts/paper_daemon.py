@@ -620,6 +620,7 @@ if __name__ == "__main__":
     parser.add_argument("--run_dir", type=str, default="runs/phase19_twin/STRICT")
     parser.add_argument("--min_adx", type=float, default=35.0)
     parser.add_argument("--max_exp_move_bps", type=float, default=80.0)
+    parser.add_argument("--max_risk_trade_pct", type=float, default=1.0, help="Max risk % per trade")
     parser.add_argument("--soft_defense_override", action="store_true", help="Allow defense mode triggers with reduced risk.")
     parser.add_argument("--min_risk_pct", type=float, default=0.1, help="Minimum risk %% floor per trade")
     parser.add_argument("--safe_paper", action="store_true", help="Enable safe paper mode (min risk floor + defense override)")
@@ -641,7 +642,9 @@ if __name__ == "__main__":
     cfg["min_adx"] = args.min_adx
     cfg["max_exp_move_bps"] = args.max_exp_move_bps
     cfg["soft_defense_override"] = args.soft_defense_override
-    cfg["min_risk_pct"] = args.min_risk_pct
+    # Convert percentages to fractions (1.0 -> 0.01)
+    cfg["max_risk_trade_pct"] = args.max_risk_trade_pct / 100.0
+    cfg["min_risk_pct"] = args.min_risk_pct / 100.0
     cfg["safe_paper"] = args.safe_paper
     if cfg["safe_paper"]:
         cfg["soft_defense_override"] = True # Implies override
@@ -674,6 +677,8 @@ if __name__ == "__main__":
     
     print(f"Starting PaperDaemon [{cfg['daemon_id']}]")
     print(f"  MinADX: {cfg['min_adx']}")
+    print(f"  MaxRisk: {cfg['max_risk_trade_pct']:.4f} (Min {cfg['min_risk_pct']:.4f})")
+    print(f"  SafePaper: {cfg['safe_paper']}")
     print(f"  RunDir: {cfg['run_dir']}")
     
     d = PaperDaemon(cfg)
