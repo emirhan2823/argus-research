@@ -26,6 +26,7 @@ from argus_py.broker.paper import PaperBroker, TradeFill
 from argus_py.data.reporting import Reporter
 from argus_py.data.market_state import Bar
 from argus_py.telemetry.schema import TelemetryEvent
+from argus_py.risk.kill_switch import KillSwitch, KillSwitchConfig, check_and_activate
 import argparse
 
 # --- CONFIGURATION (Adx35_Exp80) ---
@@ -100,6 +101,9 @@ class PaperDaemon:
             "consecutive_errors": 0,
             "start_time_iso": datetime.now().isoformat()
         }
+        self.consecutive_losses = 0
+        self.api_error_timestamps = deque(maxlen=2048)
+        self.api_errors_1h = 0
         
         # Ensure CSV Headers
         self._init_csvs()
@@ -117,6 +121,7 @@ class PaperDaemon:
         self.day_start_equity = initial_balance
         self.daily_stop_active = False
         self.kill_switch_active = False
+        self.kill_switch_state_file = self.run_dir / "kill_switch_state.json"
         
         # 3. Components
         self.reporter = Reporter(str(self.run_dir))
@@ -125,6 +130,11 @@ class PaperDaemon:
             mode="paper",
             reporter=self.reporter
         )
+        ks_cfg = KillSwitchConfig(
+            soft_daily_loss_pct=self.cfg["daily_loss_limit_pct"],
+            halt_dd_pct=self.cfg["kill_switch_dd_pct"]
+        )
+        self.kill_switch = KillSwitch.load_state(self.kill_switch_state_file, config=ks_cfg)
         
         # Inject Positions
         if "positions" in loaded_state:
@@ -222,6 +232,7 @@ class PaperDaemon:
                     "id": self.cfg["daemon_id"],
                     "min_adx": self.cfg["min_adx"]
                 },
+                "risk_level": self.kill_switch.get_level().value,
                 "health": {
                     "stale_seconds": 0, # Calculated by consumer
                     "last_error": self.health["last_error"],
@@ -249,6 +260,45 @@ class PaperDaemon:
             
         except Exception as e:
             print(f"Heartbeat Error: {e}")
+
+    def _refresh_api_error_count(self):
+        now = time.time()
+        self.api_errors_1h = sum(1 for ts in self.api_error_timestamps if (now - ts) <= 3600.0)
+
+    def _record_api_error(self):
+        self.api_error_timestamps.append(time.time())
+        self._refresh_api_error_count()
+
+    def _persist_kill_switch(self):
+        try:
+            self.kill_switch.save_state(self.run_dir / "kill_switch_state.json")
+        except Exception:
+            self.log_error("SAVE_KILL_SWITCH_FAILED")
+
+    def _apply_kill_switch_guard(self, bar: Bar, daily_pnl_pct: float, current_dd_pct: float) -> bool:
+        metrics = {
+            'daily_pnl_pct': daily_pnl_pct,
+            'total_dd_pct': current_dd_pct,
+            'consecutive_losses': self.consecutive_losses,
+            'api_errors_1h': self.api_errors_1h
+        }
+        level = check_and_activate(self.kill_switch, metrics)
+
+        if self.kill_switch.should_close_all() and self.broker.details:
+            close_map = {self.cfg["symbol"]: bar.close}
+            if hasattr(self.broker, "close_all"):
+                closed = self.broker.close_all(bar.timestamp, close_map)
+            else:
+                closed = self.broker.close_all_positions(bar.timestamp, close_map)
+            for fill in closed:
+                self.append_trade(fill)
+
+        if not self.kill_switch.can_trade():
+            self.append_reject(bar, "REJECT_KILL_SWITCH", f"Level: {level.value}")
+            self.reporter.log_reject(bar.timestamp, self.cfg["symbol"], "REJECT_KILL_SWITCH", f"Level: {level.value}")
+            self.kill_switch_active = level.value in {"HARD", "HALT"}
+            return True
+        return False
 
     def append_decision(self, bar, verdict, router_res, score, exp_move, adx):
         self.counters["decisions_total"] += 1
@@ -422,55 +472,54 @@ class PaperDaemon:
         self.save_state("loop_start")
         last_ts = self.history_bars[-1].timestamp
         
-        while True:
-            try:
-                # 1. Kill Switch
-                dd_pct = (1.0 - (self.broker.equity / self.cfg["start_balance"])) * 100.0
-                if dd_pct >= self.cfg["kill_switch_dd_pct"]:
-                    print(f"KILL SWITCH TRIGGERED. DD: {dd_pct:.2f}%")
-                    self.save_state("kill_switch")
-                    break
-
-                # 2. Fetch Data
-                klines = self.fetch_klines(limit=2)
-                if not klines:
-                    time.sleep(10)
-                    continue
-                
-                # Close Logic: index 0 is N-1 (Closed), index 1 is N (Open)
-                # Ensure we process closed bar
-                candidate_bar = klines[0]
-                
-                if candidate_bar.timestamp > last_ts:
-                    print(f"[{datetime.fromtimestamp(candidate_bar.timestamp)}] New Closed Bar: {candidate_bar.close}")
-                    self.process_bar(candidate_bar)
-                    if self.kill_switch_active:
-                        print("KILL SWITCH ACTIVATED IN BAR PROCESS.")
-                        self.save_state("kill_switch")
-                        break
-                    last_ts = candidate_bar.timestamp
-                    self.save_state("new_bar_processed")
+        try:
+            while True:
+                try:
+                    # 2. Fetch Data
+                    klines = self.fetch_klines(limit=2)
+                    if not klines:
+                        self._record_api_error()
+                        time.sleep(10)
+                        continue
+                    self._refresh_api_error_count()
                     
-                    # Heartbeat
-                    self.update_heartbeat(last_bar=candidate_bar)
-                    self.health["consecutive_errors"] = 0 # Reset health on success
+                    # Close Logic: index 0 is N-1 (Closed), index 1 is N (Open)
+                    # Ensure we process closed bar
+                    candidate_bar = klines[0]
                     
-                    with open(self.hb_log, "a") as f:
-                        entry = f"HEARTBEAT: {datetime.now().isoformat()} last_bar_ts={last_ts} equity={self.broker.equity:.2f} pos={len(self.broker.details)}\n"
-                        f.write(entry)
+                    if candidate_bar.timestamp > last_ts:
+                        print(f"[{datetime.fromtimestamp(candidate_bar.timestamp)}] New Closed Bar: {candidate_bar.close}")
+                        self.process_bar(candidate_bar)
+                        if self.kill_switch.should_disconnect():
+                            print("KILL SWITCH HALT ACTIVE. Stopping daemon loop.")
+                            self.save_state("kill_switch_halt")
+                            break
+                        last_ts = candidate_bar.timestamp
+                        self.save_state("new_bar_processed")
                         
-                time.sleep(5) 
-                # Refresh heartbeat even if no new bar (keep alive) - every 12 loops (approx 1 min) ?
-                # Or just every loop? cheap enough.
-                self.update_heartbeat(last_bar=None if not self.history_bars else self.history_bars[-1]) 
-                
-            except KeyboardInterrupt:
-                print("Stopping...")
-                self.save_state("shutdown")
-                break
-            except Exception:
-                self.log_error("RUN_LOOP_EXCEPTION")
-                time.sleep(10)
+                        # Heartbeat
+                        self.update_heartbeat(last_bar=candidate_bar)
+                        self.health["consecutive_errors"] = 0 # Reset health on success
+                        
+                        with open(self.hb_log, "a") as f:
+                            entry = f"HEARTBEAT: {datetime.now().isoformat()} last_bar_ts={last_ts} equity={self.broker.equity:.2f} pos={len(self.broker.details)}\n"
+                            f.write(entry)
+                            
+                    time.sleep(5) 
+                    # Refresh heartbeat even if no new bar (keep alive) - every 12 loops (approx 1 min) ?
+                    # Or just every loop? cheap enough.
+                    self.update_heartbeat(last_bar=None if not self.history_bars else self.history_bars[-1]) 
+                    
+                except KeyboardInterrupt:
+                    print("Stopping...")
+                    self.save_state("shutdown")
+                    break
+                except Exception:
+                    self.log_error("RUN_LOOP_EXCEPTION")
+                    self._record_api_error()
+                    time.sleep(10)
+        finally:
+            self._persist_kill_switch()
                 
     def process_bar(self, bar: Bar):
         self.counters["bars_seen"] += 1
@@ -494,6 +543,8 @@ class PaperDaemon:
         daily_dd_pct = 0.0
         if self.day_start_equity > 0:
             daily_dd_pct = ((self.day_start_equity - self.broker.equity) / self.day_start_equity) * 100.0
+        daily_pnl_pct = -daily_dd_pct
+        current_dd_pct = -total_dd_pct
         if daily_dd_pct >= self.cfg["daily_loss_limit_pct"]:
             self.daily_stop_active = True
         
@@ -599,6 +650,13 @@ class PaperDaemon:
         if exit_fill:
              print(f"CLOSE {exit_fill.side} @ {exit_fill.price:.2f} PnL:{exit_fill.pnl:.2f} ({exit_fill.event})")
              self.append_trade(exit_fill)
+             if exit_fill.pnl < 0:
+                 self.consecutive_losses += 1
+             elif exit_fill.pnl > 0:
+                 self.consecutive_losses = 0
+
+        if self._apply_kill_switch_guard(bar, daily_pnl_pct, current_dd_pct):
+            return
         
         if verdict.decision == "GO":
             print(f"ENTER_EXEC_BRANCH: decision={verdict.decision} direction={verdict.direction}")

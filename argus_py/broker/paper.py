@@ -337,6 +337,10 @@ class PaperBroker:
                 closed_trades.append(t_fill)
         return closed_trades
 
+    def close_all(self, timestamp: float, price_dict: Dict[str, float]) -> List[TradeFill]:
+        """Compatibility alias used by risk kill-switch integration."""
+        return self.close_all_positions(timestamp, price_dict)
+
     def _generate_stable_pid(self, symbol: str, timestamp: float, direction: str, price: float, unique_seq: int) -> str:
         """
         Generates a deterministic 8-char PositionID based on entry details + sequence counter.
