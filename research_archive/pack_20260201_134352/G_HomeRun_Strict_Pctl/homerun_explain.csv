@@ -1,2 +1,0 @@
-timestamp,dt,score,threshold,conviction,regime,slope_net,adx,rationale,direction,expected_move_bps,slip_bps,spread_bps
-1704283260.0,2024-01-03 15:01:00,30.60552270087046,27.554561622172603,66.66666666666666,TREND,-138.77245815138303,69.04999798513207,Regime: TREND (Orion 2x). Score: -0.67. Bearish Consensus.,SELL,0,5.0,5.0

@@ -1,2 +1,0 @@
-Scenario,PositionId,EntryTs,ExitTs,Direction,EntryPrice,ExitPrice,ExpMove,Cost,Realized,Net,Slope,ADX,Regime,Score,SafetyFactor
-B_HeavyRealism,2bcf8dab,1704283740.0,1704283860.0,SELL,40847.102009999995,41705.70809425019,,20.0,-210.19999999999942,-230.19999999999942,-226.678039,75.83,TREND,,
