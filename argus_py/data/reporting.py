@@ -57,6 +57,8 @@ class Reporter:
             
             # Extract Metadata
             meta = verdict.metadata
+            if "effective_leverage" in meta:
+                lev_str = f"{meta.get('effective_leverage', 1.0):.1f}"
             block_reason = meta.get("block_reason", "N/A")
             slope = f"{meta.get('slope', 0.0):.6f}"
             zone = meta.get("zone", "N/A")
@@ -193,11 +195,13 @@ class Reporter:
         
         # Max Drawdown
         high_water = 0.0
-        max_dd = 0.0
+        max_dd_raw = 0.0
         for s in equity_curve:
             if s.equity > high_water: high_water = s.equity
-            dd = (high_water - s.equity) / high_water if high_water > 0 else 0
-            if dd > max_dd: max_dd = dd
+            dd_raw = (high_water - s.equity) / high_water if high_water > 0 else 0.0
+            if dd_raw > max_dd_raw: max_dd_raw = dd_raw
+        # Report capped DD for readability, keep raw value for diagnostics.
+        max_dd = min(1.0, max_dd_raw)
             
         # Win Rate / Profit Factor
         # Filter only CLOSE trades for PnL
@@ -219,6 +223,7 @@ class Reporter:
             "final_equity": final_equity,
             "total_return_pct": total_ret_pct,
             "max_drawdown_pct": max_dd * 100.0,
+            "max_drawdown_raw_pct": max_dd_raw * 100.0,
             "total_trades": len(closed_trades),
             "win_rate": win_rate,
             "profit_factor": profit_factor,

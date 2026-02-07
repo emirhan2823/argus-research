@@ -31,7 +31,7 @@ class CapitalEngine:
                 profile=CapitalProfileType.SMALL,
                 max_risk_per_trade=0.02,
                 max_daily_loss=0.04,
-                leverage_cap=3.0, # Allow up to 3x for DEGEN testing on small accounts
+                leverage_cap=1.0, # Small accounts: 1x to avoid notional cap conflicts
                 council_threshold=0.5, # Higher conviction needed
                 description="Survival Mode. Lev 1x. Focus on Compounding."
             )

@@ -271,17 +271,21 @@ class PaperBroker:
             # Risk % = Actual Risk / Equity
             actual_risk_val = qty * price_dist
             max_risk_pct_cap = self.realism.get("max_risk_per_trade_pct", 1.0) / 100.0
+            actual_risk_ratio = (actual_risk_val / self.equity) if self.equity > 0 else 0.0
+            # Tolerate tiny floating-point drift at the cap boundary (e.g. 1.0000000002%).
+            eps = 1e-9
             
-            if (actual_risk_val / self.equity) > max_risk_pct_cap:
+            if (actual_risk_ratio - max_risk_pct_cap) > eps:
                 # Should we resize or reject? Prompt says "REJECT et"
                 # "Eğer position açma, bu guardrail’leri ihlal ediyorsa trade’i REJECT et"
-                return (False, f"REJECT_RISK_CAP: Risk {actual_risk_val/self.equity*100:.2f}% > {max_risk_pct_cap*100:.2f}%")
+                return (False, f"REJECT_RISK_CAP: Risk {actual_risk_ratio*100:.2f}% > {max_risk_pct_cap*100:.2f}%")
 
             # 2. Notional Cap
             notional = qty * exec_price
             max_notional_pct = self.realism.get("max_notional_pct_of_equity", 100.0) / 100.0
-            if (notional / self.equity) > max_notional_pct:
-                 return (False, f"REJECT_NOTIONAL_CAP: Notional {notional/self.equity*100:.2f}% > {max_notional_pct*100:.2f}%")
+            notional_ratio = (notional / self.equity) if self.equity > 0 else 0.0
+            if (notional_ratio - max_notional_pct) > eps:
+                 return (False, f"REJECT_NOTIONAL_CAP: Notional {notional_ratio*100:.2f}% > {max_notional_pct*100:.2f}%")
 
             # 3. Liquidation Safety Margin
             # Liq Price approx: Entry * (1 - 1/Lev) for Long, Entry * (1 + 1/Lev) for Short (Isolated)

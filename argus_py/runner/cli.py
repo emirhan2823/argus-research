@@ -5,8 +5,8 @@ import csv
 import json
 import numpy as np
 from datetime import datetime
-from argus_py.data.loader import DataLoader
 from argus_py.data.binance_downloader import BinanceDownloader
+from argus_py.adapters import MarketLoadRequest, build_market_adapter
 from argus_py.models.aegean.aegean import AegeanEngine
 from argus_py.models.orion.orion import OrionEngine
 from argus_py.council.aggregator import Council
@@ -20,9 +20,9 @@ from argus_py.strategy.router import ModeRouter
 # Phase P2.8 Modules
 from argus_py.risk.capital_engine import CapitalEngine
 from argus_py.risk.performance_guard import PerformanceGuard
+from argus_py.portfolio.allocator import PortfolioAllocatorV1
 from argus_py.reporting.capital_report import save_capital_log
-from argus_py.lab.plot_report import generate_plots
-from argus_py.reporting.run_report import generate_report
+from argus_py.signals.external import ExternalSignalProvider
 
 def run(args):
     print(f"--- Argus Phase C: {args.symbol} (${args.start_balance}) Mode:{args.mode} ---")
@@ -42,7 +42,8 @@ def run(args):
         "vol_trap_thresh": getattr(args, 'vol_trap_threshold', 0.0),
         "vol_trap_v2": getattr(args, 'vol_trap_v2', False),
         "mode": args.mode,
-        "router_enabled": True # Implicit in Phase C
+        "router_enabled": True, # Implicit in Phase C
+        "portfolio_allocator_v1": getattr(args, "portfolio_allocator_v1", False),
     }
     print(f"EFFECTIVE_CONFIG: {json.dumps(eff_config)}")
 
@@ -60,37 +61,20 @@ def run(args):
             return # EXIT after download (Mega Prompt)
             
         max_bars = getattr(args, 'max_bars', None)
-        # Use strict matching if verify_data is set or just generally for this pipeline
-        # Actually, let's always default to False for backward compat, but if running the pipeline script we might want it.
-        # User prompt: "CLI backtest çağrısında strict_symbol=True kullan."
-        # We can key off --verify_data OR just force it.
-        # Let's add strict flag or just change default? No, `load_from_dir` default is False.
-        # Let's infer strictness if `start_date` and `end_date` are set? No.
-        # Let's pass it always as True? No, might break other workflows.
-        # Let's just use verify_data or a new flag?
-        # Check params: prompt didn't strictly say "add --strict flag".
-        # It said: "CLI backtest çağrısında strict_symbol=True kullan."
-        # I will infer strict if symbol and dates are provided? 
-        # Actually, let's just make it simpler: enable it by default if user supplied symbol explicitly.
-        # Wait, previous behavior was loose.
-        # I'll pass strict_symbol=True.
-        # 0. Cache Priority Loading
-        # Try to find specific cached range file: {SYMBOL}_1m_{START}_{END}.csv
-        cache_loaded = False
-        if args.start_date and args.end_date:
-            cache_file = f"{args.symbol}_1m_{args.start_date}_{args.end_date}.csv"
-            cache_path = os.path.join(args.data_dir, cache_file)
-            if os.path.exists(cache_path):
-                 if not getattr(args, 'quiet', False):
-                     print(f"Loading Cached Range: {cache_path}")
-                 bars = DataLoader.load_csv(cache_path)
-                 from argus_py.data.market_state import MarketState
-                 # Use first filename as source
-                 market = MarketState(bars, source_files=[cache_file], symbol_requested=args.symbol, symbol_resolved=args.symbol)
-                 cache_loaded = True
+        market_adapter = build_market_adapter(args.asset_class, args.market_adapter)
+        if not getattr(args, 'quiet', False):
+            print(f"MarketAdapter: {market_adapter.name} ({args.asset_class})")
 
-        if not cache_loaded:
-            market = DataLoader.load_from_dir(args.data_dir, max_bars=max_bars, symbol=args.symbol, strict_symbol=True)
+        market = market_adapter.load_market(
+            MarketLoadRequest(
+                data_dir=args.data_dir,
+                symbol=args.symbol,
+                start_date=args.start_date,
+                end_date=args.end_date,
+                max_bars=max_bars,
+                strict_symbol=True,
+            )
+        )
         
         # Observability
         min_close = min([b.close for b in market._all_bars]) if market._all_bars else 0
@@ -101,7 +85,8 @@ def run(args):
         
         # Preflight Guard: Range Coverage
         # Ensure loaded data covers requested range (within tolerance)
-        if args.start_date and args.end_date and market._all_bars:
+        # If max_bars is used, partial-range datasets are expected; skip strict coverage guard.
+        if args.start_date and args.end_date and market._all_bars and not getattr(args, "max_bars", None):
              req_s_ts = time.mktime(datetime.strptime(args.start_date, "%Y-%m-%d").timetuple())
              req_e_ts = time.mktime(datetime.strptime(args.end_date, "%Y-%m-%d").timetuple())
              
@@ -181,12 +166,35 @@ def run(args):
     mode_engine = ModeEngine(max_daily_dd_pct=0.04, max_total_dd_pct=0.10, profile_override=args.profile) 
     capital_engine = CapitalEngine()
     perf_guard = PerformanceGuard()
+    portfolio_allocator = None
+    if getattr(args, "portfolio_allocator_v1", False):
+        portfolio_allocator = PortfolioAllocatorV1(
+            risk_budget_pct=args.portfolio_risk_budget_pct,
+            max_asset_exposure_pct=args.portfolio_max_asset_exposure_pct,
+            assumed_stop_loss_pct=args.portfolio_assumed_stop_loss_pct,
+        )
     
     use_auto_capital = getattr(args, 'auto_capital_mode', True)
     forced_cap_profile = getattr(args, 'capital_profile', None)
 
     reporter = Reporter()
     reporter.save_config(args)
+
+    external_signal_provider = None
+    if getattr(args, "external_signal_file", ""):
+        try:
+            external_signal_provider = ExternalSignalProvider.from_csv(
+                args.external_signal_file,
+                symbol=args.symbol,
+            )
+            if not getattr(args, "quiet", False):
+                print(
+                    f"ExternalSignals: loaded={external_signal_provider.size} "
+                    f"file={args.external_signal_file}"
+                )
+        except Exception as e:
+            print(f"WARNING: external signal file could not be loaded: {e}")
+            external_signal_provider = None
 
     # Realism Config
     realism_config = {
@@ -215,6 +223,10 @@ def run(args):
     market.set_time(0)
     
     metrics = []
+    # Seed equity curve so single-bar windows still produce summary artifacts.
+    seed_bar = market.latest_bar
+    broker.mark_to_market(args.symbol, seed_bar.close)
+    metrics.append(broker.get_state(seed_bar.timestamp, snapshot_type="BAR"))
     capital_log = []
     
     # Signal Stats
@@ -247,6 +259,13 @@ def run(args):
         print(f"WARNING: Warmup insufficient ({len(market._all_bars)}/{MIN_WARMUP})")
         print("         Expect NO_GO signals due to indicator warmup lock.")
 
+    # Hard-stop state (daily + total DD)
+    current_day = None
+    daily_start_equity = args.start_balance
+    daily_halt_day = None
+    equity_hwm = args.start_balance
+    hard_total_stop = False
+
     while market.can_advance:
         market.advance()
         bars_processed += 1
@@ -257,6 +276,27 @@ def run(args):
         # A. Update State
         broker.mark_to_market(args.symbol, current_bar.close)
         current_equity = broker.equity
+        equity_hwm = max(equity_hwm, current_equity)
+
+        bar_day = current_bar.dt.date()
+        if current_day is None or bar_day != current_day:
+            current_day = bar_day
+            daily_start_equity = current_equity
+            daily_halt_day = None
+
+        daily_loss_pct = 0.0
+        if daily_start_equity > 0:
+            daily_loss_pct = ((daily_start_equity - current_equity) / daily_start_equity) * 100.0
+
+        total_dd_pct = 0.0
+        if equity_hwm > 0:
+            total_dd_pct = ((equity_hwm - current_equity) / equity_hwm) * 100.0
+
+        if total_dd_pct >= args.hard_stop_total_dd_pct:
+            hard_total_stop = True
+        if daily_loss_pct >= args.hard_stop_daily_loss_pct:
+            daily_halt_day = current_day
+
         perf_guard.update(current_equity, broker.trades)
         safety_report = perf_guard.get_safety_report()
         
@@ -296,6 +336,37 @@ def run(args):
             threshold=effective_threshold,
             chop_floor=args.chop_floor
         )
+
+        # Optional external overlay (news + trader signals).
+        if external_signal_provider is not None:
+            ext = external_signal_provider.latest_for(
+                bar_ts=current_bar.timestamp,
+                max_age_sec=int(max(0, args.external_signal_max_age_min * 60)),
+            )
+            if ext is not None:
+                verdict.metadata["external_signal_source"] = ext.source
+                verdict.metadata["external_signal_direction"] = ext.direction
+                verdict.metadata["external_signal_confidence"] = ext.confidence
+                if verdict.decision == "GO" and ext.direction in {"BUY", "SELL"}:
+                    if ext.direction == verdict.direction:
+                        boost = args.external_signal_conviction_boost * ext.confidence
+                        verdict.conviction = min(1.0, verdict.conviction + boost)
+                        verdict.metadata["external_signal_effect"] = "BOOST"
+                    else:
+                        verdict.metadata["external_signal_effect"] = "OPPOSED"
+                        if (
+                            args.external_signal_enforce_alignment
+                            and ext.confidence >= args.external_signal_block_confidence
+                        ):
+                            verdict.decision = "BLOCK"
+                            verdict.metadata["block_reason"] = "EXTERNAL_SIGNAL_CONFLICT"
+                            reporter.log_reject(
+                                current_bar.timestamp,
+                                args.symbol,
+                                "EXTERNAL_SIGNAL_CONFLICT",
+                                f"model={verdict.direction} ext={ext.direction} "
+                                f"conf={ext.confidence:.2f} src={ext.source}",
+                            )
         
         # D. MRIE Update (Passive)
         _atr = or_vote.metadata.get('atr', 0.0)
@@ -341,7 +412,7 @@ def run(args):
         # D. Mode Update
         mode_snap = mode_engine.update(
             equity=broker.equity, 
-            daily_start_equity=args.start_balance, 
+            daily_start_equity=daily_start_equity, 
             trades=broker.trades,
             regime=regime,
             conviction=verdict.conviction
@@ -480,13 +551,22 @@ def run(args):
                  'min_adx_pass': 1,
                  'max_exp_pass': 1,
                  'vol_trap_pass': 1,
+                 'portfolio_pass': 1,
                  'blocked_reason': "N/A"
              }
              verdict.metadata['gates'] = gates
              
              # --- FILTER LOGIC (Applied to Verdict directly) ---
              if verdict.decision == "GO":
-                 if is_lockdown:
+                 if hard_total_stop:
+                     verdict.decision = "BLOCK"
+                     gates['blocked_reason'] = "HARD_STOP_TOTAL_DD"
+                     reporter.log_reject(current_bar.timestamp, args.symbol, "HARD_STOP_TOTAL_DD", f"DD {total_dd_pct:.2f}% >= {args.hard_stop_total_dd_pct:.2f}%")
+                 elif daily_halt_day == current_day:
+                     verdict.decision = "BLOCK"
+                     gates['blocked_reason'] = "HARD_STOP_DAILY_LOSS"
+                     reporter.log_reject(current_bar.timestamp, args.symbol, "HARD_STOP_DAILY_LOSS", f"DailyLoss {daily_loss_pct:.2f}% >= {args.hard_stop_daily_loss_pct:.2f}%")
+                 elif is_lockdown:
                      verdict.decision = "BLOCK"
                      gates['blocked_reason'] = "LOCKDOWN"
                      reporter.log_reject(current_bar.timestamp, args.symbol, "LOCKDOWN", safety_report['status'])
@@ -497,8 +577,41 @@ def run(args):
                          gates['blocked_reason'] = "ROUTER_DEFENSE"
                          reporter.log_reject(current_bar.timestamp, args.symbol, "ROUTER_DEFENSE", "Risk=0.0")
 
-                     final_risk = effective_max_risk * mode_snap.risk_multiplier * r_risk_mult
+                     # Keep execution risk aligned with broker hard cap to avoid false REJECT_RISK_CAP.
+                     final_risk_raw = effective_max_risk * mode_snap.risk_multiplier * r_risk_mult
+                     broker_risk_cap = max(0.0, args.max_risk_per_trade_pct / 100.0)
+                     final_risk = min(final_risk_raw, broker_risk_cap) if broker_risk_cap > 0 else final_risk_raw
                      effective_leverage = min(mode_snap.leverage_allowed, effective_lev_cap)
+
+                     # Portfolio allocator v1: risk budget + max asset exposure clamp.
+                     if portfolio_allocator is not None:
+                         current_asset_exposure_pct = 0.0
+                         if args.symbol in broker.details and current_equity > 0:
+                             pos = broker.details[args.symbol]
+                             current_asset_exposure_pct = abs(pos.quantity * current_bar.close / current_equity) * 100.0
+
+                         alloc = portfolio_allocator.allocate_single_asset(
+                             requested_risk_pct=final_risk,
+                             current_asset_exposure_pct=current_asset_exposure_pct,
+                         )
+                         final_risk = alloc.allowed_risk_pct / 100.0
+                         verdict.metadata["portfolio_alloc_reason"] = alloc.reason
+                         verdict.metadata["portfolio_requested_risk_pct"] = alloc.requested_risk_pct
+                         verdict.metadata["portfolio_allowed_risk_pct"] = alloc.allowed_risk_pct
+                         verdict.metadata["portfolio_implied_exposure_pct"] = alloc.implied_asset_exposure_pct
+                         if alloc.blocked:
+                             verdict.decision = "BLOCK"
+                             gates['portfolio_pass'] = 0
+                             gates['blocked_reason'] = "PORTFOLIO_BUDGET"
+                             reporter.log_reject(
+                                 current_bar.timestamp,
+                                 args.symbol,
+                                 "PORTFOLIO_BUDGET",
+                                 f"{alloc.reason}: ReqRisk {alloc.requested_risk_pct:.2f}% -> Allow {alloc.allowed_risk_pct:.2f}%",
+                             )
+
+                     verdict.metadata["effective_risk_pct"] = final_risk * 100.0
+                     verdict.metadata["effective_leverage"] = effective_leverage
                      
                      # 1. Min ADX Filter (V5 AdxGate)
                      base_min_adx = getattr(args, 'min_adx', 0.0)
@@ -567,6 +680,7 @@ def run(args):
              
              # Continue if Blocked
              if verdict.decision != "GO":
+                 metrics.append(broker.get_state(current_bar.timestamp, snapshot_type="BAR"))
                  continue
                      
              # Edge Filter (Diagnose & Home Run)
@@ -624,6 +738,7 @@ def run(args):
                      metrics_str = f"Exp:{expected_move:.1f} (Sl:{slope_bps_abs:.1f}/ATR:{atr_bps:.1f}) < Cost:{total_cost_bps:.1f}*{cost_safety_used:.1f} Score:{edge_score:.1f}"
                      reporter.log_reject(current_bar.timestamp, args.symbol, "REJECT_EDGE_COST", metrics_str, meta=f"{edge_score:.1f}")
                      reporter.log_decision(verdict, mode_process=mode_snap, capital_profile=cap_prof_str)
+                     metrics.append(broker.get_state(current_bar.timestamp, snapshot_type="BAR"))
                      continue
 
                  # --- 2. Score Filter (Legacy/HomeRun) ---
@@ -640,6 +755,7 @@ def run(args):
                          gates['blocked_reason'] = "LOW_SCORE"
                          reporter.log_reject(current_bar.timestamp, args.symbol, "REJECT_EDGE_TOO_LOW", f"Score {edge_score:.1f} < {req_threshold:.1f} {stats_ctx}")
                          reporter.log_decision(verdict, mode_process=mode_snap, capital_profile=cap_prof_str)
+                         metrics.append(broker.get_state(current_bar.timestamp, snapshot_type="BAR"))
                          continue
              
              success, reason = broker.execute_strategy(
@@ -672,6 +788,11 @@ def run(args):
                  
                  # Explainability Log (HomeRun)
                  if (min_edge > 0 or min_edge_mult > 0):
+                     # Use the effective safety factor already computed for this verdict.
+                     safety_factor_for_log = verdict.metadata.get(
+                         "safety_factor",
+                         getattr(args, "cost_safety_factor", 2.0),
+                     )
                      explanation = {
                          "timestamp": current_bar.timestamp,
                          "dt": str(current_bar.dt),
@@ -688,7 +809,7 @@ def run(args):
                          "slip_bps": args.slippage_bps,
                          "spread_bps": args.spread_bps,
                          "fee_bps": args.fee_bps,
-                         "safety_factor": adaptive_safety if getattr(args, 'adaptive_cost_safety', False) else getattr(args, 'cost_safety_factor', 2.0)
+                         "safety_factor": safety_factor_for_log,
                      }
                      trade_explanations.append(explanation)
              else:
@@ -738,6 +859,9 @@ def run(args):
     # Generate Reports
     if getattr(args, 'report', False):
         print("Generating reports...")
+        # Lazy imports: avoid heavy matplotlib/pandas startup in no_report runs.
+        from argus_py.lab.plot_report import generate_plots
+        from argus_py.reporting.run_report import generate_report
         
         # Save Score Stats
         # Save Score Stats (Enhanced)
@@ -795,6 +919,8 @@ if __name__ == "__main__":
     parser.add_argument("--mode", default="backtest", help="backtest, paper, adaptive, conservative")
     parser.add_argument("--symbol", default="BTCUSDT")
     parser.add_argument("--data_dir", required=False, default="argus_py/data", help="Data directory (default: argus_py/data)")
+    parser.add_argument("--asset_class", default="crypto", choices=["crypto", "us_equity", "bist"], help="Asset class for market adapter routing")
+    parser.add_argument("--market_adapter", default="auto", choices=["auto", "crypto_csv", "us_equity_stub", "bist_stub"], help="Explicit market adapter override")
     parser.add_argument("--start_balance", type=float, default=1000.0)
     
     # Adaptive Flags
@@ -811,6 +937,8 @@ if __name__ == "__main__":
     
     parser.add_argument("--exit_policy", default="FIXED_BRACKET", help="FIXED_BRACKET, TRAILING_STOP, TIME_STOP")
     parser.add_argument("--cooldown_bars", type=int, default=3, help="Bars to wait after trade")
+    parser.add_argument("--hard_stop_daily_loss_pct", type=float, default=3.0, help="Hard stop for daily loss %% (blocks new entries for rest of day)")
+    parser.add_argument("--hard_stop_total_dd_pct", type=float, default=15.0, help="Hard stop for total drawdown %% (blocks all new entries)")
     
     # Capital Args (P2.8)
     parser.add_argument("--auto_capital_mode", action="store_true", default=True, help="Enable Capital Engine")
@@ -829,6 +957,7 @@ if __name__ == "__main__":
     # Phase P4 Args
     parser.add_argument("--max_bars", type=int, help="Limit number of bars loaded (tail)")
     parser.add_argument("--report", action="store_true", default=True, help="Generate plot and markdown report")
+    parser.add_argument("--no_report", action="store_true", help="Skip plot and markdown report generation")
     parser.add_argument("--lab_grid", action="store_true", help="Run batch grid experiments")
 
     # Realism Toggles (Mega Prompt)
@@ -839,9 +968,18 @@ if __name__ == "__main__":
     parser.add_argument("--use_bid_ask", action="store_true", help="Simulate Bid/Ask spread logic")
     
     # Position Sizing Guardrails
-    parser.add_argument("--max_risk_per_trade_pct", type=float, default=1.0, help="Max risk per trade %% of equity")
+    parser.add_argument("--max_risk_per_trade_pct", type=float, default=1.0, help="Hard risk cap %% of equity (final risk is clamped to this)")
     parser.add_argument("--max_notional_pct_of_equity", type=float, default=100.0, help="Max total notional %% of equity")
     parser.add_argument("--liq_safety_margin_pct", type=float, default=20.0, help="Liquidation safety margin %%")
+    parser.add_argument("--portfolio_allocator_v1", action="store_true", help="Enable portfolio allocator v1 (risk budget + exposure cap)")
+    parser.add_argument("--portfolio_risk_budget_pct", type=float, default=1.0, help="Portfolio risk budget per trade %%")
+    parser.add_argument("--portfolio_max_asset_exposure_pct", type=float, default=35.0, help="Max per-asset exposure %% of equity")
+    parser.add_argument("--portfolio_assumed_stop_loss_pct", type=float, default=2.0, help="Assumed stop distance %% for exposure->risk mapping")
+    parser.add_argument("--external_signal_file", type=str, default="", help="CSV file for external signals (news/trader)")
+    parser.add_argument("--external_signal_max_age_min", type=float, default=240.0, help="Max external signal age in minutes")
+    parser.add_argument("--external_signal_conviction_boost", type=float, default=0.20, help="Conviction boost multiplier when aligned")
+    parser.add_argument("--external_signal_block_confidence", type=float, default=0.75, help="Conflict confidence threshold for blocking")
+    parser.add_argument("--external_signal_enforce_alignment", action="store_true", help="Block GO decisions when high-confidence external signal disagrees")
     
     # Trade Filtering (Diagnostics)
     parser.add_argument("--min_expected_move_bps", type=float, default=0.0, help="Min expected move score (bps)")
@@ -866,6 +1004,8 @@ if __name__ == "__main__":
     parser.add_argument("--min_adx", type=float, default=None, help="Reject signals if ADX < N (Weak Trend) (Default: Disabled)")
 
     args = parser.parse_args()
+    if getattr(args, "no_report", False):
+        args.report = False
     
     if args.lab_grid:
         from argus_py.lab.batch_run import run_grid
@@ -873,4 +1013,3 @@ if __name__ == "__main__":
     else:
         args.close_at_end = str(args.close_at_end).lower() == "true"
         run(args)
-

@@ -56,6 +56,9 @@ DEFAULT_CONFIG = {
     "max_risk_trade_pct": 1.0,
     "daily_loss_limit_pct": 3.0,
     "kill_switch_dd_pct": 8.0,
+    "soft_defense_override": False,
+    "min_risk_pct": 0.1,
+    "safe_paper": False,
     
     # Config Objects Mock (Will be populated in main)
     "args": None
@@ -110,6 +113,10 @@ class PaperDaemon:
         # 2. Load State
         loaded_state = self.load_state()
         initial_balance = loaded_state.get("balance", self.cfg["start_balance"])
+        self.current_day = None
+        self.day_start_equity = initial_balance
+        self.daily_stop_active = False
+        self.kill_switch_active = False
         
         # 3. Components
         self.reporter = Reporter(str(self.run_dir))
@@ -437,6 +444,10 @@ class PaperDaemon:
                 if candidate_bar.timestamp > last_ts:
                     print(f"[{datetime.fromtimestamp(candidate_bar.timestamp)}] New Closed Bar: {candidate_bar.close}")
                     self.process_bar(candidate_bar)
+                    if self.kill_switch_active:
+                        print("KILL SWITCH ACTIVATED IN BAR PROCESS.")
+                        self.save_state("kill_switch")
+                        break
                     last_ts = candidate_bar.timestamp
                     self.save_state("new_bar_processed")
                     
@@ -469,6 +480,22 @@ class PaperDaemon:
         
         args = self.cfg["args"]
         history = self.history_bars
+
+        # Mark equity on current close before risk gates.
+        self.broker.mark_to_market(self.cfg["symbol"], bar.close)
+        total_dd_pct = (1.0 - (self.broker.equity / self.cfg["start_balance"])) * 100.0
+
+        bar_day = datetime.fromtimestamp(bar.timestamp).date()
+        if self.current_day is None or bar_day != self.current_day:
+            self.current_day = bar_day
+            self.day_start_equity = self.broker.equity
+            self.daily_stop_active = False
+
+        daily_dd_pct = 0.0
+        if self.day_start_equity > 0:
+            daily_dd_pct = ((self.day_start_equity - self.broker.equity) / self.day_start_equity) * 100.0
+        if daily_dd_pct >= self.cfg["daily_loss_limit_pct"]:
+            self.daily_stop_active = True
         
         # 1. Indicators
         regime = self.regime_detector.detect(history)
@@ -522,8 +549,8 @@ class PaperDaemon:
         r_risk_mult = 1.0
         r_risk_mult = 1.0
         if router_res['policy'] == "caution_v5": r_risk_mult = 0.7
-        elif router_res['policy'] == "defense_flat": 
-            if self.cfg["soft_defense_override"]:
+        elif router_res['policy'] == "defense_flat":
+            if self.cfg.get("soft_defense_override", False):
                 r_risk_mult = 0.2
             else:
                 r_risk_mult = 0.0
@@ -549,13 +576,24 @@ class PaperDaemon:
             verdict.decision = "BLOCK"
             self.reporter.log_reject(bar.timestamp, self.cfg["symbol"], "MAX_EXP", f"Exp {em_check:.1f} > {max_exp}")
             self.append_reject(bar, "MAX_EXP", f"Exp {em_check:.1f} > {max_exp}")
+
+        if verdict.decision == "GO" and self.daily_stop_active:
+            verdict.decision = "BLOCK"
+            detail = f"DailyDD {daily_dd_pct:.2f}% >= {self.cfg['daily_loss_limit_pct']:.2f}%"
+            self.reporter.log_reject(bar.timestamp, self.cfg["symbol"], "DAILY_STOP", detail)
+            self.append_reject(bar, "DAILY_STOP", detail)
+
+        if verdict.decision == "GO" and total_dd_pct >= self.cfg["kill_switch_dd_pct"]:
+            verdict.decision = "BLOCK"
+            detail = f"DD {total_dd_pct:.2f}% >= {self.cfg['kill_switch_dd_pct']:.2f}%"
+            self.reporter.log_reject(bar.timestamp, self.cfg["symbol"], "KILL_SWITCH_DD", detail)
+            self.append_reject(bar, "KILL_SWITCH_DD", detail)
+            self.kill_switch_active = True
             
         # Log Decision
         self.append_decision(bar, verdict, router_res, edge_score if verdict.decision=="GO" else 0.0, em_check, adx_m)
             
         # 5. Execution
-        self.broker.mark_to_market(self.cfg["symbol"], bar.close)
-        
         # Check Exits (Brackets)
         exit_fill = self.broker.check_brackets(self.cfg["symbol"], bar.high, bar.low, bar.timestamp)
         if exit_fill:
@@ -621,6 +659,8 @@ if __name__ == "__main__":
     parser.add_argument("--min_adx", type=float, default=35.0)
     parser.add_argument("--max_exp_move_bps", type=float, default=80.0)
     parser.add_argument("--max_risk_trade_pct", type=float, default=1.0, help="Max risk % per trade")
+    parser.add_argument("--daily_loss_limit_pct", type=float, default=3.0, help="Daily loss hard stop %%")
+    parser.add_argument("--kill_switch_dd_pct", type=float, default=15.0, help="Total drawdown kill switch %%")
     parser.add_argument("--soft_defense_override", action="store_true", help="Allow defense mode triggers with reduced risk.")
     parser.add_argument("--min_risk_pct", type=float, default=0.1, help="Minimum risk %% floor per trade")
     parser.add_argument("--safe_paper", action="store_true", help="Enable safe paper mode (min risk floor + defense override)")
@@ -641,6 +681,8 @@ if __name__ == "__main__":
     cfg["min_adx"] = args.min_adx
     cfg["min_adx"] = args.min_adx
     cfg["max_exp_move_bps"] = args.max_exp_move_bps
+    cfg["daily_loss_limit_pct"] = args.daily_loss_limit_pct
+    cfg["kill_switch_dd_pct"] = args.kill_switch_dd_pct
     cfg["soft_defense_override"] = args.soft_defense_override
     # Convert percentages to fractions (1.0 -> 0.01)
     cfg["max_risk_trade_pct"] = args.max_risk_trade_pct / 100.0
@@ -678,6 +720,7 @@ if __name__ == "__main__":
     print(f"Starting PaperDaemon [{cfg['daemon_id']}]")
     print(f"  MinADX: {cfg['min_adx']}")
     print(f"  MaxRisk: {cfg['max_risk_trade_pct']:.4f} (Min {cfg['min_risk_pct']:.4f})")
+    print(f"  DailyStop: {cfg['daily_loss_limit_pct']:.2f}% | KillSwitchDD: {cfg['kill_switch_dd_pct']:.2f}%")
     print(f"  SafePaper: {cfg['safe_paper']}")
     print(f"  RunDir: {cfg['run_dir']}")
     
