@@ -1574,6 +1574,829 @@ print(f'Exit: {signal.action}, Reason: {signal.reason}')
 
 ---
 
+# PHASE 21: Infrastructure & Quality (Weeks 7-12)
+
+---
+
+## P21-001: Walk-Forward Enhancements
+
+**Assign to:** Codex  
+**Priority:** P1  
+**Estimated:** 6 hours
+
+### Objective
+Make walk-forward backtest robust: no NO_DATA errors, proper windowing, 12-month baseline.
+
+### Current State
+```python
+# argus_py/lab/walk_forward.py exists but has issues:
+# - Some windows fail with NO_DATA
+# - Windowing logic not clear
+# - No proper result aggregation
+```
+
+### Contract
+
+**File:** `argus_py/lab/walk_forward.py` (ENHANCE)
+
+```python
+from dataclasses import dataclass
+from typing import List, Optional, Tuple
+from datetime import date, timedelta
+import pandas as pd
+from pathlib import Path
+
+@dataclass
+class WFWindow:
+    start: date
+    end: date
+    train_start: date
+    train_end: date
+    test_start: date
+    test_end: date
+    
+@dataclass
+class WFResult:
+    window: WFWindow
+    train_trades: int
+    test_trades: int
+    train_sharpe: float
+    test_sharpe: float
+    test_pnl: float
+    test_dd: float
+    test_wr: float
+
+@dataclass
+class WFReport:
+    windows: List[WFResult]
+    aggregate_sharpe: float
+    aggregate_pnl: float
+    aggregate_dd: float
+    no_data_windows: List[int]  # Should be empty
+
+class WalkForwardEngine:
+    """Walk-forward optimization engine with proper error handling."""
+    
+    def __init__(self, data_path: Path, output_dir: Path):
+        self.data_path = data_path
+        self.output_dir = output_dir
+    
+    def create_windows(
+        self,
+        start_date: date,
+        end_date: date,
+        train_months: int = 6,
+        test_months: int = 1,
+        step_months: int = 1
+    ) -> List[WFWindow]:
+        """
+        Create non-overlapping test windows with rolling training.
+        
+        Args:
+            start_date: Overall start
+            end_date: Overall end
+            train_months: Training window size
+            test_months: Test window size
+            step_months: Step between windows
+        
+        Returns:
+            List of WFWindow objects
+        """
+        ...
+    
+    def validate_data(self, window: WFWindow) -> Tuple[bool, str]:
+        """
+        Check if sufficient data exists for window.
+        
+        Returns:
+            (is_valid, error_message)
+        """
+        ...
+    
+    def run_window(self, window: WFWindow) -> WFResult:
+        """
+        Run single window: train, then test.
+        
+        Raises:
+            ValueError: If data validation fails
+        """
+        ...
+    
+    def run_full(
+        self,
+        start_date: date,
+        end_date: date,
+        symbols: List[str] = ["BTCUSDT"],
+        skip_invalid: bool = True
+    ) -> WFReport:
+        """
+        Run full walk-forward simulation.
+        
+        Args:
+            skip_invalid: If True, skip windows with no data instead of failing
+        
+        Returns:
+            Complete report with all window results
+        """
+        ...
+    
+    def save_report(self, report: WFReport, filename: str) -> Path:
+        """Save report as JSON and CSV."""
+        ...
+```
+
+### Window Creation Logic
+
+```python
+def create_windows(self, start_date, end_date, train_months=6, test_months=1, step_months=1):
+    windows = []
+    current_test_start = start_date + timedelta(days=train_months * 30)
+    
+    while current_test_start + timedelta(days=test_months * 30) <= end_date:
+        train_start = current_test_start - timedelta(days=train_months * 30)
+        train_end = current_test_start - timedelta(days=1)
+        test_end = current_test_start + timedelta(days=test_months * 30) - timedelta(days=1)
+        
+        windows.append(WFWindow(
+            start=train_start,
+            end=test_end,
+            train_start=train_start,
+            train_end=train_end,
+            test_start=current_test_start,
+            test_end=test_end
+        ))
+        
+        current_test_start += timedelta(days=step_months * 30)
+    
+    return windows
+```
+
+### Acceptance Criteria
+- [ ] 12-month run completes without NO_DATA errors
+- [ ] Each window produces train + test metrics
+- [ ] Aggregate metrics calculated correctly
+- [ ] Report saves to JSON and CSV
+- [ ] Invalid windows logged but don't crash
+
+### Verification
+```bash
+pytest tests/unit/test_walk_forward.py -v
+
+python -c "
+from argus_py.lab.walk_forward import WalkForwardEngine
+from datetime import date
+from pathlib import Path
+
+engine = WalkForwardEngine(
+    data_path=Path('argus_py/data'),
+    output_dir=Path('runs/wf_test')
+)
+
+windows = engine.create_windows(
+    start_date=date(2025, 1, 1),
+    end_date=date(2026, 1, 1),
+    train_months=6,
+    test_months=1
+)
+print(f'Created {len(windows)} windows')
+for w in windows[:3]:
+    print(f'  Train: {w.train_start} to {w.train_end}')
+    print(f'  Test:  {w.test_start} to {w.test_end}')
+"
+```
+
+### Files to Modify/Create
+1. `argus_py/lab/walk_forward.py` (ENHANCE - 300 lines)
+2. `Scripts/sprint1_walkforward_12m.py` (ENHANCE)
+3. `tests/unit/test_walk_forward.py` (NEW - 100 lines)
+
+---
+
+## P21-002: Deterministic Backtest Module
+
+**Assign to:** Codex  
+**Priority:** P1  
+**Estimated:** 4 hours
+
+### Objective
+Guarantee reproducibility: same seed → identical results.
+
+### Contract
+
+**File:** `argus_py/lab/determinism.py` (NEW)
+
+```python
+from dataclasses import dataclass
+from typing import Any, Dict, List
+import hashlib
+import json
+from pathlib import Path
+import random
+import numpy as np
+
+@dataclass
+class RunManifest:
+    run_id: str
+    seed: int
+    timestamp: str
+    git_commit: str
+    config_hash: str
+    data_hash: str
+    result_hash: str
+
+class DeterminismManager:
+    """Ensures reproducible backtest runs."""
+    
+    def __init__(self, seed: int = 42):
+        self.seed = seed
+    
+    def initialize(self) -> None:
+        """
+        Set all random seeds for reproducibility.
+        Must be called before any randomness is used.
+        """
+        random.seed(self.seed)
+        np.random.seed(self.seed)
+        # If using torch: torch.manual_seed(self.seed)
+    
+    def hash_config(self, config: Dict[str, Any]) -> str:
+        """Generate hash of configuration."""
+        config_str = json.dumps(config, sort_keys=True)
+        return hashlib.sha256(config_str.encode()).hexdigest()[:16]
+    
+    def hash_data(self, data_path: Path) -> str:
+        """Generate hash of input data."""
+        if data_path.is_file():
+            return hashlib.sha256(data_path.read_bytes()).hexdigest()[:16]
+        else:
+            # Hash all CSV files in directory
+            file_hashes = []
+            for f in sorted(data_path.glob("*.csv")):
+                file_hashes.append(hashlib.sha256(f.read_bytes()).hexdigest())
+            return hashlib.sha256("".join(file_hashes).encode()).hexdigest()[:16]
+    
+    def hash_results(self, trades_csv: Path) -> str:
+        """Generate hash of trade results."""
+        if trades_csv.exists():
+            return hashlib.sha256(trades_csv.read_bytes()).hexdigest()[:16]
+        return "NO_TRADES"
+    
+    def get_git_commit(self) -> str:
+        """Get current git commit hash."""
+        import subprocess
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                capture_output=True, text=True
+            )
+            return result.stdout.strip()[:8]
+        except:
+            return "UNKNOWN"
+    
+    def create_manifest(
+        self,
+        run_id: str,
+        config: Dict[str, Any],
+        data_path: Path,
+        trades_csv: Path
+    ) -> RunManifest:
+        """Create manifest for a completed run."""
+        from datetime import datetime
+        return RunManifest(
+            run_id=run_id,
+            seed=self.seed,
+            timestamp=datetime.now().isoformat(),
+            git_commit=self.get_git_commit(),
+            config_hash=self.hash_config(config),
+            data_hash=self.hash_data(data_path),
+            result_hash=self.hash_results(trades_csv)
+        )
+    
+    def save_manifest(self, manifest: RunManifest, path: Path) -> None:
+        """Save manifest to JSON file."""
+        path.write_text(json.dumps({
+            "run_id": manifest.run_id,
+            "seed": manifest.seed,
+            "timestamp": manifest.timestamp,
+            "git_commit": manifest.git_commit,
+            "config_hash": manifest.config_hash,
+            "data_hash": manifest.data_hash,
+            "result_hash": manifest.result_hash
+        }, indent=2))
+    
+    def compare_runs(self, manifest1: RunManifest, manifest2: RunManifest) -> Dict[str, bool]:
+        """Compare two runs for determinism."""
+        return {
+            "same_seed": manifest1.seed == manifest2.seed,
+            "same_config": manifest1.config_hash == manifest2.config_hash,
+            "same_data": manifest1.data_hash == manifest2.data_hash,
+            "same_result": manifest1.result_hash == manifest2.result_hash,
+            "is_deterministic": manifest1.result_hash == manifest2.result_hash
+        }
+```
+
+### Verification Script
+
+**File:** `Scripts/verify_determinism.py` (ENHANCE)
+
+```python
+#!/usr/bin/env python3
+"""Verify backtest determinism by running twice and comparing."""
+
+import argparse
+from pathlib import Path
+from argus_py.lab.determinism import DeterminismManager
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--runs", type=int, default=2)
+    parser.add_argument("--seed", type=int, default=42)
+    args = parser.parse_args()
+    
+    dm = DeterminismManager(seed=args.seed)
+    manifests = []
+    
+    for i in range(args.runs):
+        dm.initialize()  # Reset seeds
+        
+        # Run backtest
+        run_id = f"determinism_check_{i}"
+        run_dir = Path(f"runs/{run_id}")
+        run_dir.mkdir(parents=True, exist_ok=True)
+        
+        # ... run backtest ...
+        
+        manifest = dm.create_manifest(
+            run_id=run_id,
+            config={"seed": args.seed},
+            data_path=Path("argus_py/data"),
+            trades_csv=run_dir / "trades.csv"
+        )
+        dm.save_manifest(manifest, run_dir / "manifest.json")
+        manifests.append(manifest)
+    
+    # Compare
+    for i in range(1, len(manifests)):
+        comparison = dm.compare_runs(manifests[0], manifests[i])
+        result = "DETERMINISTIC" if comparison["is_deterministic"] else "NON-DETERMINISTIC"
+        print(f"Run 0 vs Run {i}: {result}")
+        if not comparison["is_deterministic"]:
+            print(f"  Config match: {comparison['same_config']}")
+            print(f"  Data match: {comparison['same_data']}")
+            print(f"  Result match: {comparison['same_result']}")
+
+if __name__ == "__main__":
+    main()
+```
+
+### Acceptance Criteria
+- [ ] DeterminismManager.initialize() sets all seeds
+- [ ] Config hashing is stable (same config → same hash)
+- [ ] Data hashing works for files and directories
+- [ ] Manifest captures all relevant metadata
+- [ ] Two runs with same seed produce identical trades.csv
+
+### Verification
+```bash
+pytest tests/unit/test_determinism.py -v
+
+python Scripts/verify_determinism.py --runs 2 --seed 42
+# Expected: "Run 0 vs Run 1: DETERMINISTIC"
+```
+
+### Files to Create
+1. `argus_py/lab/determinism.py` (NEW - 150 lines)
+2. `Scripts/verify_determinism.py` (ENHANCE - 100 lines)
+3. `tests/unit/test_determinism.py` (NEW - 80 lines)
+
+---
+
+## P21-003: CI & Packaging
+
+**Assign to:** Sonnet  
+**Priority:** P2  
+**Estimated:** 4 hours
+
+### Objective
+Pre-commit hooks, Makefile, reproducible environment.
+
+### Deliverables
+
+**File:** `.pre-commit-config.yaml` (NEW)
+
+```yaml
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-added-large-files
+        args: ['--maxkb=500']
+      - id: check-merge-conflict
+      - id: detect-private-key
+  
+  - repo: https://github.com/psf/black
+    rev: 24.1.1
+    hooks:
+      - id: black
+        language_version: python3.11
+  
+  - repo: https://github.com/pycqa/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        args: ["--profile", "black"]
+  
+  - repo: https://github.com/pycqa/flake8
+    rev: 7.0.0
+    hooks:
+      - id: flake8
+        args: ['--max-line-length=100', '--ignore=E203,W503']
+  
+  - repo: local
+    hooks:
+      - id: no-print-statements
+        name: No print() in production code
+        entry: bash -c 'git diff --cached --name-only | xargs grep -l "print(" argus_py/ 2>/dev/null && exit 1 || exit 0'
+        language: system
+        pass_filenames: false
+      
+      - id: no-large-csv
+        name: No CSV files > 1MB
+        entry: bash -c 'find . -name "*.csv" -size +1M | head -1 | grep . && exit 1 || exit 0'
+        language: system
+        pass_filenames: false
+```
+
+**File:** `Makefile` (NEW)
+
+```makefile
+.PHONY: install test lint format clean run-daemon stop-daemon status
+
+PYTHON := python3
+VENV := venv
+PIP := $(VENV)/bin/pip
+PYTEST := $(VENV)/bin/pytest
+
+# Installation
+install:
+	$(PYTHON) -m venv $(VENV)
+	$(PIP) install --upgrade pip
+	$(PIP) install -r requirements.txt
+	$(PIP) install -r requirements-dev.txt
+	$(VENV)/bin/pre-commit install
+
+# Testing
+test:
+	$(PYTEST) tests/unit/ -v --tb=short
+
+test-integration:
+	$(PYTEST) tests/integration/ -v --tb=short
+
+test-all:
+	$(PYTEST) tests/ -v --tb=short
+
+test-coverage:
+	$(PYTEST) tests/unit/ --cov=argus_py --cov-report=html
+
+# Linting
+lint:
+	$(VENV)/bin/flake8 argus_py/ Scripts/
+	$(VENV)/bin/mypy argus_py/ --ignore-missing-imports
+
+format:
+	$(VENV)/bin/black argus_py/ Scripts/ tests/
+	$(VENV)/bin/isort argus_py/ Scripts/ tests/
+
+# Pre-commit
+pre-commit:
+	$(VENV)/bin/pre-commit run --all-files
+
+# Daemon control
+run-daemon:
+	./Scripts/phase19ctl.sh start
+
+stop-daemon:
+	./Scripts/phase19ctl.sh stop
+
+status:
+	./Scripts/phase19ctl.sh status
+
+# Clean
+clean:
+	find . -type d -name __pycache__ -exec rm -rf {} +
+	find . -type f -name "*.pyc" -delete
+	find . -type f -name "*.pyo" -delete
+	rm -rf .pytest_cache .mypy_cache htmlcov
+
+# Development
+dev-sync:
+	$(PIP) freeze > requirements-frozen.txt
+```
+
+**File:** `pyproject.toml` (NEW)
+
+```toml
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "argus-terminal"
+version = "0.21.0"
+description = "Autonomous crypto trading system"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+
+[tool.black]
+line-length = 100
+target-version = ['py310', 'py311']
+include = '\.pyi?$'
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --tb=short"
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+```
+
+**File:** `requirements-dev.txt` (NEW)
+
+```
+# Development dependencies
+pytest>=7.4.0
+pytest-cov>=4.1.0
+black>=24.1.0
+isort>=5.13.0
+flake8>=7.0.0
+mypy>=1.8.0
+pre-commit>=3.6.0
+```
+
+### Acceptance Criteria
+- [ ] `make install` creates venv and installs deps
+- [ ] `make test` runs all unit tests
+- [ ] `make lint` checks code quality
+- [ ] `make format` formats all code
+- [ ] `pre-commit run --all-files` passes
+- [ ] Fresh clone → make install → make test works
+
+### Verification
+```bash
+# Fresh setup
+rm -rf venv
+make install
+make test
+make lint
+make pre-commit
+
+# Expected: All pass
+```
+
+### Files to Create
+1. `.pre-commit-config.yaml` (NEW)
+2. `Makefile` (NEW)
+3. `pyproject.toml` (NEW)
+4. `requirements-dev.txt` (NEW)
+
+---
+
+## P21-004: Fee & Slippage Realism Model
+
+**Assign to:** Codex  
+**Priority:** P2  
+**Estimated:** 3 hours
+
+### Objective
+Accurate fee and slippage modeling for realistic P&L estimates.
+
+### Contract
+
+**File:** `argus_py/broker/realism.py` (NEW)
+
+```python
+from dataclasses import dataclass
+from typing import Optional
+import numpy as np
+
+@dataclass
+class FeeModel:
+    """Exchange fee configuration."""
+    taker_bps: float = 4.0     # 0.04% Binance Futures
+    maker_bps: float = 2.0     # 0.02%
+    funding_bps: float = 1.0   # Avg 0.01% per 8h
+
+@dataclass
+class SlippageModel:
+    """Market impact configuration."""
+    base_bps: float = 2.0      # Base slippage
+    size_impact_bps: float = 1.0  # Per sqrt($1000)
+    volatility_mult: float = 1.5  # ATR multiplier
+
+@dataclass
+class RealismConfig:
+    fees: FeeModel = None
+    slippage: SlippageModel = None
+    
+    def __post_init__(self):
+        self.fees = self.fees or FeeModel()
+        self.slippage = self.slippage or SlippageModel()
+
+class RealismEngine:
+    """Realistic fee and slippage calculator."""
+    
+    def __init__(self, config: RealismConfig = None):
+        self.config = config or RealismConfig()
+    
+    def calculate_commission(
+        self,
+        quantity: float,
+        price: float,
+        is_taker: bool = True
+    ) -> float:
+        """Calculate trading commission."""
+        fee_bps = self.config.fees.taker_bps if is_taker else self.config.fees.maker_bps
+        notional = quantity * price
+        return notional * (fee_bps / 10000)
+    
+    def calculate_slippage(
+        self,
+        price: float,
+        quantity: float,
+        side: str,
+        atr: Optional[float] = None,
+        volume_24h: Optional[float] = None
+    ) -> float:
+        """
+        Calculate market impact slippage.
+        
+        Returns:
+            Slippage amount (positive = adverse, subtract from price for buys)
+        """
+        cfg = self.config.slippage
+        notional = quantity * price
+        
+        # Base slippage
+        base = price * (cfg.base_bps / 10000)
+        
+        # Size impact (sqrt scaling)
+        size_impact = price * (cfg.size_impact_bps / 10000) * np.sqrt(notional / 1000)
+        
+        # Volatility adjustment
+        vol_adj = 1.0
+        if atr:
+            atr_pct = atr / price * 100
+            vol_adj = 1.0 + (atr_pct - 1.0) * (cfg.volatility_mult - 1.0)  # Scale around 1% ATR
+        
+        total = (base + size_impact) * max(0.5, vol_adj)
+        
+        # Adverse direction
+        return total if side == "BUY" else -total
+    
+    def calculate_funding(
+        self,
+        position_value: float,
+        hours_held: float,
+        avg_funding_rate: Optional[float] = None
+    ) -> float:
+        """
+        Calculate funding cost for futures position.
+        
+        Args:
+            position_value: Notional value
+            hours_held: How long position held
+            avg_funding_rate: Override default rate
+        
+        Returns:
+            Funding cost (positive = paid, negative = received)
+        """
+        rate_bps = avg_funding_rate or self.config.fees.funding_bps
+        funding_periods = hours_held / 8.0
+        return position_value * (rate_bps / 10000) * funding_periods
+    
+    def get_effective_price(
+        self,
+        price: float,
+        quantity: float,
+        side: str,
+        atr: Optional[float] = None
+    ) -> float:
+        """Get effective fill price including slippage."""
+        slip = self.calculate_slippage(price, quantity, side, atr)
+        if side == "BUY":
+            return price + slip  # Pay more
+        else:
+            return price - abs(slip)  # Receive less
+    
+    def estimate_round_trip_cost(
+        self,
+        price: float,
+        quantity: float,
+        hold_hours: float = 24.0,
+        atr: Optional[float] = None
+    ) -> dict:
+        """Estimate total round-trip trading costs."""
+        notional = quantity * price
+        
+        # Entry
+        entry_commission = self.calculate_commission(quantity, price, is_taker=True)
+        entry_slippage = abs(self.calculate_slippage(price, quantity, "BUY", atr))
+        
+        # Exit
+        exit_commission = self.calculate_commission(quantity, price, is_taker=True)
+        exit_slippage = abs(self.calculate_slippage(price, quantity, "SELL", atr))
+        
+        # Funding
+        funding = self.calculate_funding(notional, hold_hours)
+        
+        total = entry_commission + exit_commission + entry_slippage + exit_slippage + funding
+        
+        return {
+            "notional": notional,
+            "entry_commission": entry_commission,
+            "exit_commission": exit_commission,
+            "entry_slippage": entry_slippage,
+            "exit_slippage": exit_slippage,
+            "funding": funding,
+            "total_cost": total,
+            "cost_bps": (total / notional) * 10000
+        }
+```
+
+### Integration with Paper Broker
+
+Modify `argus_py/broker/paper.py`:
+
+```python
+from argus_py.broker.realism import RealismEngine, RealismConfig
+
+class PaperBroker:
+    def __init__(self, ...):
+        self.realism = RealismEngine(RealismConfig())
+    
+    def execute_order(self, symbol, side, quantity, price, atr=None):
+        # Get realistic fill price
+        fill_price = self.realism.get_effective_price(price, quantity, side, atr)
+        
+        # Calculate commission
+        commission = self.realism.calculate_commission(quantity, fill_price)
+        
+        # Execute at realistic price
+        ...
+```
+
+### Acceptance Criteria
+- [ ] Commission calculation matches Binance (0.04% taker)
+- [ ] Slippage scales with position size
+- [ ] Funding calculated correctly for 8h periods
+- [ ] Round-trip cost estimation accurate
+- [ ] Paper broker uses realism engine
+
+### Verification
+```bash
+pytest tests/unit/test_realism.py -v
+
+python -c "
+from argus_py.broker.realism import RealismEngine
+
+engine = RealismEngine()
+
+# Test $1000 BTC trade
+costs = engine.estimate_round_trip_cost(
+    price=50000,
+    quantity=0.02,  # $1000 notional
+    hold_hours=24,
+    atr=500
+)
+print(f'Notional: \${costs[\"notional\"]:.2f}')
+print(f'Entry Commission: \${costs[\"entry_commission\"]:.2f}')
+print(f'Entry Slippage: \${costs[\"entry_slippage\"]:.2f}')
+print(f'Funding (24h): \${costs[\"funding\"]:.2f}')
+print(f'Total Cost: \${costs[\"total_cost\"]:.2f} ({costs[\"cost_bps\"]:.1f} bps)')
+"
+# Expected: ~$1.50 total ($0.40 comm x2 + ~$0.30 slip x2 + ~$0.30 funding)
+```
+
+### Files to Create
+1. `argus_py/broker/realism.py` (NEW - 150 lines)
+2. `argus_py/broker/paper.py` (MODIFY - integrate realism)
+3. `tests/unit/test_realism.py` (NEW - 60 lines)
+
+---
+
 ## Agent Work Log Template
 
 Her agent tamamladığında bu formatı kullanmalı:
