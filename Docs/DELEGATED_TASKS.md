@@ -3510,6 +3510,613 @@ python Scripts/chiron_learn.py runs/phase19_twin/SOFT/ --output chiron_test.json
 
 ---
 
+# PHASE 23: Production Readiness (Months 6-9)
+
+---
+
+## P23-001: Alert & Notification System
+
+**Assign to:** Sonnet  
+**Priority:** P1  
+**Estimated:** 5 hours
+
+### Objective
+Multi-channel alerting: Telegram, Discord, Email for trading events and system health.
+
+### Contract
+
+**File:** `argus_py/alerts/dispatcher.py` (NEW)
+
+```python
+from dataclasses import dataclass
+from enum import Enum
+from typing import List, Optional
+import httpx
+
+class AlertLevel(Enum):
+    INFO = "INFO"
+    WARNING = "WARNING"
+    CRITICAL = "CRITICAL"
+
+class AlertChannel(Enum):
+    TELEGRAM = "telegram"
+    DISCORD = "discord"
+    EMAIL = "email"
+
+@dataclass
+class AlertConfig:
+    telegram_bot_token: Optional[str] = None
+    telegram_chat_id: Optional[str] = None
+    discord_webhook: Optional[str] = None
+    email_smtp: Optional[str] = None
+    email_to: Optional[str] = None
+
+@dataclass
+class Alert:
+    level: AlertLevel
+    title: str
+    message: str
+    channels: List[AlertChannel]
+    timestamp: float
+
+class AlertDispatcher:
+    def __init__(self, config: AlertConfig):
+        self.config = config
+    
+    async def send(self, alert: Alert) -> dict:
+        results = {}
+        for channel in alert.channels:
+            if channel == AlertChannel.TELEGRAM:
+                results["telegram"] = await self._send_telegram(alert)
+            elif channel == AlertChannel.DISCORD:
+                results["discord"] = await self._send_discord(alert)
+        return results
+    
+    async def _send_telegram(self, alert: Alert) -> bool:
+        if not self.config.telegram_bot_token:
+            return False
+        url = f"https://api.telegram.org/bot{self.config.telegram_bot_token}/sendMessage"
+        emoji = {"INFO": "ℹ️", "WARNING": "⚠️", "CRITICAL": "🚨"}[alert.level.value]
+        text = f"{emoji} *{alert.title}*\n{alert.message}"
+        async with httpx.AsyncClient() as client:
+            r = await client.post(url, json={
+                "chat_id": self.config.telegram_chat_id,
+                "text": text, "parse_mode": "Markdown"
+            })
+            return r.status_code == 200
+    
+    async def _send_discord(self, alert: Alert) -> bool:
+        if not self.config.discord_webhook:
+            return False
+        colors = {"INFO": 3447003, "WARNING": 16776960, "CRITICAL": 15158332}
+        async with httpx.AsyncClient() as client:
+            r = await client.post(self.config.discord_webhook, json={
+                "embeds": [{"title": alert.title, "description": alert.message, 
+                           "color": colors[alert.level.value]}]
+            })
+            return r.status_code == 204
+```
+
+### Alert Types
+- Trade executed (BUY/SELL)
+- Position closed (P&L)
+- Kill-switch activated
+- Heartbeat stale (>5min)
+- Daily summary
+
+### Files to Create
+1. `argus_py/alerts/__init__.py`
+2. `argus_py/alerts/dispatcher.py` (150 lines)
+3. `argus_py/alerts/templates.py` (message formatting)
+4. `tests/unit/test_alerts.py`
+
+---
+
+## P23-002: Disaster Recovery & Backup
+
+**Assign to:** Codex  
+**Priority:** P1  
+**Estimated:** 4 hours
+
+### Objective
+Automated state backup and recovery from crashes.
+
+### Contract
+
+**File:** `argus_py/recovery/backup.py` (NEW)
+
+```python
+from dataclasses import dataclass
+from pathlib import Path
+import shutil
+import json
+from datetime import datetime
+
+@dataclass
+class BackupConfig:
+    backup_dir: Path
+    max_backups: int = 24  # Keep 24 hourly backups
+    interval_minutes: int = 60
+
+class BackupManager:
+    def __init__(self, run_dir: Path, config: BackupConfig):
+        self.run_dir = run_dir
+        self.config = config
+    
+    def create_backup(self) -> Path:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_path = self.config.backup_dir / f"backup_{timestamp}"
+        backup_path.mkdir(parents=True)
+        
+        # Copy critical files
+        for f in ["daemon_state.json", "trades.csv", "decisions.csv", "rejects.csv"]:
+            src = self.run_dir / f
+            if src.exists():
+                shutil.copy2(src, backup_path / f)
+        
+        self._cleanup_old_backups()
+        return backup_path
+    
+    def restore_latest(self) -> bool:
+        backups = sorted(self.config.backup_dir.glob("backup_*"))
+        if not backups:
+            return False
+        latest = backups[-1]
+        for f in latest.iterdir():
+            shutil.copy2(f, self.run_dir / f.name)
+        return True
+    
+    def _cleanup_old_backups(self):
+        backups = sorted(self.config.backup_dir.glob("backup_*"))
+        while len(backups) > self.config.max_backups:
+            shutil.rmtree(backups.pop(0))
+```
+
+### Files to Create
+1. `argus_py/recovery/__init__.py`
+2. `argus_py/recovery/backup.py` (100 lines)
+3. `argus_py/recovery/restore.py` (state validation)
+4. `tests/unit/test_backup.py`
+
+---
+
+## P23-003: Performance Profiling
+
+**Assign to:** Codex  
+**Priority:** P2  
+**Estimated:** 3 hours
+
+### Objective
+Identify bottlenecks in bar processing loop.
+
+### Contract
+
+**File:** `argus_py/profiling/profiler.py` (NEW)
+
+```python
+import time
+from dataclasses import dataclass, field
+from typing import Dict, List
+from contextlib import contextmanager
+
+@dataclass
+class ProfileResult:
+    name: str
+    calls: int = 0
+    total_ms: float = 0.0
+    min_ms: float = float('inf')
+    max_ms: float = 0.0
+    
+    @property
+    def avg_ms(self) -> float:
+        return self.total_ms / self.calls if self.calls > 0 else 0
+
+class Profiler:
+    def __init__(self):
+        self.results: Dict[str, ProfileResult] = {}
+    
+    @contextmanager
+    def measure(self, name: str):
+        start = time.perf_counter()
+        yield
+        elapsed = (time.perf_counter() - start) * 1000
+        
+        if name not in self.results:
+            self.results[name] = ProfileResult(name)
+        r = self.results[name]
+        r.calls += 1
+        r.total_ms += elapsed
+        r.min_ms = min(r.min_ms, elapsed)
+        r.max_ms = max(r.max_ms, elapsed)
+    
+    def report(self) -> str:
+        lines = ["=== Performance Profile ==="]
+        for name, r in sorted(self.results.items(), key=lambda x: -x[1].total_ms):
+            lines.append(f"{name}: {r.calls} calls, avg={r.avg_ms:.2f}ms, total={r.total_ms:.0f}ms")
+        return "\n".join(lines)
+```
+
+### Usage in Daemon
+```python
+profiler = Profiler()
+with profiler.measure("data_fetch"):
+    bars = fetch_bars()
+with profiler.measure("strategy_eval"):
+    signal = evaluate_strategy(bars)
+# Print every 1000 bars
+if bar_count % 1000 == 0:
+    print(profiler.report())
+```
+
+### Files to Create
+1. `argus_py/profiling/profiler.py` (80 lines)
+2. `tests/unit/test_profiler.py`
+
+---
+
+## P23-004: Security Hardening
+
+**Assign to:** Sonnet  
+**Priority:** P1  
+**Estimated:** 4 hours
+
+### Objective
+Secure API key storage, audit logging, rate limiting.
+
+### Contract
+
+**File:** `argus_py/security/vault.py` (NEW)
+
+```python
+import os
+import base64
+from cryptography.fernet import Fernet
+from pathlib import Path
+
+class SecureVault:
+    def __init__(self, key_file: Path = None):
+        self.key_file = key_file or Path.home() / ".argus" / "vault.key"
+        self._fernet = None
+    
+    def _get_fernet(self) -> Fernet:
+        if self._fernet is None:
+            if self.key_file.exists():
+                key = self.key_file.read_bytes()
+            else:
+                key = Fernet.generate_key()
+                self.key_file.parent.mkdir(parents=True, exist_ok=True)
+                self.key_file.write_bytes(key)
+                os.chmod(self.key_file, 0o600)
+            self._fernet = Fernet(key)
+        return self._fernet
+    
+    def encrypt(self, plaintext: str) -> str:
+        return self._get_fernet().encrypt(plaintext.encode()).decode()
+    
+    def decrypt(self, ciphertext: str) -> str:
+        return self._get_fernet().decrypt(ciphertext.encode()).decode()
+    
+    def store_api_key(self, name: str, key: str):
+        secrets_file = self.key_file.parent / "secrets.enc"
+        secrets = self._load_secrets()
+        secrets[name] = self.encrypt(key)
+        secrets_file.write_text(json.dumps(secrets))
+    
+    def get_api_key(self, name: str) -> str:
+        secrets = self._load_secrets()
+        return self.decrypt(secrets[name]) if name in secrets else None
+```
+
+### Files to Create
+1. `argus_py/security/__init__.py`
+2. `argus_py/security/vault.py` (100 lines)
+3. `argus_py/security/audit.py` (action logging)
+4. `tests/unit/test_vault.py`
+
+---
+
+# PHASE 24: Scale & Expansion (Months 9-12)
+
+---
+
+## P24-001: Multi-Exchange Support
+
+**Assign to:** Codex  
+**Priority:** P1  
+**Estimated:** 12 hours
+
+### Objective
+Support Binance, Bybit, OKX with unified interface.
+
+### Contract
+
+**File:** `argus_py/exchanges/base.py` (NEW)
+
+```python
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from typing import Dict, List
+
+@dataclass
+class Ticker:
+    symbol: str
+    bid: float
+    ask: float
+    last: float
+    volume_24h: float
+
+@dataclass
+class OrderFill:
+    order_id: str
+    symbol: str
+    side: str
+    price: float
+    quantity: float
+    commission: float
+
+class ExchangeAdapter(ABC):
+    @abstractmethod
+    async def get_ticker(self, symbol: str) -> Ticker: ...
+    
+    @abstractmethod
+    async def get_balance(self, asset: str) -> float: ...
+    
+    @abstractmethod
+    async def get_positions(self) -> Dict[str, float]: ...
+    
+    @abstractmethod
+    async def market_order(self, symbol: str, side: str, qty: float) -> OrderFill: ...
+    
+    @abstractmethod
+    async def close_position(self, symbol: str) -> OrderFill: ...
+```
+
+**File:** `argus_py/exchanges/binance.py`, `bybit.py`, `okx.py` (implementations)
+
+### Files to Create
+1. `argus_py/exchanges/__init__.py`
+2. `argus_py/exchanges/base.py` (interface)
+3. `argus_py/exchanges/binance.py` (200 lines)
+4. `argus_py/exchanges/bybit.py` (200 lines)
+5. `argus_py/exchanges/okx.py` (200 lines)
+6. `tests/unit/test_exchanges.py`
+
+---
+
+## P24-002: Telegram Bot Interface
+
+**Assign to:** Sonnet  
+**Priority:** P2  
+**Estimated:** 6 hours
+
+### Objective
+Control and monitor Argus via Telegram commands.
+
+### Commands
+- `/status` - Current positions, equity, drawdown
+- `/trades` - Recent 5 trades
+- `/killswitch [soft|hard|off]` - Control kill-switch
+- `/report` - Daily/weekly summary
+- `/balance` - Account balance
+
+### Contract
+
+**File:** `argus_py/bot/telegram_bot.py` (NEW)
+
+```python
+from telegram import Update
+from telegram.ext import Application, CommandHandler, ContextTypes
+from pathlib import Path
+
+class ArgusTelegramBot:
+    def __init__(self, token: str, run_dir: Path, allowed_users: list):
+        self.token = token
+        self.run_dir = run_dir
+        self.allowed_users = allowed_users
+    
+    async def cmd_status(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        if update.effective_user.id not in self.allowed_users:
+            return
+        state = self._load_state()
+        msg = f"🛡️ *Argus Status*\n"
+        msg += f"Equity: ${state.get('equity', 0):.2f}\n"
+        msg += f"Drawdown: {state.get('current_dd_pct', 0):.2f}%\n"
+        msg += f"Kill-Switch: {state.get('kill_switch_level', 'NORMAL')}"
+        await update.message.reply_text(msg, parse_mode="Markdown")
+    
+    def run(self):
+        app = Application.builder().token(self.token).build()
+        app.add_handler(CommandHandler("status", self.cmd_status))
+        app.add_handler(CommandHandler("trades", self.cmd_trades))
+        app.add_handler(CommandHandler("killswitch", self.cmd_killswitch))
+        app.run_polling()
+```
+
+### Files to Create
+1. `argus_py/bot/__init__.py`
+2. `argus_py/bot/telegram_bot.py` (200 lines)
+3. `Scripts/run_telegram_bot.py`
+
+---
+
+## P24-003: ML Signal Generator
+
+**Assign to:** Codex  
+**Priority:** P2  
+**Estimated:** 10 hours
+
+### Objective
+XGBoost/LightGBM model for signal prediction.
+
+### Contract
+
+**File:** `argus_py/ml/signal_model.py` (NEW)
+
+```python
+from dataclasses import dataclass
+from typing import List, Optional
+import numpy as np
+from pathlib import Path
+
+@dataclass
+class MLFeatures:
+    rsi_14: float
+    macd_hist: float
+    bb_position: float  # 0-1 within bands
+    atr_pct: float
+    volume_ratio: float
+    fear_greed: float
+    funding_rate: float
+
+@dataclass
+class MLPrediction:
+    direction: str  # UP|DOWN|FLAT
+    confidence: float
+    expected_return: float
+
+class SignalModel:
+    def __init__(self, model_path: Optional[Path] = None):
+        self.model = None
+        if model_path and model_path.exists():
+            self.load(model_path)
+    
+    def train(self, features: np.ndarray, labels: np.ndarray):
+        import lightgbm as lgb
+        dataset = lgb.Dataset(features, label=labels)
+        params = {
+            "objective": "multiclass", "num_class": 3,
+            "metric": "multi_logloss", "verbosity": -1
+        }
+        self.model = lgb.train(params, dataset, num_boost_round=100)
+    
+    def predict(self, features: MLFeatures) -> MLPrediction:
+        if self.model is None:
+            return MLPrediction("FLAT", 0.5, 0.0)
+        
+        x = np.array([[features.rsi_14, features.macd_hist, features.bb_position,
+                       features.atr_pct, features.volume_ratio, features.fear_greed,
+                       features.funding_rate]])
+        probs = self.model.predict(x)[0]
+        direction = ["DOWN", "FLAT", "UP"][np.argmax(probs)]
+        return MLPrediction(direction, max(probs), probs[2] - probs[0])
+    
+    def save(self, path: Path):
+        self.model.save_model(str(path))
+    
+    def load(self, path: Path):
+        import lightgbm as lgb
+        self.model = lgb.Booster(model_file=str(path))
+```
+
+### Training Script
+
+**File:** `Scripts/train_ml_model.py`
+
+```python
+#!/usr/bin/env python3
+from argus_py.ml.signal_model import SignalModel
+from pathlib import Path
+import pandas as pd
+
+def main():
+    # Load historical data with features and outcomes
+    df = pd.read_csv("runs/training_data.csv")
+    features = df[["rsi_14", "macd_hist", "bb_position", "atr_pct", 
+                   "volume_ratio", "fear_greed", "funding_rate"]].values
+    labels = df["outcome"].values  # 0=down, 1=flat, 2=up
+    
+    model = SignalModel()
+    model.train(features, labels)
+    model.save(Path("models/signal_model.lgb"))
+    print("Model trained and saved")
+
+if __name__ == "__main__":
+    main()
+```
+
+### Files to Create
+1. `argus_py/ml/__init__.py`
+2. `argus_py/ml/signal_model.py` (150 lines)
+3. `argus_py/ml/feature_eng.py` (feature extraction)
+4. `Scripts/train_ml_model.py`
+5. `tests/unit/test_ml_model.py`
+
+---
+
+## P24-004: Compliance & Reporting
+
+**Assign to:** Sonnet  
+**Priority:** P2  
+**Estimated:** 4 hours
+
+### Objective
+Tax-ready trade reports, P&L statements.
+
+### Contract
+
+**File:** `argus_py/reporting/compliance.py` (NEW)
+
+```python
+from dataclasses import dataclass
+from typing import List
+from datetime import date
+from pathlib import Path
+import csv
+
+@dataclass
+class TaxLot:
+    symbol: str
+    buy_date: date
+    buy_price: float
+    sell_date: date
+    sell_price: float
+    quantity: float
+    pnl: float
+    hold_days: int
+    short_term: bool  # <1 year
+
+class ComplianceReporter:
+    def __init__(self, trades_csv: Path):
+        self.trades_csv = trades_csv
+    
+    def generate_8949(self, year: int) -> List[TaxLot]:
+        """Generate IRS Form 8949 compatible report."""
+        lots = []
+        # Match buys with sells using FIFO
+        # ... implementation
+        return [l for l in lots if l.sell_date.year == year]
+    
+    def generate_pnl_statement(self, start: date, end: date) -> dict:
+        """Generate P&L statement for period."""
+        lots = self._get_lots_in_range(start, end)
+        return {
+            "period_start": start.isoformat(),
+            "period_end": end.isoformat(),
+            "total_trades": len(lots),
+            "realized_pnl": sum(l.pnl for l in lots),
+            "short_term_pnl": sum(l.pnl for l in lots if l.short_term),
+            "long_term_pnl": sum(l.pnl for l in lots if not l.short_term),
+            "win_rate": sum(1 for l in lots if l.pnl > 0) / len(lots) if lots else 0
+        }
+    
+    def export_csv(self, lots: List[TaxLot], output: Path):
+        with open(output, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(["Symbol", "Buy Date", "Buy Price", "Sell Date", 
+                           "Sell Price", "Quantity", "P&L", "Term"])
+            for l in lots:
+                writer.writerow([l.symbol, l.buy_date, l.buy_price, l.sell_date,
+                               l.sell_price, l.quantity, l.pnl, 
+                               "Short" if l.short_term else "Long"])
+```
+
+### Files to Create
+1. `argus_py/reporting/compliance.py` (150 lines)
+2. `Scripts/generate_tax_report.py`
+3. `tests/unit/test_compliance.py`
+
+---
+
 ## Agent Work Log Template
 
 Her agent tamamladığında bu formatı kullanmalı:
