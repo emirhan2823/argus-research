@@ -2397,6 +2397,1119 @@ print(f'Total Cost: \${costs[\"total_cost\"]:.2f} ({costs[\"cost_bps\"]:.1f} bps
 
 ---
 
+# PHASE 22: Advanced Features (Months 3-6)
+
+---
+
+## P22-001: Multi-Symbol Portfolio Manager
+
+**Assign to:** Codex  
+**Priority:** P1  
+**Estimated:** 8 hours
+
+### Objective
+Extend from single BTC to multi-symbol trading with portfolio-level risk management.
+
+### Contract
+
+**File:** `argus_py/portfolio/manager.py` (NEW)
+
+```python
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional
+from enum import Enum
+
+class CorrelationBucket(Enum):
+    BTC_ECOSYSTEM = "BTC_ECOSYSTEM"    # BTC, WBTC
+    ETH_ECOSYSTEM = "ETH_ECOSYSTEM"    # ETH, stETH
+    ALTCOIN_MAJOR = "ALTCOIN_MAJOR"    # SOL, BNB, XRP
+    ALTCOIN_MID = "ALTCOIN_MID"        # LINK, AVAX, DOT
+    STABLECOIN = "STABLECOIN"          # Excluded from trading
+
+@dataclass
+class SymbolConfig:
+    symbol: str
+    enabled: bool = True
+    max_position_pct: float = 20.0     # Max 20% of portfolio
+    bucket: CorrelationBucket = CorrelationBucket.ALTCOIN_MID
+    min_score_for_entry: float = 65.0
+    priority: int = 1                   # 1=highest
+
+@dataclass
+class PortfolioLimits:
+    max_total_exposure_pct: float = 100.0
+    max_correlated_exposure_pct: float = 40.0  # Max in same bucket
+    max_open_positions: int = 5
+    max_daily_trades: int = 10
+    min_cash_reserve_pct: float = 10.0
+
+@dataclass
+class PortfolioState:
+    positions: Dict[str, float]         # symbol -> value
+    cash: float
+    total_equity: float
+    exposure_by_bucket: Dict[str, float]
+    daily_trades: int
+    daily_pnl: float
+
+@dataclass
+class AllocationDecision:
+    symbol: str
+    action: str                          # BUY|SELL|HOLD|SKIP
+    target_allocation_pct: float
+    current_allocation_pct: float
+    reason: str
+    blocked_by: Optional[str] = None
+
+class PortfolioManager:
+    """
+    Multi-symbol portfolio manager with correlation awareness.
+    
+    Responsibilities:
+    - Track positions across multiple symbols
+    - Enforce portfolio-level limits
+    - Rebalance based on signals
+    - Prevent over-concentration in correlated assets
+    """
+    
+    def __init__(
+        self,
+        symbols: List[SymbolConfig],
+        limits: PortfolioLimits = None
+    ):
+        self.symbols = {s.symbol: s for s in symbols}
+        self.limits = limits or PortfolioLimits()
+        self.state = PortfolioState(
+            positions={}, cash=0, total_equity=0,
+            exposure_by_bucket={}, daily_trades=0, daily_pnl=0
+        )
+    
+    def update_state(self, positions: Dict[str, float], cash: float) -> None:
+        """Update portfolio state from broker."""
+        self.state.positions = positions
+        self.state.cash = cash
+        self.state.total_equity = sum(positions.values()) + cash
+        
+        # Calculate bucket exposures
+        self.state.exposure_by_bucket = {}
+        for symbol, value in positions.items():
+            if symbol in self.symbols:
+                bucket = self.symbols[symbol].bucket.value
+                self.state.exposure_by_bucket[bucket] = \
+                    self.state.exposure_by_bucket.get(bucket, 0) + value
+    
+    def can_open_position(self, symbol: str, value: float) -> tuple:
+        """
+        Check if new position is allowed.
+        
+        Returns:
+            (allowed: bool, reason: str)
+        """
+        if symbol not in self.symbols:
+            return False, "Symbol not configured"
+        
+        config = self.symbols[symbol]
+        
+        # Check if already in position
+        if symbol in self.state.positions:
+            return False, "Already in position"
+        
+        # Check max positions
+        if len(self.state.positions) >= self.limits.max_open_positions:
+            return False, f"Max positions ({self.limits.max_open_positions}) reached"
+        
+        # Check daily trades
+        if self.state.daily_trades >= self.limits.max_daily_trades:
+            return False, "Max daily trades reached"
+        
+        # Check cash reserve
+        min_cash = self.state.total_equity * (self.limits.min_cash_reserve_pct / 100)
+        if self.state.cash - value < min_cash:
+            return False, "Would violate cash reserve"
+        
+        # Check single position limit
+        max_position = self.state.total_equity * (config.max_position_pct / 100)
+        if value > max_position:
+            return False, f"Exceeds max position size ({config.max_position_pct}%)"
+        
+        # Check total exposure
+        new_exposure = sum(self.state.positions.values()) + value
+        max_exposure = self.state.total_equity * (self.limits.max_total_exposure_pct / 100)
+        if new_exposure > max_exposure:
+            return False, "Would exceed total exposure limit"
+        
+        # Check correlated exposure
+        bucket = config.bucket.value
+        current_bucket = self.state.exposure_by_bucket.get(bucket, 0)
+        max_bucket = self.state.total_equity * (self.limits.max_correlated_exposure_pct / 100)
+        if current_bucket + value > max_bucket:
+            return False, f"Would exceed {bucket} correlation limit"
+        
+        return True, "OK"
+    
+    def rank_opportunities(
+        self,
+        signals: Dict[str, float]  # symbol -> score
+    ) -> List[AllocationDecision]:
+        """
+        Rank trading opportunities by priority and score.
+        
+        Returns:
+            Sorted list of allocation decisions
+        """
+        decisions = []
+        
+        for symbol, score in signals.items():
+            if symbol not in self.symbols:
+                continue
+            
+            config = self.symbols[symbol]
+            if not config.enabled:
+                continue
+            
+            if score < config.min_score_for_entry:
+                decisions.append(AllocationDecision(
+                    symbol=symbol, action="SKIP",
+                    target_allocation_pct=0, current_allocation_pct=0,
+                    reason=f"Score {score:.0f} < {config.min_score_for_entry}"
+                ))
+                continue
+            
+            # Calculate target allocation
+            target_pct = min(config.max_position_pct, score / 5)  # Scale by score
+            current_pct = (self.state.positions.get(symbol, 0) / 
+                          self.state.total_equity * 100) if self.state.total_equity > 0 else 0
+            
+            allowed, reason = self.can_open_position(symbol, 
+                self.state.total_equity * target_pct / 100)
+            
+            decisions.append(AllocationDecision(
+                symbol=symbol,
+                action="BUY" if allowed else "HOLD",
+                target_allocation_pct=target_pct,
+                current_allocation_pct=current_pct,
+                reason=f"Score: {score:.0f}",
+                blocked_by=None if allowed else reason
+            ))
+        
+        # Sort by priority, then score
+        decisions.sort(key=lambda d: (
+            self.symbols.get(d.symbol, SymbolConfig(d.symbol)).priority,
+            -signals.get(d.symbol, 0)
+        ))
+        
+        return decisions
+```
+
+### Default Symbol List
+
+```python
+DEFAULT_CRYPTO_SYMBOLS = [
+    SymbolConfig("BTCUSDT", bucket=CorrelationBucket.BTC_ECOSYSTEM, priority=1, max_position_pct=30),
+    SymbolConfig("ETHUSDT", bucket=CorrelationBucket.ETH_ECOSYSTEM, priority=1, max_position_pct=25),
+    SymbolConfig("SOLUSDT", bucket=CorrelationBucket.ALTCOIN_MAJOR, priority=2, max_position_pct=15),
+    SymbolConfig("BNBUSDT", bucket=CorrelationBucket.ALTCOIN_MAJOR, priority=2, max_position_pct=15),
+    SymbolConfig("XRPUSDT", bucket=CorrelationBucket.ALTCOIN_MAJOR, priority=3, max_position_pct=10),
+    SymbolConfig("LINKUSDT", bucket=CorrelationBucket.ALTCOIN_MID, priority=3, max_position_pct=10),
+    SymbolConfig("AVAXUSDT", bucket=CorrelationBucket.ALTCOIN_MID, priority=3, max_position_pct=10),
+]
+```
+
+### Acceptance Criteria
+- [ ] Multi-symbol state tracking works
+- [ ] Correlation bucket limits enforced
+- [ ] Position limits checked correctly
+- [ ] Opportunity ranking by priority
+- [ ] Cash reserve maintained
+
+### Verification
+```bash
+pytest tests/unit/test_portfolio_manager.py -v
+
+python -c "
+from argus_py.portfolio.manager import PortfolioManager, SymbolConfig, CorrelationBucket
+
+pm = PortfolioManager([
+    SymbolConfig('BTCUSDT', bucket=CorrelationBucket.BTC_ECOSYSTEM, max_position_pct=30),
+    SymbolConfig('ETHUSDT', bucket=CorrelationBucket.ETH_ECOSYSTEM, max_position_pct=25),
+])
+
+pm.update_state(positions={'BTCUSDT': 3000}, cash=7000)
+print(f'Total Equity: \${pm.state.total_equity}')
+print(f'BTC Exposure: {pm.state.exposure_by_bucket}')
+
+allowed, reason = pm.can_open_position('ETHUSDT', 2500)
+print(f'Can open ETH? {allowed} - {reason}')
+"
+```
+
+### Files to Create
+1. `argus_py/portfolio/__init__.py` (NEW)
+2. `argus_py/portfolio/manager.py` (NEW - 300 lines)
+3. `argus_py/portfolio/symbols.py` (NEW - default configs)
+4. `tests/unit/test_portfolio_manager.py` (NEW - 150 lines)
+
+---
+
+## P22-002: Live Trading Bridge
+
+**Assign to:** Codex  
+**Priority:** P1  
+**Estimated:** 10 hours
+
+### Objective
+Bridge paper broker to live Binance Futures with safety guardrails.
+
+### Contract
+
+**File:** `argus_py/broker/live.py` (NEW)
+
+```python
+from dataclasses import dataclass
+from typing import Optional, Dict
+from enum import Enum
+import hmac
+import hashlib
+import time
+import httpx
+
+class OrderType(Enum):
+    MARKET = "MARKET"
+    LIMIT = "LIMIT"
+
+class OrderSide(Enum):
+    BUY = "BUY"
+    SELL = "SELL"
+
+@dataclass
+class LiveConfig:
+    api_key: str
+    api_secret: str
+    testnet: bool = True              # Start with testnet!
+    base_url: str = None
+    max_order_value: float = 100.0    # Safety cap per order
+    max_daily_volume: float = 1000.0  # Safety cap per day
+    require_confirmation: bool = True  # Confirm before execute
+    
+    def __post_init__(self):
+        if self.base_url is None:
+            self.base_url = (
+                "https://testnet.binancefuture.com" if self.testnet
+                else "https://fapi.binance.com"
+            )
+
+@dataclass
+class OrderRequest:
+    symbol: str
+    side: OrderSide
+    quantity: float
+    order_type: OrderType = OrderType.MARKET
+    price: Optional[float] = None
+    reduce_only: bool = False
+
+@dataclass
+class OrderResult:
+    success: bool
+    order_id: Optional[str]
+    fill_price: Optional[float]
+    fill_quantity: Optional[float]
+    commission: Optional[float]
+    error: Optional[str]
+
+class LiveBroker:
+    """
+    Live Binance Futures broker with safety guardrails.
+    
+    SAFETY FEATURES:
+    - Testnet by default
+    - Max order value cap
+    - Max daily volume cap
+    - Optional confirmation prompt
+    - All orders logged
+    """
+    
+    def __init__(self, config: LiveConfig):
+        self.config = config
+        self.daily_volume = 0.0
+        self.orders_today = []
+        self._client = httpx.Client(timeout=10.0)
+    
+    def _sign(self, params: Dict) -> str:
+        """Create HMAC SHA256 signature."""
+        query_string = "&".join(f"{k}={v}" for k, v in sorted(params.items()))
+        return hmac.new(
+            self.config.api_secret.encode(),
+            query_string.encode(),
+            hashlib.sha256
+        ).hexdigest()
+    
+    def _request(self, method: str, endpoint: str, params: Dict) -> Dict:
+        """Make signed API request."""
+        params["timestamp"] = int(time.time() * 1000)
+        params["signature"] = self._sign(params)
+        
+        headers = {"X-MBX-APIKEY": self.config.api_key}
+        url = f"{self.config.base_url}{endpoint}"
+        
+        if method == "GET":
+            response = self._client.get(url, params=params, headers=headers)
+        else:
+            response = self._client.post(url, params=params, headers=headers)
+        
+        response.raise_for_status()
+        return response.json()
+    
+    def get_account(self) -> Dict:
+        """Get account information."""
+        return self._request("GET", "/fapi/v2/account", {})
+    
+    def get_positions(self) -> Dict[str, float]:
+        """Get current positions."""
+        account = self.get_account()
+        positions = {}
+        for pos in account.get("positions", []):
+            amt = float(pos["positionAmt"])
+            if amt != 0:
+                positions[pos["symbol"]] = amt
+        return positions
+    
+    def get_balance(self) -> float:
+        """Get available USDT balance."""
+        account = self.get_account()
+        for asset in account.get("assets", []):
+            if asset["asset"] == "USDT":
+                return float(asset["availableBalance"])
+        return 0.0
+    
+    def _check_safety(self, order: OrderRequest, notional: float) -> tuple:
+        """Check safety limits before execution."""
+        # Check order size
+        if notional > self.config.max_order_value:
+            return False, f"Order value ${notional:.2f} exceeds max ${self.config.max_order_value}"
+        
+        # Check daily volume
+        if self.daily_volume + notional > self.config.max_daily_volume:
+            return False, f"Would exceed daily volume limit ${self.config.max_daily_volume}"
+        
+        return True, "OK"
+    
+    def execute(self, order: OrderRequest, current_price: float) -> OrderResult:
+        """
+        Execute order with safety checks.
+        
+        Args:
+            order: Order to execute
+            current_price: Current market price for notional calculation
+        
+        Returns:
+            OrderResult with fill details or error
+        """
+        notional = order.quantity * current_price
+        
+        # Safety checks
+        safe, reason = self._check_safety(order, notional)
+        if not safe:
+            return OrderResult(
+                success=False, order_id=None, fill_price=None,
+                fill_quantity=None, commission=None, error=reason
+            )
+        
+        # Confirmation prompt (if enabled)
+        if self.config.require_confirmation:
+            print(f"\n⚠️  LIVE ORDER CONFIRMATION")
+            print(f"   {order.side.value} {order.quantity} {order.symbol}")
+            print(f"   Notional: ${notional:.2f}")
+            confirm = input("   Type 'YES' to confirm: ")
+            if confirm != "YES":
+                return OrderResult(
+                    success=False, order_id=None, fill_price=None,
+                    fill_quantity=None, commission=None, error="User cancelled"
+                )
+        
+        try:
+            params = {
+                "symbol": order.symbol,
+                "side": order.side.value,
+                "type": order.order_type.value,
+                "quantity": order.quantity,
+            }
+            if order.reduce_only:
+                params["reduceOnly"] = "true"
+            if order.order_type == OrderType.LIMIT and order.price:
+                params["price"] = order.price
+                params["timeInForce"] = "GTC"
+            
+            result = self._request("POST", "/fapi/v1/order", params)
+            
+            # Update daily tracking
+            self.daily_volume += notional
+            self.orders_today.append({
+                "time": time.time(),
+                "order": order,
+                "result": result
+            })
+            
+            return OrderResult(
+                success=True,
+                order_id=str(result.get("orderId")),
+                fill_price=float(result.get("avgPrice", current_price)),
+                fill_quantity=float(result.get("executedQty", order.quantity)),
+                commission=float(result.get("commission", 0)),
+                error=None
+            )
+            
+        except Exception as e:
+            return OrderResult(
+                success=False, order_id=None, fill_price=None,
+                fill_quantity=None, commission=None, error=str(e)
+            )
+    
+    def close_position(self, symbol: str, current_price: float) -> OrderResult:
+        """Close entire position for symbol."""
+        positions = self.get_positions()
+        if symbol not in positions:
+            return OrderResult(
+                success=False, order_id=None, fill_price=None,
+                fill_quantity=None, commission=None, error="No position"
+            )
+        
+        quantity = abs(positions[symbol])
+        side = OrderSide.SELL if positions[symbol] > 0 else OrderSide.BUY
+        
+        return self.execute(
+            OrderRequest(symbol=symbol, side=side, quantity=quantity, reduce_only=True),
+            current_price
+        )
+```
+
+### Safety Guardrails
+
+```python
+# PRODUCTION CHECKLIST (must pass before live trading)
+LIVE_TRADING_CHECKLIST = [
+    "testnet=True verified working",
+    "max_order_value set to acceptable loss",
+    "max_daily_volume set to daily risk budget",
+    "require_confirmation=True for initial testing",
+    "Kill-switch integration verified",
+    "API keys have trade permission only (no withdraw)",
+    "IP whitelist configured on Binance",
+    "Testnet paper run for 7+ days without issues",
+]
+```
+
+### Acceptance Criteria
+- [ ] Testnet orders execute correctly
+- [ ] Safety limits block oversized orders
+- [ ] Confirmation prompt works
+- [ ] Daily volume tracking accurate
+- [ ] Position close works
+- [ ] Error handling robust
+
+### Verification
+```bash
+pytest tests/unit/test_live_broker.py -v
+
+# Testnet integration (requires API keys)
+python -c "
+from argus_py.broker.live import LiveBroker, LiveConfig
+
+config = LiveConfig(
+    api_key='YOUR_TESTNET_KEY',
+    api_secret='YOUR_TESTNET_SECRET',
+    testnet=True,
+    max_order_value=50.0,
+    require_confirmation=False
+)
+
+broker = LiveBroker(config)
+balance = broker.get_balance()
+print(f'Testnet Balance: \${balance:.2f}')
+positions = broker.get_positions()
+print(f'Positions: {positions}')
+"
+```
+
+### Files to Create
+1. `argus_py/broker/live.py` (NEW - 300 lines)
+2. `argus_py/broker/safety.py` (NEW - guardrails)
+3. `tests/unit/test_live_broker.py` (NEW - 100 lines, mocked)
+4. `Docs/LIVE_TRADING_CHECKLIST.md` (NEW)
+
+---
+
+## P22-003: Real-Time Dashboard
+
+**Assign to:** Sonnet  
+**Priority:** P2  
+**Estimated:** 6 hours
+
+### Objective
+Web-based real-time dashboard for monitoring paper/live trading.
+
+### Contract
+
+**File:** `argus_py/dashboard/app.py` (NEW)
+
+```python
+from flask import Flask, jsonify, render_template
+from pathlib import Path
+import json
+import csv
+from datetime import datetime
+
+app = Flask(__name__)
+
+class DashboardData:
+    """Data provider for dashboard."""
+    
+    def __init__(self, run_dir: Path):
+        self.run_dir = run_dir
+    
+    def get_heartbeat(self) -> dict:
+        """Get latest heartbeat data."""
+        path = self.run_dir / "heartbeat.json"
+        if path.exists():
+            return json.loads(path.read_text())
+        return {"error": "No heartbeat"}
+    
+    def get_state(self) -> dict:
+        """Get daemon state."""
+        path = self.run_dir / "daemon_state.json"
+        if path.exists():
+            return json.loads(path.read_text())
+        return {"error": "No state"}
+    
+    def get_recent_trades(self, limit: int = 20) -> list:
+        """Get recent trades from CSV."""
+        path = self.run_dir / "trades.csv"
+        if not path.exists():
+            return []
+        
+        trades = []
+        with open(path) as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                trades.append(row)
+        
+        return trades[-limit:]
+    
+    def get_recent_decisions(self, limit: int = 50) -> list:
+        """Get recent decisions."""
+        path = self.run_dir / "decisions.csv"
+        if not path.exists():
+            return []
+        
+        decisions = []
+        with open(path) as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                decisions.append(row)
+        
+        return decisions[-limit:]
+    
+    def get_equity_curve(self) -> list:
+        """Calculate equity curve from trades."""
+        trades = self.get_recent_trades(1000)
+        curve = []
+        equity = 1000  # Starting equity
+        
+        for trade in trades:
+            if trade.get("event") == "CLOSE":
+                pnl = float(trade.get("pnl", 0))
+                equity += pnl
+                curve.append({
+                    "timestamp": trade["timestamp"],
+                    "equity": equity
+                })
+        
+        return curve
+    
+    def get_rejection_summary(self) -> dict:
+        """Summarize rejections by code."""
+        path = self.run_dir / "rejects.csv"
+        if not path.exists():
+            return {}
+        
+        summary = {}
+        with open(path) as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                code = row.get("code", "UNKNOWN")
+                summary[code] = summary.get(code, 0) + 1
+        
+        return summary
+
+# Routes
+@app.route("/")
+def index():
+    return render_template("index.html")
+
+@app.route("/api/status")
+def api_status():
+    data = DashboardData(Path(app.config["RUN_DIR"]))
+    return jsonify({
+        "heartbeat": data.get_heartbeat(),
+        "state": data.get_state()
+    })
+
+@app.route("/api/trades")
+def api_trades():
+    data = DashboardData(Path(app.config["RUN_DIR"]))
+    return jsonify(data.get_recent_trades(50))
+
+@app.route("/api/equity")
+def api_equity():
+    data = DashboardData(Path(app.config["RUN_DIR"]))
+    return jsonify(data.get_equity_curve())
+
+@app.route("/api/rejections")
+def api_rejections():
+    data = DashboardData(Path(app.config["RUN_DIR"]))
+    return jsonify(data.get_rejection_summary())
+
+def create_app(run_dir: str):
+    app.config["RUN_DIR"] = run_dir
+    return app
+```
+
+### Frontend Template
+
+**File:** `argus_py/dashboard/templates/index.html`
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Argus Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #1a1a2e; color: #eee; margin: 0; padding: 20px; }
+        .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+        .card { background: #16213e; border-radius: 12px; padding: 20px; }
+        .card h3 { margin-top: 0; color: #00d9ff; }
+        .status-ok { color: #00ff88; }
+        .status-warn { color: #ffaa00; }
+        .status-error { color: #ff4444; }
+        .metric { font-size: 2em; font-weight: bold; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 8px; text-align: left; border-bottom: 1px solid #333; }
+        #equity-chart { max-height: 300px; }
+    </style>
+</head>
+<body>
+    <h1>🛡️ Argus Trading Dashboard</h1>
+    
+    <div class="grid">
+        <div class="card">
+            <h3>System Status</h3>
+            <div id="status">Loading...</div>
+        </div>
+        
+        <div class="card">
+            <h3>Portfolio</h3>
+            <div id="portfolio">Loading...</div>
+        </div>
+        
+        <div class="card">
+            <h3>Risk Level</h3>
+            <div id="risk" class="metric">--</div>
+        </div>
+    </div>
+    
+    <div class="card" style="margin-top: 20px;">
+        <h3>Equity Curve</h3>
+        <canvas id="equity-chart"></canvas>
+    </div>
+    
+    <div class="grid" style="margin-top: 20px;">
+        <div class="card">
+            <h3>Recent Trades</h3>
+            <table id="trades-table">
+                <tr><th>Time</th><th>Symbol</th><th>Side</th><th>P&L</th></tr>
+            </table>
+        </div>
+        
+        <div class="card">
+            <h3>Rejection Summary</h3>
+            <div id="rejections"></div>
+        </div>
+    </div>
+    
+    <script>
+        async function fetchData() {
+            const status = await fetch('/api/status').then(r => r.json());
+            const trades = await fetch('/api/trades').then(r => r.json());
+            const equity = await fetch('/api/equity').then(r => r.json());
+            const rejections = await fetch('/api/rejections').then(r => r.json());
+            
+            updateStatus(status);
+            updateTrades(trades);
+            updateEquityChart(equity);
+            updateRejections(rejections);
+        }
+        
+        function updateStatus(data) {
+            const hb = data.heartbeat;
+            const state = data.state;
+            
+            document.getElementById('status').innerHTML = `
+                <p>Last Update: ${new Date(hb.timestamp * 1000).toLocaleString()}</p>
+                <p>Bars Processed: ${hb.bars_processed}</p>
+                <p class="${hb.errors_1h === 0 ? 'status-ok' : 'status-warn'}">
+                    Errors (1h): ${hb.errors_1h}
+                </p>
+            `;
+            
+            document.getElementById('portfolio').innerHTML = `
+                <p class="metric">$${state.equity?.toFixed(2) || '--'}</p>
+                <p>Balance: $${state.balance?.toFixed(2) || '--'}</p>
+                <p>Drawdown: ${state.current_dd_pct?.toFixed(2) || '--'}%</p>
+            `;
+            
+            const riskLevel = state.kill_switch_level || 'NORMAL';
+            const riskClass = riskLevel === 'NORMAL' ? 'status-ok' : 
+                             riskLevel === 'SOFT' ? 'status-warn' : 'status-error';
+            document.getElementById('risk').innerHTML = `<span class="${riskClass}">${riskLevel}</span>`;
+        }
+        
+        // ... more update functions ...
+        
+        setInterval(fetchData, 5000);
+        fetchData();
+    </script>
+</body>
+</html>
+```
+
+### CLI Runner
+
+**File:** `Scripts/dashboard.py`
+
+```python
+#!/usr/bin/env python3
+import argparse
+from argus_py.dashboard.app import create_app
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("run_dir", help="Path to run directory")
+    parser.add_argument("--port", type=int, default=8080)
+    parser.add_argument("--host", default="127.0.0.1")
+    args = parser.parse_args()
+    
+    app = create_app(args.run_dir)
+    print(f"🛡️ Argus Dashboard running at http://{args.host}:{args.port}")
+    app.run(host=args.host, port=args.port, debug=False)
+
+if __name__ == "__main__":
+    main()
+```
+
+### Acceptance Criteria
+- [ ] Dashboard loads without errors
+- [ ] Status updates every 5 seconds
+- [ ] Equity chart renders correctly
+- [ ] Trade history displays
+- [ ] Rejection summary accurate
+
+### Verification
+```bash
+# Start dashboard
+python Scripts/dashboard.py runs/phase19_twin/SOFT/ --port 8080
+
+# Open browser to http://localhost:8080
+# Verify all panels load and update
+```
+
+### Files to Create
+1. `argus_py/dashboard/__init__.py` (NEW)
+2. `argus_py/dashboard/app.py` (NEW - 200 lines)
+3. `argus_py/dashboard/templates/index.html` (NEW)
+4. `Scripts/dashboard.py` (NEW - CLI runner)
+
+### Dependencies
+```bash
+pip install flask
+```
+
+---
+
+## P22-004: Chiron ML Learning Module
+
+**Assign to:** Codex  
+**Priority:** P2  
+**Estimated:** 8 hours
+
+### Objective
+Implement ML-based weight optimization from historical trade outcomes.
+
+### Contract
+
+**File:** `argus_py/models/chiron/learner.py` (NEW)
+
+```python
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple
+import json
+from pathlib import Path
+import numpy as np
+from datetime import datetime
+
+@dataclass
+class TradeOutcome:
+    timestamp: int
+    symbol: str
+    regime: str
+    engine_scores: Dict[str, float]  # orion, aether, hermes, phoenix
+    verdict: str
+    pnl: float
+    hold_duration: float
+
+@dataclass
+class LearningRecord:
+    regime: str
+    weights: Dict[str, float]
+    sample_count: int
+    avg_pnl: float
+    win_rate: float
+    sharpe: float
+    last_updated: str
+
+class ChironLearner:
+    """
+    ML-based weight optimizer for Council voting.
+    
+    Uses historical trade outcomes to optimize engine weights per regime.
+    """
+    
+    def __init__(self, state_path: Optional[Path] = None):
+        self.state_path = state_path
+        self.records: Dict[str, LearningRecord] = {}
+        self.outcomes: List[TradeOutcome] = []
+        
+        if state_path and state_path.exists():
+            self.load_state()
+    
+    def add_outcome(self, outcome: TradeOutcome) -> None:
+        """Record a trade outcome for learning."""
+        self.outcomes.append(outcome)
+    
+    def optimize_weights(
+        self,
+        regime: str,
+        min_samples: int = 30
+    ) -> Optional[Dict[str, float]]:
+        """
+        Optimize weights for a specific regime using gradient-free optimization.
+        
+        Uses historical outcomes to find weight combination that maximizes Sharpe.
+        """
+        # Filter outcomes for this regime
+        regime_outcomes = [o for o in self.outcomes if o.regime == regime]
+        
+        if len(regime_outcomes) < min_samples:
+            return None  # Not enough data
+        
+        # Extract features and targets
+        engines = ["orion", "aether", "hermes", "phoenix", "aegean"]
+        X = np.array([[o.engine_scores.get(e, 50) for e in engines] 
+                      for o in regime_outcomes])
+        y = np.array([o.pnl for o in regime_outcomes])
+        
+        # Simple optimization: weight by correlation with positive outcomes
+        best_weights = self._optimize_correlation(X, y, engines)
+        
+        # Calculate performance metrics
+        win_rate = np.mean(y > 0)
+        avg_pnl = np.mean(y)
+        sharpe = np.mean(y) / np.std(y) if np.std(y) > 0 else 0
+        
+        # Store record
+        self.records[regime] = LearningRecord(
+            regime=regime,
+            weights=best_weights,
+            sample_count=len(regime_outcomes),
+            avg_pnl=avg_pnl,
+            win_rate=win_rate,
+            sharpe=sharpe,
+            last_updated=datetime.now().isoformat()
+        )
+        
+        return best_weights
+    
+    def _optimize_correlation(
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        engines: List[str]
+    ) -> Dict[str, float]:
+        """
+        Simple correlation-based weight optimization.
+        
+        Weights engines by their correlation with positive outcomes.
+        """
+        weights = {}
+        
+        for i, engine in enumerate(engines):
+            scores = X[:, i]
+            
+            # Correlation between engine score and P&L
+            if np.std(scores) > 0 and np.std(y) > 0:
+                corr = np.corrcoef(scores, y)[0, 1]
+            else:
+                corr = 0
+            
+            # Convert correlation to weight (0.1 to 0.4 range)
+            weights[engine] = max(0.1, min(0.4, 0.25 + corr * 0.15))
+        
+        # Normalize to sum to 1
+        total = sum(weights.values())
+        return {k: v/total for k, v in weights.items()}
+    
+    def get_optimal_weights(self, regime: str) -> Optional[Dict[str, float]]:
+        """Get previously optimized weights for regime."""
+        if regime in self.records:
+            return self.records[regime].weights
+        return None
+    
+    def load_outcomes_from_csv(self, trades_csv: Path, decisions_csv: Path) -> int:
+        """Load historical outcomes from telemetry CSVs."""
+        import csv
+        
+        # Load decisions for engine scores
+        decisions = {}
+        with open(decisions_csv) as f:
+            for row in csv.DictReader(f):
+                key = (row["bar_ts"], row["symbol"])
+                decisions[key] = row
+        
+        # Load trades and match with decisions
+        count = 0
+        with open(trades_csv) as f:
+            for row in csv.DictReader(f):
+                if row["event"] != "CLOSE":
+                    continue
+                
+                # Find matching decision (simplified)
+                # ... matching logic ...
+                
+                self.outcomes.append(TradeOutcome(
+                    timestamp=int(row["timestamp"]),
+                    symbol=row["symbol"],
+                    regime="TREND",  # From decision
+                    engine_scores={},  # From decision
+                    verdict="GO",
+                    pnl=float(row["pnl"]),
+                    hold_duration=0
+                ))
+                count += 1
+        
+        return count
+    
+    def save_state(self) -> None:
+        """Save learning state to disk."""
+        if not self.state_path:
+            return
+        
+        state = {
+            "records": {k: {
+                "regime": v.regime,
+                "weights": v.weights,
+                "sample_count": v.sample_count,
+                "avg_pnl": v.avg_pnl,
+                "win_rate": v.win_rate,
+                "sharpe": v.sharpe,
+                "last_updated": v.last_updated
+            } for k, v in self.records.items()},
+            "outcomes_count": len(self.outcomes)
+        }
+        
+        self.state_path.write_text(json.dumps(state, indent=2))
+    
+    def load_state(self) -> None:
+        """Load learning state from disk."""
+        if not self.state_path or not self.state_path.exists():
+            return
+        
+        state = json.loads(self.state_path.read_text())
+        
+        for k, v in state.get("records", {}).items():
+            self.records[k] = LearningRecord(**v)
+```
+
+### Weekly Learning Script
+
+**File:** `Scripts/chiron_learn.py`
+
+```python
+#!/usr/bin/env python3
+"""
+Weekly Chiron learning job.
+Analyzes past week's trades and updates weight recommendations.
+"""
+
+import argparse
+from pathlib import Path
+from argus_py.models.chiron.learner import ChironLearner
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("run_dir", help="Run directory with CSVs")
+    parser.add_argument("--output", default="chiron_weights.json")
+    args = parser.parse_args()
+    
+    run_dir = Path(args.run_dir)
+    learner = ChironLearner(state_path=Path(args.output))
+    
+    # Load historical data
+    count = learner.load_outcomes_from_csv(
+        run_dir / "trades.csv",
+        run_dir / "decisions.csv"
+    )
+    print(f"Loaded {count} trade outcomes")
+    
+    # Optimize for each regime
+    for regime in ["TREND", "CHOP", "RISK_OFF", "NEUTRAL"]:
+        weights = learner.optimize_weights(regime)
+        if weights:
+            record = learner.records[regime]
+            print(f"\n{regime}:")
+            print(f"  Samples: {record.sample_count}")
+            print(f"  Win Rate: {record.win_rate:.1%}")
+            print(f"  Sharpe: {record.sharpe:.2f}")
+            print(f"  Weights: {weights}")
+    
+    learner.save_state()
+    print(f"\nSaved to {args.output}")
+
+if __name__ == "__main__":
+    main()
+```
+
+### Acceptance Criteria
+- [ ] Outcome recording works
+- [ ] Weight optimization produces valid weights
+- [ ] Correlation-based optimization reasonable
+- [ ] State persistence works
+- [ ] CSV loading works
+
+### Verification
+```bash
+pytest tests/unit/test_chiron_learner.py -v
+
+python Scripts/chiron_learn.py runs/phase19_twin/SOFT/ --output chiron_test.json
+# Expected: Weight recommendations per regime
+```
+
+### Files to Create
+1. `argus_py/models/chiron/learner.py` (NEW - 250 lines)
+2. `Scripts/chiron_learn.py` (NEW - 80 lines)
+3. `tests/unit/test_chiron_learner.py` (NEW - 100 lines)
+
+---
+
 ## Agent Work Log Template
 
 Her agent tamamladığında bu formatı kullanmalı:
