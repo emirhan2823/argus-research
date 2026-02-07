@@ -753,6 +753,827 @@ pip install feedparser groq
 
 ---
 
+## P20-ENH4: Council Weighted Voting System
+
+**Assign to:** Codex  
+**Priority:** P1  
+**Estimated:** 5 hours
+
+### Objective
+Implement weighted voting aggregator that combines all engine outputs (matching Swift ArgusGrandCouncil).
+
+### Current State
+```python
+# argus_py/council/aggregator.py (current)
+# Only aggregates Aegean + Orion with fixed weights
+```
+
+### Target State
+
+**File:** `argus_py/council/council.py` (NEW)
+
+```python
+from dataclasses import dataclass
+from enum import Enum
+from typing import Dict, List, Optional
+from argus_py.models.orion.orion import OrionVote
+from argus_py.models.aether.aether import AetherResult
+from argus_py.models.hermes.hermes import HermesResult
+
+class CouncilAction(Enum):
+    AGGRESSIVE_BUY = "AGGRESSIVE_BUY"  # 80%+ allocation
+    ACCUMULATE = "ACCUMULATE"          # 50% allocation
+    HOLD = "HOLD"
+    TRIM = "TRIM"                      # Sell 50%
+    LIQUIDATE = "LIQUIDATE"            # Sell 100%
+
+class SignalStrength(Enum):
+    STRONG = "STRONG"
+    NORMAL = "NORMAL"
+    WEAK = "WEAK"  
+    VETOED = "VETOED"
+
+@dataclass
+class ModuleVote:
+    module: str           # "orion", "aether", "hermes", "phoenix"
+    score: float          # 0-100
+    direction: str        # LONG|SHORT|FLAT
+    confidence: float     # 0-1
+    reasons: List[str]
+
+@dataclass
+class CouncilDecision:
+    action: CouncilAction
+    strength: SignalStrength
+    confidence: float             # 0-100
+    reasoning: str
+    votes: List[ModuleVote]
+    weights_used: Dict[str, float]
+
+class CouncilWeights:
+    """Dynamic weights based on regime"""
+    
+    TREND_WEIGHTS = {
+        "orion": 0.35,     # Technical dominates
+        "aether": 0.20,
+        "hermes": 0.15,
+        "phoenix": 0.20,
+        "aegean": 0.10
+    }
+    
+    CHOP_WEIGHTS = {
+        "orion": 0.15,     # Reduce technical
+        "aether": 0.30,    # Macro more important
+        "hermes": 0.20,
+        "phoenix": 0.25,   # Reversion works in chop
+        "aegean": 0.10
+    }
+    
+    RISK_OFF_WEIGHTS = {
+        "orion": 0.10,
+        "aether": 0.40,    # Macro dominates
+        "hermes": 0.30,    # News critical
+        "phoenix": 0.10,
+        "aegean": 0.10
+    }
+    
+    @classmethod
+    def get_for_regime(cls, regime: str) -> Dict[str, float]:
+        if regime == "TREND":
+            return cls.TREND_WEIGHTS
+        elif regime == "CHOP":
+            return cls.CHOP_WEIGHTS
+        elif regime == "RISK_OFF":
+            return cls.RISK_OFF_WEIGHTS
+        return cls.TREND_WEIGHTS  # Default
+
+
+class GrandCouncil:
+    """Aggregates all engine votes into final decision"""
+    
+    def convene(
+        self,
+        orion_vote: Optional[OrionVote],
+        aether_result: Optional[AetherResult],
+        hermes_result: Optional[HermesResult],
+        phoenix_score: Optional[float],
+        aegean_vote: Optional[ModuleVote],
+        regime: str = "TREND"
+    ) -> CouncilDecision:
+        
+        # 1. Get regime-aware weights
+        weights = CouncilWeights.get_for_regime(regime)
+        
+        # 2. Collect votes
+        votes = self._collect_votes(orion_vote, aether_result, hermes_result, 
+                                     phoenix_score, aegean_vote)
+        
+        # 3. Calculate weighted score
+        weighted_score = self._calculate_weighted_score(votes, weights)
+        
+        # 4. Determine action
+        action = self._determine_action(weighted_score, votes)
+        
+        # 5. Check for vetoes
+        strength = self._check_vetoes(votes, action)
+        
+        return CouncilDecision(
+            action=action,
+            strength=strength,
+            confidence=weighted_score,
+            reasoning=self._generate_reasoning(votes, action),
+            votes=votes,
+            weights_used=weights
+        )
+    
+    def _calculate_weighted_score(self, votes: List[ModuleVote], 
+                                   weights: Dict[str, float]) -> float:
+        total_weight = 0
+        weighted_sum = 0
+        
+        for vote in votes:
+            if vote.module in weights:
+                w = weights[vote.module]
+                weighted_sum += vote.score * w
+                total_weight += w
+        
+        return weighted_sum / total_weight if total_weight > 0 else 50.0
+    
+    def _determine_action(self, score: float, votes: List[ModuleVote]) -> CouncilAction:
+        # Count directions
+        long_count = sum(1 for v in votes if v.direction == "LONG")
+        short_count = sum(1 for v in votes if v.direction == "SHORT")
+        
+        if score >= 75 and long_count >= 3:
+            return CouncilAction.AGGRESSIVE_BUY
+        elif score >= 60 and long_count >= 2:
+            return CouncilAction.ACCUMULATE
+        elif score <= 35 and short_count >= 3:
+            return CouncilAction.LIQUIDATE
+        elif score <= 45 and short_count >= 2:
+            return CouncilAction.TRIM
+        return CouncilAction.HOLD
+    
+    def _check_vetoes(self, votes: List[ModuleVote], action: CouncilAction) -> SignalStrength:
+        # Aether RISK_OFF vetoes buys
+        aether = next((v for v in votes if v.module == "aether"), None)
+        if aether and aether.score < 30 and action in [CouncilAction.AGGRESSIVE_BUY, CouncilAction.ACCUMULATE]:
+            return SignalStrength.VETOED
+        
+        # Hermes extreme negative vetoes buys
+        hermes = next((v for v in votes if v.module == "hermes"), None)
+        if hermes and hermes.score < 20 and action in [CouncilAction.AGGRESSIVE_BUY, CouncilAction.ACCUMULATE]:
+            return SignalStrength.VETOED
+        
+        # Strong consensus
+        if all(v.confidence > 0.7 for v in votes if v.confidence > 0):
+            return SignalStrength.STRONG
+        
+        return SignalStrength.NORMAL
+```
+
+### Acceptance Criteria
+- [ ] Regime-based weight selection works
+- [ ] Weighted score calculation correct
+- [ ] Veto logic blocks inappropriate actions
+- [ ] All module votes collected correctly
+- [ ] Output matches CouncilDecision schema
+
+### Verification
+```bash
+pytest tests/unit/test_council.py -v
+
+python -c "
+from argus_py.council.council import GrandCouncil, ModuleVote
+
+council = GrandCouncil()
+decision = council.convene(
+    orion_vote=ModuleVote('orion', 75, 'LONG', 0.8, ['Trend up']),
+    aether_result=None,
+    hermes_result=None,
+    phoenix_score=65,
+    aegean_vote=ModuleVote('aegean', 70, 'LONG', 0.7, ['Momentum']),
+    regime='TREND'
+)
+print(f'Action: {decision.action.value}')
+print(f'Strength: {decision.strength.value}')
+print(f'Confidence: {decision.confidence:.1f}')
+"
+```
+
+### Files to Create
+1. `argus_py/council/council.py` (NEW - 250 lines)
+2. `argus_py/council/weights.py` (NEW - 50 lines)
+3. `tests/unit/test_council.py` (NEW - 100 lines)
+
+---
+
+## P20-ENH5: Chiron Regime Detection Engine
+
+**Assign to:** Codex  
+**Priority:** P1  
+**Estimated:** 4 hours
+
+### Objective
+Implement regime detector that adjusts engine weights dynamically (matching Swift ChironRegimeEngine).
+
+### Contract
+
+**File:** `argus_py/models/chiron/__init__.py` (NEW)
+**File:** `argus_py/models/chiron/chiron.py` (NEW)
+
+```python
+from dataclasses import dataclass
+from enum import Enum
+from typing import Dict, Optional, List
+import json
+from pathlib import Path
+
+class MarketRegime(Enum):
+    TREND = "TREND"
+    CHOP = "CHOP"
+    RISK_OFF = "RISK_OFF"
+    NEWS_SHOCK = "NEWS_SHOCK"
+    NEUTRAL = "NEUTRAL"
+
+@dataclass
+class RegimeContext:
+    orion_score: Optional[float]
+    aether_score: Optional[float]
+    hermes_score: Optional[float]
+    adx: float
+    chop_index: float        # Choppiness Index
+    recent_volatility: float  # ATR / Price %
+
+@dataclass
+class ChironResult:
+    regime: MarketRegime
+    core_weights: Dict[str, float]    # Long-term components
+    pulse_weights: Dict[str, float]   # Short-term components
+    explanation: str
+    confidence: float
+
+class ChironRegimeEngine:
+    """Detects market regime and adjusts weights"""
+    
+    def __init__(self, state_path: Optional[Path] = None):
+        self.state_path = state_path
+        self._last_regime: MarketRegime = MarketRegime.NEUTRAL
+    
+    def evaluate(self, context: RegimeContext) -> ChironResult:
+        regime = self._detect_regime(context)
+        core, pulse = self._get_base_weights(regime)
+        
+        # Adjust for missing data
+        core = self._adjust_for_missing(core, context)
+        pulse = self._adjust_for_missing(pulse, context)
+        
+        return ChironResult(
+            regime=regime,
+            core_weights=core,
+            pulse_weights=pulse,
+            explanation=self._explain(regime, context),
+            confidence=self._calculate_confidence(context)
+        )
+    
+    def _detect_regime(self, ctx: RegimeContext) -> MarketRegime:
+        aether = ctx.aether_score or 50
+        orion = ctx.orion_score or 50
+        hermes = ctx.hermes_score or 50
+        
+        # 1. Check for News Shock
+        if hermes < 20 or hermes > 85:
+            return MarketRegime.NEWS_SHOCK
+        
+        # 2. Check for Risk-Off
+        if aether < 35:
+            return MarketRegime.RISK_OFF
+        
+        # 3. Check for Trend
+        if ctx.adx >= 25 and ctx.chop_index < 45:
+            return MarketRegime.TREND
+        
+        # 4. Check for Chop
+        if ctx.chop_index > 60 or (ctx.adx < 20 and 40 < orion < 60):
+            return MarketRegime.CHOP
+        
+        return MarketRegime.NEUTRAL
+    
+    def _get_base_weights(self, regime: MarketRegime) -> tuple:
+        WEIGHT_TABLE = {
+            MarketRegime.TREND: (
+                {"orion": 0.35, "aether": 0.20, "hermes": 0.15, "phoenix": 0.20, "aegean": 0.10},
+                {"orion": 0.40, "phoenix": 0.30, "hermes": 0.15, "aegean": 0.15}
+            ),
+            MarketRegime.CHOP: (
+                {"orion": 0.15, "aether": 0.30, "hermes": 0.20, "phoenix": 0.25, "aegean": 0.10},
+                {"phoenix": 0.40, "hermes": 0.25, "orion": 0.20, "aegean": 0.15}
+            ),
+            MarketRegime.RISK_OFF: (
+                {"aether": 0.40, "hermes": 0.30, "orion": 0.10, "phoenix": 0.10, "aegean": 0.10},
+                {"hermes": 0.50, "aether": 0.30, "phoenix": 0.10, "orion": 0.10}
+            ),
+            MarketRegime.NEWS_SHOCK: (
+                {"hermes": 0.50, "aether": 0.25, "orion": 0.10, "phoenix": 0.05, "aegean": 0.10},
+                {"hermes": 0.60, "aether": 0.20, "phoenix": 0.10, "orion": 0.10}
+            ),
+            MarketRegime.NEUTRAL: (
+                {"orion": 0.25, "aether": 0.25, "hermes": 0.20, "phoenix": 0.20, "aegean": 0.10},
+                {"orion": 0.25, "phoenix": 0.25, "hermes": 0.25, "aegean": 0.25}
+            )
+        }
+        return WEIGHT_TABLE.get(regime, WEIGHT_TABLE[MarketRegime.NEUTRAL])
+    
+    def _adjust_for_missing(self, weights: Dict[str, float], ctx: RegimeContext) -> Dict[str, float]:
+        """Zero out weights for missing modules, redistribute"""
+        adjusted = weights.copy()
+        
+        if ctx.orion_score is None:
+            adjusted["orion"] = 0
+        if ctx.aether_score is None:
+            adjusted["aether"] = 0
+        if ctx.hermes_score is None:
+            adjusted["hermes"] = 0
+        
+        # Normalize
+        total = sum(adjusted.values())
+        if total > 0:
+            return {k: v/total for k, v in adjusted.items()}
+        return adjusted
+    
+    def save_state(self, path: Path):
+        state = {"last_regime": self._last_regime.value}
+        path.write_text(json.dumps(state))
+    
+    def load_state(self, path: Path):
+        if path.exists():
+            state = json.loads(path.read_text())
+            self._last_regime = MarketRegime(state.get("last_regime", "NEUTRAL"))
+```
+
+### Choppiness Index Calculation
+
+```python
+def calculate_chop_index(highs: List[float], lows: List[float], 
+                          closes: List[float], period: int = 14) -> float:
+    """Choppiness Index: 0-100, higher = more choppy"""
+    import math
+    
+    atr_sum = 0
+    for i in range(1, period + 1):
+        tr = max(highs[-i] - lows[-i], 
+                 abs(highs[-i] - closes[-i-1]),
+                 abs(lows[-i] - closes[-i-1]))
+        atr_sum += tr
+    
+    highest = max(highs[-period:])
+    lowest = min(lows[-period:])
+    
+    if highest == lowest:
+        return 50.0
+    
+    chop = 100 * math.log10(atr_sum / (highest - lowest)) / math.log10(period)
+    return max(0, min(100, chop))
+```
+
+### Acceptance Criteria
+- [ ] All 5 regimes detected correctly
+- [ ] Weight tables match Swift implementation
+- [ ] Missing module adjustment works
+- [ ] State persistence works
+- [ ] Choppiness Index calculation correct
+
+### Verification
+```bash
+pytest tests/unit/test_chiron.py -v
+
+python -c "
+from argus_py.models.chiron.chiron import ChironRegimeEngine, RegimeContext
+
+engine = ChironRegimeEngine()
+result = engine.evaluate(RegimeContext(
+    orion_score=45,
+    aether_score=30,
+    hermes_score=50,
+    adx=15,
+    chop_index=65,
+    recent_volatility=2.5
+))
+print(f'Regime: {result.regime.value}')
+print(f'Core Weights: {result.core_weights}')
+"
+```
+
+### Files to Create
+1. `argus_py/models/chiron/__init__.py` (NEW)
+2. `argus_py/models/chiron/chiron.py` (NEW - 200 lines)
+3. `argus_py/models/chiron/indicators.py` (NEW - choppiness calc - 50 lines)
+4. `tests/unit/test_chiron.py` (NEW - 80 lines)
+
+---
+
+## P20-ENH6: Phoenix Channel Reversion Strategy
+
+**Assign to:** Codex  
+**Priority:** P2  
+**Estimated:** 4 hours
+
+### Objective
+Port linear regression channel reversion strategy (matching Swift PhoenixLogic).
+
+### Contract
+
+**File:** `argus_py/models/phoenix/__init__.py` (NEW)
+**File:** `argus_py/models/phoenix/phoenix.py` (NEW)
+
+```python
+from dataclasses import dataclass
+from typing import List, Optional, Tuple
+import numpy as np
+
+@dataclass
+class ChannelLevels:
+    upper: float
+    middle: float
+    lower: float
+    slope: float
+    r_squared: float  # Channel validity
+
+@dataclass
+class PhoenixSignals:
+    touch_lower_band: bool
+    rsi_reversal: bool
+    bullish_divergence: bool
+    trend_ok: bool
+
+@dataclass
+class PhoenixAdvice:
+    score: float           # 0-100
+    entry_price: float
+    stop_loss: float       # Invalidation level
+    target_1: float        # Mid-band
+    target_2: float        # Upper-band
+    channel: ChannelLevels
+    signals: PhoenixSignals
+    reason: str
+    r_squared: float
+
+class PhoenixEngine:
+    """Linear Regression Channel Mean Reversion"""
+    
+    def __init__(self, lookback: int = 60, channel_k: float = 2.0):
+        self.lookback = lookback
+        self.channel_k = channel_k
+    
+    def analyze(self, closes: List[float], highs: List[float], 
+                lows: List[float]) -> Optional[PhoenixAdvice]:
+        
+        if len(closes) < self.lookback:
+            return None
+        
+        # 1. Calculate Linear Regression Channel
+        channel = self._calculate_channel(closes[-self.lookback:])
+        
+        # 2. Check R-Squared validity (must be > 0.25)
+        if channel.r_squared < 0.25:
+            return PhoenixAdvice(
+                score=0, entry_price=closes[-1], stop_loss=0, target_1=0, target_2=0,
+                channel=channel, signals=PhoenixSignals(False, False, False, False),
+                reason="Channel weak (R² < 0.25)", r_squared=channel.r_squared
+            )
+        
+        # 3. Calculate RSI
+        rsi = self._calculate_rsi(closes, 14)
+        current_rsi = rsi[-1] if rsi else 50
+        
+        # 4. Detect signals
+        price = closes[-1]
+        signals = PhoenixSignals(
+            touch_lower_band=price <= channel.lower * 1.005,
+            rsi_reversal=current_rsi < 35 and rsi[-2] < current_rsi if len(rsi) > 1 else False,
+            bullish_divergence=self._check_divergence(closes, rsi),
+            trend_ok=channel.slope > -(channel.middle * 0.0005)
+        )
+        
+        # 5. Calculate score
+        score = self._calculate_score(signals, current_rsi, channel)
+        
+        # 6. Calculate levels
+        atr = self._calculate_atr(highs, lows, closes, 14)
+        stop_loss = channel.lower - (1.25 * atr) if signals.touch_lower_band else price - (2 * atr)
+        
+        return PhoenixAdvice(
+            score=score,
+            entry_price=price,
+            stop_loss=stop_loss,
+            target_1=channel.middle,
+            target_2=channel.upper if channel.slope > 0 else channel.middle + (channel.upper - channel.middle) * 0.5,
+            channel=channel,
+            signals=signals,
+            reason=self._generate_reason(score, signals, channel.slope),
+            r_squared=channel.r_squared
+        )
+    
+    def _calculate_channel(self, closes: List[float]) -> ChannelLevels:
+        """Linear Regression Channel with R-squared"""
+        n = len(closes)
+        x = np.arange(n)
+        y = np.array(closes)
+        
+        # Linear regression
+        x_mean = x.mean()
+        y_mean = y.mean()
+        
+        slope = np.sum((x - x_mean) * (y - y_mean)) / np.sum((x - x_mean) ** 2)
+        intercept = y_mean - slope * x_mean
+        
+        # Calculate regression line values
+        y_pred = slope * x + intercept
+        
+        # Standard deviation of residuals
+        residuals = y - y_pred
+        sigma = np.std(residuals)
+        
+        # R-squared
+        ss_res = np.sum(residuals ** 2)
+        ss_tot = np.sum((y - y_mean) ** 2)
+        r_squared = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0
+        
+        mid = y_pred[-1]
+        upper = mid + (self.channel_k * sigma)
+        lower = mid - (self.channel_k * sigma)
+        
+        return ChannelLevels(upper, mid, lower, slope, r_squared)
+    
+    def _calculate_score(self, signals: PhoenixSignals, rsi: float, 
+                          channel: ChannelLevels) -> float:
+        score = 50.0
+        
+        # Mean reversion signals
+        if signals.touch_lower_band:
+            score += 20
+        if signals.rsi_reversal:
+            score += 15
+        if signals.bullish_divergence:
+            score += 15
+        if rsi < 35:
+            score += 10
+        if signals.trend_ok:
+            score += 5
+        
+        # Penalties
+        if channel.slope < 0:
+            score -= 15
+        sigma_pct = (channel.upper - channel.lower) / channel.middle / 2
+        if sigma_pct > 0.08:  # High volatility
+            score -= 10
+        if rsi > 50:
+            score -= 15
+        
+        return max(0, min(100, score))
+```
+
+### Acceptance Criteria
+- [ ] Linear regression channel calculation matches Swift
+- [ ] R-squared filter works (reject weak channels)
+- [ ] RSI divergence detection works
+- [ ] Scoring logic matches Swift PhoenixLogic
+- [ ] Stop loss and targets calculated correctly
+
+### Verification
+```bash
+pytest tests/unit/test_phoenix.py -v
+
+python -c "
+from argus_py.models.phoenix.phoenix import PhoenixEngine
+from argus_py.data.loader import load_csv
+
+bars = load_csv('argus_py/data/BTCUSDT.csv')[-100:]
+closes = [b.close for b in bars]
+highs = [b.high for b in bars]
+lows = [b.low for b in bars]
+
+engine = PhoenixEngine()
+advice = engine.analyze(closes, highs, lows)
+print(f'Score: {advice.score}')
+print(f'R²: {advice.r_squared:.3f}')
+print(f'Entry: {advice.entry_price:.2f}, SL: {advice.stop_loss:.2f}')
+print(f'T1: {advice.target_1:.2f}, T2: {advice.target_2:.2f}')
+"
+```
+
+### Files to Create
+1. `argus_py/models/phoenix/__init__.py` (NEW)
+2. `argus_py/models/phoenix/phoenix.py` (NEW - 200 lines)
+3. `tests/unit/test_phoenix.py` (NEW - 80 lines)
+
+---
+
+## P20-ENH7: AutoPilot Position Management
+
+**Assign to:** Codex  
+**Priority:** P2  
+**Estimated:** 5 hours
+
+### Objective
+Implement automated position entry/exit logic (matching Swift ArgusAutoPilotEngine).
+
+### Contract
+
+**File:** `argus_py/autopilot/__init__.py` (NEW)
+**File:** `argus_py/autopilot/autopilot.py` (NEW)
+
+```python
+from dataclasses import dataclass
+from enum import Enum
+from typing import Dict, List, Optional
+
+class AutoPilotMode(Enum):
+    CORSE = "CORSE"   # Swing: wider stops, longer holds
+    PULSE = "PULSE"   # Scalp: tight stops, quick exits
+
+@dataclass
+class TradePosition:
+    symbol: str
+    entry_price: float
+    quantity: float
+    mode: AutoPilotMode
+    entry_time: float
+    high_water_mark: float  # For trailing stop
+    engine: str             # Which engine triggered
+
+@dataclass
+class AutoPilotSignal:
+    action: str             # BUY|SELL|TRIM|HOLD
+    quantity: float
+    reason: str
+    stop_loss: Optional[float]
+    take_profit: Optional[float]
+    trim_percentage: Optional[float]
+
+@dataclass
+class AutoPilotConfig:
+    # Risk limits
+    max_risk_per_trade_pct: float = 1.0   # 1% of portfolio
+    max_equity_exposure: float = 1.0       # 100%
+    
+    # Corse (Swing) settings
+    corse_stop_pct: float = 8.0
+    corse_trim_threshold_pct: float = 20.0
+    corse_trailing_activation_pct: float = 5.0
+    corse_trailing_distance_pct: float = 2.5
+    
+    # Pulse (Scalp) settings
+    pulse_stop_pct: float = 5.0
+    pulse_trim_threshold_pct: float = 10.0
+    pulse_trailing_activation_pct: float = 3.0
+    pulse_trailing_distance_pct: float = 1.5
+    
+    # Entry
+    min_score_for_entry: float = 65.0
+    min_confidence_pct: float = 40.0
+
+
+class AutoPilotEngine:
+    """Handles position entry and exit logic"""
+    
+    def __init__(self, config: AutoPilotConfig = None):
+        self.config = config or AutoPilotConfig()
+    
+    def evaluate(
+        self,
+        symbol: str,
+        current_price: float,
+        council_score: float,
+        council_action: str,
+        existing_position: Optional[TradePosition],
+        portfolio_equity: float,
+        cash_available: float
+    ) -> AutoPilotSignal:
+        
+        if existing_position:
+            return self._manage_existing(symbol, current_price, council_score, existing_position)
+        else:
+            return self._evaluate_entry(symbol, current_price, council_score, council_action,
+                                        portfolio_equity, cash_available)
+    
+    def _manage_existing(self, symbol: str, price: float, score: float,
+                          pos: TradePosition) -> AutoPilotSignal:
+        """The Harvester - manage open positions"""
+        pnl_pct = ((price - pos.entry_price) / pos.entry_price) * 100
+        mode = pos.mode
+        cfg = self.config
+        
+        # Get mode-specific thresholds
+        if mode == AutoPilotMode.CORSE:
+            stop_pct = cfg.corse_stop_pct
+            trim_pct = cfg.corse_trim_threshold_pct
+            trail_activate = cfg.corse_trailing_activation_pct
+            trail_distance = cfg.corse_trailing_distance_pct
+        else:  # PULSE
+            stop_pct = cfg.pulse_stop_pct
+            trim_pct = cfg.pulse_trim_threshold_pct
+            trail_activate = cfg.pulse_trailing_activation_pct
+            trail_distance = cfg.pulse_trailing_distance_pct
+        
+        # 1. HARD STOP
+        if pnl_pct < -stop_pct:
+            return AutoPilotSignal("SELL", pos.quantity, f"Stop Loss ({pnl_pct:.1f}%)", None, None, None)
+        
+        # 2. TRIM PROFITS
+        if pnl_pct > trim_pct:
+            return AutoPilotSignal("TRIM", pos.quantity * 0.3, f"Profit Taking ({pnl_pct:.1f}%)", None, None, 0.3)
+        
+        # 3. TRAILING STOP
+        drawdown_from_high = ((pos.high_water_mark - price) / pos.high_water_mark) * 100
+        if pnl_pct > trail_activate and drawdown_from_high > trail_distance:
+            return AutoPilotSignal("SELL", pos.quantity, f"Trailing Stop (DD: {drawdown_from_high:.1f}%)", None, None, None)
+        
+        # 4. THESIS BROKEN
+        score_threshold = 55 if mode == AutoPilotMode.CORSE else 50
+        if score < score_threshold and pnl_pct < 0:
+            return AutoPilotSignal("SELL", pos.quantity, f"Thesis Broken (Score: {score:.0f})", None, None, None)
+        
+        return AutoPilotSignal("HOLD", 0, "Position OK", None, None, None)
+    
+    def _evaluate_entry(self, symbol: str, price: float, score: float, action: str,
+                         equity: float, cash: float) -> AutoPilotSignal:
+        """The Hunter - find new entries"""
+        
+        if score < self.config.min_score_for_entry:
+            return AutoPilotSignal("HOLD", 0, f"Score too low ({score:.0f})", None, None, None)
+        
+        if action not in ["AGGRESSIVE_BUY", "ACCUMULATE"]:
+            return AutoPilotSignal("HOLD", 0, f"No buy signal ({action})", None, None, None)
+        
+        # Calculate position size (1% risk)
+        risk_amount = equity * (self.config.max_risk_per_trade_pct / 100)
+        assumed_stop_pct = 5.0  # Default 5% stop
+        position_value = risk_amount / (assumed_stop_pct / 100)
+        
+        # Cap by available cash
+        position_value = min(position_value, cash * 0.95)
+        quantity = position_value / price
+        
+        if quantity <= 0:
+            return AutoPilotSignal("HOLD", 0, "Insufficient cash", None, None, None)
+        
+        stop_loss = price * (1 - assumed_stop_pct / 100)
+        take_profit = price * 1.15  # 15% target
+        
+        return AutoPilotSignal("BUY", quantity, f"Entry Signal (Score: {score:.0f})", stop_loss, take_profit, None)
+    
+    def update_high_water_mark(self, position: TradePosition, current_price: float) -> TradePosition:
+        """Update position's high water mark for trailing stop"""
+        if current_price > position.high_water_mark:
+            position.high_water_mark = current_price
+        return position
+```
+
+### Acceptance Criteria
+- [ ] Corse vs Pulse mode differences work
+- [ ] Stop loss triggers at correct thresholds
+- [ ] Trim profits at correct thresholds
+- [ ] Trailing stop activates and triggers correctly
+- [ ] Position sizing respects 1% risk rule
+- [ ] High water mark updates correctly
+
+### Verification
+```bash
+pytest tests/unit/test_autopilot.py -v
+
+python -c "
+from argus_py.autopilot.autopilot import AutoPilotEngine, TradePosition, AutoPilotMode
+
+engine = AutoPilotEngine()
+
+# Test new entry
+signal = engine.evaluate(
+    symbol='BTCUSDT',
+    current_price=50000,
+    council_score=72,
+    council_action='ACCUMULATE',
+    existing_position=None,
+    portfolio_equity=10000,
+    cash_available=5000
+)
+print(f'Entry: {signal.action}, Qty: {signal.quantity:.4f}, Reason: {signal.reason}')
+
+# Test exit
+pos = TradePosition('BTCUSDT', 50000, 0.1, AutoPilotMode.PULSE, 0, 52000, 'orion')
+signal = engine.evaluate('BTCUSDT', 48000, 45, 'HOLD', pos, 10000, 0)
+print(f'Exit: {signal.action}, Reason: {signal.reason}')
+"
+```
+
+### Files to Create
+1. `argus_py/autopilot/__init__.py` (NEW)
+2. `argus_py/autopilot/autopilot.py` (NEW - 250 lines)
+3. `argus_py/autopilot/config.py` (NEW - 50 lines)
+4. `tests/unit/test_autopilot.py` (NEW - 120 lines)
+
+---
+
 ## Agent Work Log Template
 
 Her agent tamamladığında bu formatı kullanmalı:
