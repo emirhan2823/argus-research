@@ -46,6 +46,17 @@ class TelemetryEvent:
             "block_reason_primary": reasons[0] if reasons else None,
             "block_reasons_all": reasons
         })
+        # Optional strategy tags
+        if params.get("strategy_id") is not None:
+            base["strategy_id"] = params.get("strategy_id")
+        if params.get("trigger_type") is not None:
+            base["trigger_type"] = params.get("trigger_type")
+        if params.get("regime_filter") is not None:
+            base["regime_filter"] = params.get("regime_filter")
+        if params.get("strategy_timeframe") is not None:
+            base["strategy_timeframe"] = params.get("strategy_timeframe")
+        if params.get("trigger_state") is not None:
+            base["trigger_state"] = params.get("trigger_state")
         return base
 
     @staticmethod

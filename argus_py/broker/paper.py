@@ -231,7 +231,18 @@ class PaperBroker:
             
         return None
 
-    def execute_strategy(self, symbol: str, decision: str, direction: str, price: float, timestamp: float, risk_pct: float = 0.02, leverage: float = 1.0) -> Tuple[bool, str]:
+    def execute_strategy(
+        self,
+        symbol: str,
+        decision: str,
+        direction: str,
+        price: float,
+        timestamp: float,
+        risk_pct: float = 0.02,
+        leverage: float = 1.0,
+        custom_sl_price: Optional[float] = None,
+        custom_tp_price: Optional[float] = None,
+    ) -> Tuple[bool, str]:
         """
         Returns (Success, Reason/Details)
         """
@@ -252,11 +263,11 @@ class PaperBroker:
             
             # Simple bracket logic (can be refined later to use volatility)
             if direction == "BUY":
-                sl_price = exec_price * 0.98
-                tp_price = exec_price * 1.04
+                sl_price = custom_sl_price if custom_sl_price is not None else (exec_price * 0.98)
+                tp_price = custom_tp_price if custom_tp_price is not None else (exec_price * 1.04)
             elif direction == "SELL":
-                sl_price = exec_price * 1.02
-                tp_price = exec_price * 0.96
+                sl_price = custom_sl_price if custom_sl_price is not None else (exec_price * 1.02)
+                tp_price = custom_tp_price if custom_tp_price is not None else (exec_price * 0.96)
             else:
                  return (False, "Invalid Direction")
             

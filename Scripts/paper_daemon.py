@@ -20,7 +20,9 @@ sys.path.append(str(REPO_ROOT))
 from argus_py.models.aegean.aegean import AegeanEngine
 from argus_py.models.orion.orion import OrionEngine
 from argus_py.council.aggregator import Council
+from argus_py.council.defs import ConsensusVerdict
 from argus_py.strategy.router import ModeRouter
+from argus_py.strategy.tophunter_short import evaluate_tophunter_short_v1
 from argus_py.risk.regime import RegimeDetector
 from argus_py.broker.paper import PaperBroker, TradeFill
 from argus_py.data.reporting import Reporter
@@ -60,6 +62,15 @@ DEFAULT_CONFIG = {
     "soft_defense_override": False,
     "min_risk_pct": 0.1,
     "safe_paper": False,
+    # Strategy selection
+    "strategy": "council",
+    "tophunter_adx_max": 20.0,
+    "tophunter_pivot_left": 2,
+    "tophunter_pivot_right": 2,
+    "tophunter_max_risk_trade_pct": 0.5,
+    "tophunter_daily_loss_cap_pct": 1.5,
+    "tophunter_max_open_positions": 1,
+    "tophunter_loss_cooldown_bars": 3,
     
     # Config Objects Mock (Will be populated in main)
     "args": None
@@ -102,6 +113,7 @@ class PaperDaemon:
             "start_time_iso": datetime.now().isoformat()
         }
         self.consecutive_losses = 0
+        self.tophunter_cooldown_remaining = 0
         self.api_error_timestamps = deque(maxlen=2048)
         self.api_errors_1h = 0
         
@@ -177,7 +189,8 @@ class PaperDaemon:
                 "positions": [str(p) for p in self.broker.details.values()],
                 "config_snapshot": {
                     "symbol": self.cfg["args"].symbol,
-                    "min_adx": self.cfg["min_adx"]
+                    "min_adx": self.cfg["min_adx"],
+                    "strategy": self.cfg.get("strategy", "council"),
                 }
             }
             # Atomic Write
@@ -275,6 +288,12 @@ class PaperDaemon:
         except Exception:
             self.log_error("SAVE_KILL_SWITCH_FAILED")
 
+    @staticmethod
+    def _format_strategy_tags(strategy_tags):
+        if not strategy_tags:
+            return ""
+        return "|".join(f"{k}={v}" for k, v in strategy_tags.items())
+
     def _apply_kill_switch_guard(self, bar: Bar, daily_pnl_pct: float, current_dd_pct: float) -> bool:
         metrics = {
             'daily_pnl_pct': daily_pnl_pct,
@@ -300,11 +319,14 @@ class PaperDaemon:
             return True
         return False
 
-    def append_decision(self, bar, verdict, router_res, score, exp_move, adx):
+    def append_decision(self, bar, verdict, router_res, score, exp_move, adx, strategy_tags=None):
         self.counters["decisions_total"] += 1
         ts_iso = datetime.now().isoformat()
         bar_ts_iso = datetime.fromtimestamp(bar.timestamp).isoformat()
         reasons = verdict.metadata.get("block_reason", "")
+        tags_text = self._format_strategy_tags(strategy_tags)
+        if tags_text:
+            reasons = f"{reasons};{tags_text}" if reasons else tags_text
         
         # CSV (Legacy/UI quick view)
         row = f"{ts_iso},{bar_ts_iso},{self.cfg['symbol']},{verdict.regime},{router_res['mode_final']},{verdict.decision},{verdict.direction},{score:.2f},{exp_move:.1f},{adx:.1f},{reasons}\n"
@@ -313,6 +335,12 @@ class PaperDaemon:
             
         # JSONL (Truth)
         reasons_list = [reasons] if reasons else []
+        params_payload = {
+            "max_exp_move_bps": self.cfg["max_exp_move_bps"],
+            "min_adx": self.cfg["min_adx"]
+        }
+        if strategy_tags:
+            params_payload.update(strategy_tags)
         event = TelemetryEvent.decision(
             daemon_id=self.cfg["daemon_id"],
             run_id=self.cfg.get("run_id", "unknown"),
@@ -331,19 +359,19 @@ class PaperDaemon:
                 "atr": verdict.metadata.get("atr", 0.0),
                 "expected_move_bps": exp_move
             },
-            params={
-                "max_exp_move_bps": self.cfg["max_exp_move_bps"],
-                "min_adx": self.cfg["min_adx"]
-            },
+            params=params_payload,
             reasons=reasons_list
         )
         with open(self.decisions_jsonl, "a") as f:
             f.write(json.dumps(event) + "\n")
 
-    def append_reject(self, bar, code, detail):
+    def append_reject(self, bar, code, detail, strategy_tags=None):
         self.counters["rejects_total"] += 1
         ts_iso = datetime.now().isoformat()
         bar_ts_iso = datetime.fromtimestamp(bar.timestamp).isoformat()
+        tags_text = self._format_strategy_tags(strategy_tags)
+        if tags_text:
+            detail = f"{detail} | {tags_text}" if detail else tags_text
         
         # CSV
         row = f"{ts_iso},{bar_ts_iso},{self.cfg['symbol']},{code},{detail}\n"
@@ -359,7 +387,7 @@ class PaperDaemon:
             bar_ts=bar.timestamp,
             code=code,
             detail=detail,
-            snapshot={} # Could enrich later
+            snapshot={"strategy_tags": strategy_tags or {}} # Could enrich later
         )
         with open(self.rejects_jsonl, "a") as f:
             f.write(json.dumps(event) + "\n")
@@ -527,7 +555,11 @@ class PaperDaemon:
         if len(self.history_bars) > 2000:
             self.history_bars.pop(0) 
         
-        args = self.cfg["args"]
+        strategy_name = str(self.cfg.get("strategy", "council")).lower()
+        use_tophunter = strategy_name == "tophunter_short_v1"
+        if use_tophunter and self.tophunter_cooldown_remaining > 0:
+            self.tophunter_cooldown_remaining -= 1
+
         history = self.history_bars
 
         # Mark equity on current close before risk gates.
@@ -576,73 +608,177 @@ class PaperDaemon:
         slope_bps_abs = (abs(slope_raw) / bar.close) * 10000.0
         atr_m = or_vote.metadata.get('atr', 0.0)
         atr_bps = (atr_m / bar.close) * 10000.0 if bar.close > 0 else 0.0
-        
+
+        strategy_tags = None
+        tophunter_signal = None
         expected_move = 0.0
-        if verdict.decision == "GO":
-             # Exp Logic
-             adx_bps_m = adx_m * 0.4
-             edge_score = (0.6 * slope_bps_abs) + (0.4 * adx_bps_m)
-             
-             atr_base = atr_bps * self.cfg["atr_k"]
-             adx_factor = 0.0
-             if adx_m > 20: adx_factor = min(1.0, (adx_m - 20) / 40.0)
-             adx_boost = 1.0 + adx_factor
-             
-             expected_move = max(slope_bps_abs, atr_base) * adx_boost * self.cfg["adx_boost"]
-             cap_bps = atr_bps * self.cfg["exp_cap_mult"]
-             expected_move = min(expected_move, cap_bps)
-             
-             verdict.metadata['expected_move'] = expected_move
-             verdict.metadata['score'] = edge_score
+        edge_score = 0.0
+        if use_tophunter:
+            tophunter_signal = evaluate_tophunter_short_v1(
+                history,
+                adx_value=adx_m,
+                max_adx=float(self.cfg.get("tophunter_adx_max", 20.0)),
+                left=int(self.cfg.get("tophunter_pivot_left", 2)),
+                right=int(self.cfg.get("tophunter_pivot_right", 2)),
+            )
+            strategy_tags = dict(tophunter_signal.tags)
+            strategy_tags["strategy_timeframe"] = self.cfg["interval"]
+            if tophunter_signal.decision == "GO":
+                strategy_tags["trigger_state"] = "FIRED"
+                reason = tophunter_signal.reason
+                verdict = ConsensusVerdict(
+                    timestamp=bar.timestamp,
+                    decision="GO",
+                    direction="SELL",
+                    conviction=85.0,
+                    regime=regime,
+                    rationale=reason,
+                    votes=[],
+                    metadata={
+                        "block_reason": None,
+                        "strategy_id": strategy_tags["strategy_id"],
+                        "trigger_type": strategy_tags["trigger_type"],
+                        "regime_filter": strategy_tags["regime_filter"],
+                        "pivot_low": tophunter_signal.pivot_low,
+                        "pivot_high": tophunter_signal.pivot_high,
+                        "atr": tophunter_signal.atr if tophunter_signal.atr is not None else atr_m,
+                        "slope": slope_raw,
+                    },
+                )
+                edge_score = 100.0
+                if tophunter_signal.entry_price and tophunter_signal.tp2_price and tophunter_signal.entry_price > 0:
+                    expected_move = (
+                        (tophunter_signal.entry_price - tophunter_signal.tp2_price)
+                        / tophunter_signal.entry_price
+                    ) * 10000.0
+                verdict.metadata["expected_move"] = expected_move
+                verdict.metadata["score"] = edge_score
+            else:
+                strategy_tags["trigger_state"] = "NO_FIRE"
+                verdict = ConsensusVerdict(
+                    timestamp=bar.timestamp,
+                    decision="NO_GO",
+                    direction="HOLD",
+                    conviction=0.0,
+                    regime=regime,
+                    rationale=tophunter_signal.reason,
+                    votes=[],
+                    metadata={
+                        "block_reason": tophunter_signal.reason_code,
+                        "strategy_id": strategy_tags["strategy_id"],
+                        "trigger_type": strategy_tags["trigger_type"],
+                        "regime_filter": strategy_tags["regime_filter"],
+                        "slope": slope_raw,
+                        "atr": atr_m,
+                    },
+                )
+                if tophunter_signal.reason_code.startswith("REJECT_"):
+                    self.reporter.log_reject(
+                        bar.timestamp,
+                        self.cfg["symbol"],
+                        tophunter_signal.reason_code,
+                        tophunter_signal.reason,
+                    )
+                    self.append_reject(
+                        bar,
+                        tophunter_signal.reason_code,
+                        tophunter_signal.reason,
+                        strategy_tags=strategy_tags,
+                    )
+        elif verdict.decision == "GO":
+            # Exp Logic (existing council mode)
+            adx_bps_m = adx_m * 0.4
+            edge_score = (0.6 * slope_bps_abs) + (0.4 * adx_bps_m)
+
+            atr_base = atr_bps * self.cfg["atr_k"]
+            adx_factor = 0.0
+            if adx_m > 20:
+                adx_factor = min(1.0, (adx_m - 20) / 40.0)
+            adx_boost = 1.0 + adx_factor
+
+            expected_move = max(slope_bps_abs, atr_base) * adx_boost * self.cfg["adx_boost"]
+            cap_bps = atr_bps * self.cfg["exp_cap_mult"]
+            expected_move = min(expected_move, cap_bps)
+
+            verdict.metadata['expected_move'] = expected_move
+            verdict.metadata['score'] = edge_score
 
         # Gates
         # Risk Mult
         r_risk_mult = 1.0
-        r_risk_mult = 1.0
-        if router_res['policy'] == "caution_v5": r_risk_mult = 0.7
-        elif router_res['policy'] == "defense_flat":
-            if self.cfg.get("soft_defense_override", False):
-                r_risk_mult = 0.2
-            else:
-                r_risk_mult = 0.0
-        
-        if verdict.decision == "GO" and r_risk_mult == 0.0:
-            verdict.decision = "BLOCK"
-            self.reporter.log_reject(bar.timestamp, self.cfg["symbol"], "ROUTER_DEFENSE", "Risk=0.0")
-            self.append_reject(bar, "ROUTER_DEFENSE", "Risk=0.0")
+        if not use_tophunter:
+            if router_res['policy'] == "caution_v5":
+                r_risk_mult = 0.7
+            elif router_res['policy'] == "defense_flat":
+                if self.cfg.get("soft_defense_override", False):
+                    r_risk_mult = 0.2
+                else:
+                    r_risk_mult = 0.0
 
-        # Min ADX
-        min_adx = self.cfg["min_adx"]
-        if router_res['policy'] == "caution_v5": min_adx += 10.0
-        
-        if verdict.decision == "GO" and adx_m < min_adx:
-            verdict.decision = "BLOCK"
-            self.reporter.log_reject(bar.timestamp, self.cfg["symbol"], "MIN_ADX", f"{adx_m:.1f} < {min_adx}")
-            self.append_reject(bar, "MIN_ADX", f"{adx_m:.1f} < {min_adx}")
+            if verdict.decision == "GO" and r_risk_mult == 0.0:
+                verdict.decision = "BLOCK"
+                self.reporter.log_reject(bar.timestamp, self.cfg["symbol"], "ROUTER_DEFENSE", "Risk=0.0")
+                self.append_reject(bar, "ROUTER_DEFENSE", "Risk=0.0")
 
-        # Max Exp
-        max_exp = self.cfg["max_exp_move_bps"]
-        em_check = verdict.metadata.get('expected_move', 0.0)
-        if verdict.decision == "GO" and em_check > max_exp:
-            verdict.decision = "BLOCK"
-            self.reporter.log_reject(bar.timestamp, self.cfg["symbol"], "MAX_EXP", f"Exp {em_check:.1f} > {max_exp}")
-            self.append_reject(bar, "MAX_EXP", f"Exp {em_check:.1f} > {max_exp}")
+            # Min ADX
+            min_adx = self.cfg["min_adx"]
+            if router_res['policy'] == "caution_v5":
+                min_adx += 10.0
+
+            if verdict.decision == "GO" and adx_m < min_adx:
+                verdict.decision = "BLOCK"
+                self.reporter.log_reject(bar.timestamp, self.cfg["symbol"], "MIN_ADX", f"{adx_m:.1f} < {min_adx}")
+                self.append_reject(bar, "MIN_ADX", f"{adx_m:.1f} < {min_adx}")
+
+            # Max Exp
+            max_exp = self.cfg["max_exp_move_bps"]
+            em_check = verdict.metadata.get('expected_move', 0.0)
+            if verdict.decision == "GO" and em_check > max_exp:
+                verdict.decision = "BLOCK"
+                self.reporter.log_reject(bar.timestamp, self.cfg["symbol"], "MAX_EXP", f"Exp {em_check:.1f} > {max_exp}")
+                self.append_reject(bar, "MAX_EXP", f"Exp {em_check:.1f} > {max_exp}")
+        else:
+            em_check = verdict.metadata.get('expected_move', expected_move)
+            if verdict.decision == "GO" and daily_dd_pct >= float(self.cfg.get("tophunter_daily_loss_cap_pct", 1.5)):
+                verdict.decision = "BLOCK"
+                detail = f"TopHunter daily loss cap hit ({daily_dd_pct:.2f}% >= {self.cfg.get('tophunter_daily_loss_cap_pct', 1.5):.2f}%)"
+                self.reporter.log_reject(bar.timestamp, self.cfg["symbol"], "REJECT_RISK_CAP", detail)
+                self.append_reject(bar, "REJECT_RISK_CAP", detail, strategy_tags=strategy_tags)
+            if verdict.decision == "GO" and len(self.broker.details) >= int(self.cfg.get("tophunter_max_open_positions", 1)):
+                verdict.decision = "BLOCK"
+                detail = "TopHunter max concurrent positions reached"
+                self.reporter.log_reject(bar.timestamp, self.cfg["symbol"], "REJECT_RISK_CAP", detail)
+                self.append_reject(bar, "REJECT_RISK_CAP", detail, strategy_tags=strategy_tags)
+            if verdict.decision == "GO" and self.tophunter_cooldown_remaining > 0:
+                verdict.decision = "BLOCK"
+                detail = f"Cooldown active: {self.tophunter_cooldown_remaining} bars remaining"
+                self.reporter.log_reject(bar.timestamp, self.cfg["symbol"], "REJECT_COOLDOWN", detail)
+                self.append_reject(bar, "REJECT_COOLDOWN", detail, strategy_tags=strategy_tags)
 
         if verdict.decision == "GO" and self.daily_stop_active:
             verdict.decision = "BLOCK"
             detail = f"DailyDD {daily_dd_pct:.2f}% >= {self.cfg['daily_loss_limit_pct']:.2f}%"
             self.reporter.log_reject(bar.timestamp, self.cfg["symbol"], "DAILY_STOP", detail)
-            self.append_reject(bar, "DAILY_STOP", detail)
+            self.append_reject(bar, "DAILY_STOP", detail, strategy_tags=strategy_tags)
 
         if verdict.decision == "GO" and total_dd_pct >= self.cfg["kill_switch_dd_pct"]:
             verdict.decision = "BLOCK"
             detail = f"DD {total_dd_pct:.2f}% >= {self.cfg['kill_switch_dd_pct']:.2f}%"
             self.reporter.log_reject(bar.timestamp, self.cfg["symbol"], "KILL_SWITCH_DD", detail)
-            self.append_reject(bar, "KILL_SWITCH_DD", detail)
+            self.append_reject(bar, "KILL_SWITCH_DD", detail, strategy_tags=strategy_tags)
             self.kill_switch_active = True
             
         # Log Decision
-        self.append_decision(bar, verdict, router_res, edge_score if verdict.decision=="GO" else 0.0, em_check, adx_m)
+        em_check = verdict.metadata.get('expected_move', expected_move)
+        self.append_decision(
+            bar,
+            verdict,
+            router_res,
+            edge_score if verdict.decision == "GO" else 0.0,
+            em_check,
+            adx_m,
+            strategy_tags=strategy_tags,
+        )
             
         # 5. Execution
         # Check Exits (Brackets)
@@ -652,6 +788,11 @@ class PaperDaemon:
              self.append_trade(exit_fill)
              if exit_fill.pnl < 0:
                  self.consecutive_losses += 1
+                 if use_tophunter:
+                     self.tophunter_cooldown_remaining = max(
+                         self.tophunter_cooldown_remaining,
+                         int(self.cfg.get("tophunter_loss_cooldown_bars", 3)),
+                     )
              elif exit_fill.pnl > 0:
                  self.consecutive_losses = 0
 
@@ -662,6 +803,13 @@ class PaperDaemon:
             print(f"ENTER_EXEC_BRANCH: decision={verdict.decision} direction={verdict.direction}")
             # Risk calc matching CLI (approx)
             risk_pct = self.cfg["max_risk_trade_pct"] * r_risk_mult
+            custom_sl_price = None
+            custom_tp_price = None
+            if use_tophunter:
+                risk_pct = min(risk_pct, float(self.cfg.get("tophunter_max_risk_trade_pct", 0.005)))
+                if tophunter_signal:
+                    custom_sl_price = tophunter_signal.stop_price
+                    custom_tp_price = tophunter_signal.tp2_price
             
             # SAFE PAPER: Enforce min floor if we are taking a trade (risk > 0 or safe_mode override)
             if risk_pct > 0 or self.cfg.get("safe_paper", False):
@@ -679,7 +827,9 @@ class PaperDaemon:
                 price=bar.close,
                 timestamp=bar.timestamp,
                 risk_pct=risk_pct,
-                leverage=1.0 
+                leverage=1.0,
+                custom_sl_price=custom_sl_price,
+                custom_tp_price=custom_tp_price,
             )
             
             if success:
@@ -689,7 +839,7 @@ class PaperDaemon:
             else:
                 print(f"TRADE REJECTED: {reason} [RiskPct:{risk_pct*100:.2f}%]")
                 # Log to rejects
-                self.append_reject(bar, "EXEC_REJECT", reason)
+                self.append_reject(bar, "EXEC_REJECT", reason, strategy_tags=strategy_tags)
                 # Log to trades as REJECTED (Audit Trail)
                 rej_fill = TradeFill(
                     timestamp=bar.timestamp,
@@ -714,6 +864,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--daemon_id", type=str, default="STRICT")
     parser.add_argument("--run_dir", type=str, default="runs/phase19_twin/STRICT")
+    parser.add_argument("--interval", type=str, default="1m")
     parser.add_argument("--min_adx", type=float, default=35.0)
     parser.add_argument("--max_exp_move_bps", type=float, default=80.0)
     parser.add_argument("--max_risk_trade_pct", type=float, default=1.0, help="Max risk % per trade")
@@ -722,6 +873,14 @@ if __name__ == "__main__":
     parser.add_argument("--soft_defense_override", action="store_true", help="Allow defense mode triggers with reduced risk.")
     parser.add_argument("--min_risk_pct", type=float, default=0.1, help="Minimum risk %% floor per trade")
     parser.add_argument("--safe_paper", action="store_true", help="Enable safe paper mode (min risk floor + defense override)")
+    parser.add_argument("--strategy", type=str, default="council", choices=["council", "tophunter_short_v1"])
+    parser.add_argument("--tophunter_adx_max", type=float, default=20.0)
+    parser.add_argument("--tophunter_pivot_left", type=int, default=2)
+    parser.add_argument("--tophunter_pivot_right", type=int, default=2)
+    parser.add_argument("--tophunter_daily_loss_cap_pct", type=float, default=1.5)
+    parser.add_argument("--tophunter_max_risk_trade_pct", type=float, default=0.5, help="TopHunter max risk %% per trade")
+    parser.add_argument("--tophunter_max_open_positions", type=int, default=1)
+    parser.add_argument("--tophunter_loss_cooldown_bars", type=int, default=3)
     
     args = parser.parse_args()
     
@@ -738,16 +897,28 @@ if __name__ == "__main__":
     
     cfg["min_adx"] = args.min_adx
     cfg["min_adx"] = args.min_adx
+    cfg["interval"] = args.interval
     cfg["max_exp_move_bps"] = args.max_exp_move_bps
     cfg["daily_loss_limit_pct"] = args.daily_loss_limit_pct
     cfg["kill_switch_dd_pct"] = args.kill_switch_dd_pct
     cfg["soft_defense_override"] = args.soft_defense_override
+    cfg["strategy"] = args.strategy
+    cfg["tophunter_adx_max"] = args.tophunter_adx_max
+    cfg["tophunter_pivot_left"] = args.tophunter_pivot_left
+    cfg["tophunter_pivot_right"] = args.tophunter_pivot_right
+    cfg["tophunter_daily_loss_cap_pct"] = args.tophunter_daily_loss_cap_pct
+    cfg["tophunter_max_open_positions"] = args.tophunter_max_open_positions
+    cfg["tophunter_loss_cooldown_bars"] = args.tophunter_loss_cooldown_bars
     # Convert percentages to fractions (1.0 -> 0.01)
     cfg["max_risk_trade_pct"] = args.max_risk_trade_pct / 100.0
+    cfg["tophunter_max_risk_trade_pct"] = args.tophunter_max_risk_trade_pct / 100.0
     cfg["min_risk_pct"] = args.min_risk_pct / 100.0
     cfg["safe_paper"] = args.safe_paper
     if cfg["safe_paper"]:
         cfg["soft_defense_override"] = True # Implies override
+    if cfg["strategy"] == "tophunter_short_v1" and cfg["interval"] != "1h":
+        print("WARN: TopHunter Short V1 requires 1h candles; overriding interval to 1h.")
+        cfg["interval"] = "1h"
     
     # Run ID
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -777,9 +948,11 @@ if __name__ == "__main__":
     
     print(f"Starting PaperDaemon [{cfg['daemon_id']}]")
     print(f"  MinADX: {cfg['min_adx']}")
+    print(f"  Interval: {cfg['interval']}")
     print(f"  MaxRisk: {cfg['max_risk_trade_pct']:.4f} (Min {cfg['min_risk_pct']:.4f})")
     print(f"  DailyStop: {cfg['daily_loss_limit_pct']:.2f}% | KillSwitchDD: {cfg['kill_switch_dd_pct']:.2f}%")
     print(f"  SafePaper: {cfg['safe_paper']}")
+    print(f"  Strategy: {cfg['strategy']}")
     print(f"  RunDir: {cfg['run_dir']}")
     
     d = PaperDaemon(cfg)
