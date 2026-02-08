@@ -32,3 +32,6 @@
 ## Reporting
 - Core outputs in `reports/year2/`.
 - Runbook: `Docs/YEAR2_AUTOPILOT_RUNBOOK.md`.
+
+## Core Infra Preservation
+- Do not delete: `Scripts/soak_start.sh`, `Scripts/soak_status.sh`, `Scripts/soak_stop.sh`, `Scripts/soak_smoke.sh`, `Scripts/soak_service.sh`.
