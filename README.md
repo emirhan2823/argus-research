@@ -59,6 +59,55 @@ open Algo-Trading.xcodeproj
 # Cmd+R ile çalıştır
 ```
 
+## Paper Soak Operations
+
+Bu bölüm Year-2 paper soak çalıştırması için core infra scriptlerini açıklar.
+
+### Start
+
+```bash
+Scripts/soak_start.sh council
+```
+
+Farklı strateji örneği:
+
+```bash
+Scripts/soak_start.sh tophunter_short_v1 --interval 1h
+```
+
+### Monitor
+
+```bash
+Scripts/soak_status.sh
+```
+
+Bu komut:
+- PID durumunu gösterir
+- `heartbeat.json` zaman damgasını ve yaşını gösterir
+- `daemon.log` son satırlarını tail eder
+
+### Stop
+
+```bash
+Scripts/soak_stop.sh
+```
+
+Bu komut:
+- daemon PID'yi graceful şekilde durdurur
+- gerekirse force kill uygular
+- `daemon.pid` dosyasını temizler
+
+### Log ve Runtime Konumu
+
+- Run dizini: `runs/year2/paper_main`
+- PID dosyası: `runs/year2/paper_main/daemon.pid`
+- Daemon log: `runs/year2/paper_main/daemon.log`
+- Heartbeat: `runs/year2/paper_main/heartbeat.json`
+
+### Koruma Notu
+
+`Scripts/soak_start.sh`, `Scripts/soak_status.sh`, `Scripts/soak_stop.sh` dosyaları **ARGUS CORE INFRA** kapsamındadır ve gelecekteki cleanup/refactor çalışmalarında korunmalıdır.
+
 ## 📱 Ekran Görüntüleri
 
 *Yakında eklenecek*
