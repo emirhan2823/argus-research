@@ -97,16 +97,40 @@ Bu komut:
 - gerekirse force kill uygular
 - `daemon.pid` dosyasını temizler
 
+### Quick Smoke
+
+```bash
+Scripts/soak_smoke.sh council
+```
+
+Bu komut hızlıca `start -> wait -> status -> stop` akışını çalıştırır.
+
+### JSON Status Reader
+
+```bash
+venv/bin/python Scripts/status_reader.py --run-dir runs/year2/paper_main
+```
+
+### launchd Service (macOS)
+
+```bash
+Scripts/soak_service.sh install council
+Scripts/soak_service.sh status
+Scripts/soak_service.sh stop
+```
+
 ### Log ve Runtime Konumu
 
 - Run dizini: `runs/year2/paper_main`
 - PID dosyası: `runs/year2/paper_main/daemon.pid`
 - Daemon log: `runs/year2/paper_main/daemon.log`
+- Service log: `runs/year2/paper_main/service.log`
 - Heartbeat: `runs/year2/paper_main/heartbeat.json`
+- Metrics: `runs/year2/paper_main/metrics.json`
 
 ### Koruma Notu
 
-`Scripts/soak_start.sh`, `Scripts/soak_status.sh`, `Scripts/soak_stop.sh` dosyaları **ARGUS CORE INFRA** kapsamındadır ve gelecekteki cleanup/refactor çalışmalarında korunmalıdır.
+`Scripts/soak_start.sh`, `Scripts/soak_status.sh`, `Scripts/soak_stop.sh`, `Scripts/soak_smoke.sh`, `Scripts/soak_service.sh` dosyaları **ARGUS CORE INFRA** kapsamındadır ve gelecekteki cleanup/refactor çalışmalarında korunmalıdır.
 
 ## 📱 Ekran Görüntüleri
 

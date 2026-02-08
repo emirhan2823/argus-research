@@ -3,8 +3,8 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-RUN_DIR="${REPO_ROOT}/runs/year2/paper_main"
-PID_FILE="${RUN_DIR}/daemon.pid"
+RUN_DIR="${ARGUS_RUN_DIR:-${REPO_ROOT}/runs/year2/paper_main}"
+PID_FILE="${ARGUS_PID_FILE:-${RUN_DIR}/daemon.pid}"
 
 if [[ ! -f "${PID_FILE}" ]]; then
   echo "[soak_stop] pidfile not found (${PID_FILE})"
