@@ -31,6 +31,31 @@ This plan is grounded in:
   - `argus_py/alerts/*`
   - `argus_py/dashboard/app.py`
 
+## 2.1 Run Dir Migration Note (Year-1 -> Year-2)
+
+Primary runtime path is migrated from:
+
+- Old: `runs/overnight_paper_live`
+- New: `runs/year2/paper_main`
+
+Short migration runbook:
+
+```bash
+mkdir -p runs/year2/paper_main
+rsync -av \
+  --exclude '*.pid' \
+  --exclude '*.out' \
+  --exclude 'daemon_state.json.tmp' \
+  --exclude 'heartbeat.json.tmp' \
+  runs/overnight_paper_live/ runs/year2/paper_main/
+```
+
+Policy:
+
+- Keep `runs/overnight_paper_live` as immutable archive.
+- All Year-2 gates and nightly jobs must read/write `runs/year2/*`.
+- Note: current `argus_py.runner.live_cli` writes to `runs/live` by default; mirror snapshots to `runs/year2/micro_live_main` for gate reporting.
+
 ## 3. Quarter Objectives
 
 | Quarter | Months | Theme | Exit Condition |
@@ -44,10 +69,10 @@ This plan is grounded in:
 
 | Month | Focus | Implementation Milestone | Commands (Operational) | Deliverables (Files/Folders) |
 |---|---|---|---|---|
-| M01 | Baseline freeze | Freeze baseline config set for SOFT paper daemon and telemetry contracts. | `venv/bin/python Scripts/paper_daemon.py --daemon_id SOFT --run_dir runs/year2/paper_main --min_adx 20 --max_exp_move_bps 120 --max_risk_trade_pct 1.0 --daily_loss_limit_pct 3.0 --kill_switch_dd_pct 8.0 --safe_paper` | `runs/year2/paper_main/heartbeat.json`, `runs/year2/paper_main/daemon_state.json`, `runs/year2/paper_main/decisions.csv` |
+| M01 | Baseline freeze | Freeze baseline config set for SOFT paper daemon and telemetry contracts; define nightly metrics generator entrypoint. | `venv/bin/python Scripts/paper_daemon.py --daemon_id SOFT --run_dir runs/year2/paper_main --min_adx 20 --max_exp_move_bps 120 --max_risk_trade_pct 1.0 --daily_loss_limit_pct 3.0 --kill_switch_dd_pct 8.0 --safe_paper` | `runs/year2/paper_main/heartbeat.json`, `runs/year2/paper_main/daemon_state.json`, `runs/year2/paper_main/decisions.csv`, `Scripts/year2_generate_metrics.py` |
 | M02 | Paper soak | Run uninterrupted paper soak and enforce stale-heartbeat and reject-code hygiene. | `venv/bin/python Scripts/dashboard.py runs/year2/paper_main --host 127.0.0.1 --port 18081` | `reports/year2/m02_paper_soak.md`, `runs/year2/paper_main/rejects.csv` |
 | M03 | Paper gate | Run full paper gate audit pack and gate decision review. | `venv/bin/python Scripts/weekly_audit.py runs/year2/paper_main --week 2026-W18` | `reports/year2/gates/paper_to_micro_live_gate.json`, `reports/year2/gates/paper_to_micro_live_gate.md` |
-| M04 | Micro-live phase-1 | Start micro-live with strict notional caps and mandatory cooldown. | `venv/bin/python argus_py/runner/live_cli.py --help` | `runs/year2/micro_live_main/*`, `reports/year2/m04_micro_live_start.md` |
+| M04 | Micro-live phase-1 | Start micro-live with strict notional caps and mandatory cooldown using the real runner entrypoint in dry-run mode; mirror run artifacts to Year-2 namespace. | `venv/bin/python -m argus_py.runner.live_cli --exchange bingx --symbol BTCUSDT --tf 15m --mode dry_run --profile AUTO --poll_seconds 30 --max_daily_loss_pct 0.02 --max_dd_pct 0.05 --max_consecutive_losses 3` then `rsync -av runs/live/ runs/year2/micro_live_main/` | `runs/live/*` (runner output), `runs/year2/micro_live_main/*` (gate snapshot), `reports/year2/m04_micro_live_start.md` |
 | M05 | Drift control | Measure paper-vs-micro-live drift and tighten execution assumptions. | `venv/bin/python Scripts/phase20_signal_audit.py runs/year2/micro_live_main --output reports/year2/m05_signal_audit.md` | `reports/year2/m05_signal_audit.md`, `reports/year2/m05_drift_metrics.json` |
 | M06 | Micro-live gate | Gate check for moving into live low-risk mode. | `venv/bin/python Scripts/weekly_audit.py runs/year2/micro_live_main --week 2026-W31 --json` | `reports/year2/gates/micro_live_to_live_gate.json`, `reports/year2/gates/micro_live_to_live_gate.md` |
 | M07 | Live phase-1 | Enable live at reduced risk profile and single-symbol exposure cap. | `venv/bin/python Scripts/run_telegram_bot.py --help` | `runs/year2/live_main/*`, `reports/year2/m07_live_launch.md` |
@@ -56,6 +81,12 @@ This plan is grounded in:
 | M10 | Cross-asset prep | Introduce equity/commodity adapters in paper-only with isolated run dirs. | `venv/bin/python Scripts/sprint2_make_external_signal_template.py --output runs/year2/templates/external_signals.csv` | `runs/year2/paper_equities/*`, `runs/year2/paper_commodities/*`, `runs/year2/templates/external_signals.csv` |
 | M11 | Portfolio and risk unification | Unify portfolio limits across crypto/equity/commodity paper streams. | `venv/bin/python Scripts/weekly_audit.py runs/year2/paper_equities --week 2027-W03` | `reports/year2/m11_portfolio_unification.md`, `reports/year2/m11_risk_matrix.csv` |
 | M12 | Year-end validation | Produce annual technical pack and readiness recommendation for Year-3. | `venv/bin/python Scripts/generate_tax_report.py runs/year2/live_main/trades.csv --year 2026 --output reports/year2/tax_report_2026.csv --statement-json reports/year2/tax_report_2026_summary.json` | `reports/year2/year_end_summary.md`, `reports/year2/tax_report_2026.csv`, `reports/year2/year2_retrospective.json` |
+
+### 4.1 Operational Milestone: Kill-switch / Incident Drill
+
+| Month | Drill | Command Set | Required Deliverables |
+|---|---|---|---|
+| M05 | Kill-switch and incident response drill (tabletop + simulated trigger) | `venv/bin/python Scripts/telegram_local_command_test.py --run-dir runs/year2/paper_main --user-id 1` then `venv/bin/python Scripts/weekly_audit.py runs/year2/paper_main --week 2026-W22 --json > reports/year2/incidents/2026-05-killswitch-drill.json` | `reports/year2/incidents/2026-05-killswitch-drill.md`, `reports/year2/incidents/2026-05-killswitch-drill.json`, `reports/year2/incidents/2026-05-killswitch-drill_actions.md` |
 
 ## 5. Stage Gates (Paper -> Micro-live -> Live)
 
@@ -69,6 +100,7 @@ This plan is grounded in:
 | Error Rate | `<= 0.20%` per processed bar | `> 0.20%` | `rejects.csv`, `errors.log`, health counters |
 | Number of Trades | `>= 200` valid paper trades | `< 200` | `trades.csv` |
 | Drift (expected vs realized) | `<= 10 bps` median drift | `> 10 bps` | `phase20_signal_audit.py` + custom drift report |
+| Twin Divergence (STRICT vs SOFT) | decision divergence `<= 20%` and equity curve spread `<= 2.0%` over same window | above either threshold | twin runs (`runs/phase19_twin/STRICT`, `runs/phase19_twin/SOFT`) + `Scripts/phase19_dashboard.py` / counterfactual report |
 
 **Promotion Rule:** all metrics must pass for 2 consecutive weekly reviews.
 
@@ -106,6 +138,11 @@ Night batch should run daily after market close window (example: 01:00 local tim
 # 1) Determinism check
 venv/bin/python Scripts/verify_determinism.py --runs 2 --seed 42
 
+# 1.1) Nightly metrics pack (new Year-2 pipeline)
+venv/bin/python Scripts/year2_generate_metrics.py \
+  --run-dir runs/year2/paper_main \
+  --out reports/year2/nightly/$(date +%Y%m%d)/metrics.json
+
 # 2) Walk-forward baseline refresh
 venv/bin/python Scripts/sprint1_walkforward_12m.py \
   --data_path data \
@@ -138,6 +175,12 @@ venv/bin/python Scripts/train_ml_model.py \
 | Walk-forward Output | `runs/year2/nightly/YYYYMMDD/walkforward/*` | window-level pnl, dd, sharpe |
 | Plot Pack | `reports/year2/nightly/YYYYMMDD/plots/*.png` | equity curve, DD curve, slippage distribution |
 | Model Metadata | `reports/year2/nightly/YYYYMMDD/model_card.json` | train span, features, validation metrics |
+
+`metrics.json` generation contract:
+
+- Producer script: `Scripts/year2_generate_metrics.py` (Year-2 implementation item).
+- Inputs: `heartbeat.json`, `daemon_state.json`, `decisions.csv`, `trades.csv`, `rejects.csv`.
+- Required keys: `max_dd_pct`, `win_rate`, `expectancy`, `slippage_bps_median`, `slippage_bps_p95`, `drift_bps_median`, `error_rate`.
 
 ## 7. Metrics & Telemetry Requirements
 
@@ -223,9 +266,9 @@ runs/year2/
 
 reports/year2/
   gates/
+  incidents/
   nightly/YYYYMMDD/
   realism/
-  incidents/
   year_end_summary.md
 ```
 
