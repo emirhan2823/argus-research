@@ -62,20 +62,22 @@ We don't rely on one star player. We need a team.
 
 ---
 
-## 4. 24/7 Infrastructure ("The Fortress")
+## 4. Hybrid Infrastructure: Research Beast + Cloud Soldier
 
-You cannot run a hedge fund from a laptop that goes to sleep.
+**Strategy:** Use your **High-Spec Laptop (i7-11800H, 32GB, RTX A3000M)** as the "Alpha Factory" and a lightweight Cloud VPS as the "Execution Soldier".
 
-### Task Q-003: Commercial-Grade Ops
+### The "Beast" (Your Laptop) - **Research & Training**
+*   **Role:** Heavy lifting, ML training, optimization, backtesting.
+*   **Capability:**
+    *   **CPU (8c/16t):** Run 16 parallel backtests simultaneously -> *HyperOpt 100x faster than cloud.*
+    *   **RAM (32GB):** Load 5 years of 1m tick data into memory for analysis.
+    *   **GPU (RTX A3000M 6GB):** Train XGBoost/LightGBM models on GPU. Run local LLM (Q4 Quantized Llama-3-8B) for news sentiment without API costs.
 
-1.  **Cloud Hosting:** Move from Mac to AWS (EC2) or DigitalOcean.
-    - *Why:* 99.99% uptime, lower latency to exchange.
-2.  **Process Supervision:** Use `systemd` or `supervisord`.
-    - *Why:* Auto-restart if code crashes.
-3.  **Database Persistence:** Move CSVs to PostgreSQL/TimescaleDB.
-    - *Why:* CSVs corrupt. SQL handles millions of rows concurrently.
-4.  **Latency Monitor:** Track "Tick-to-Trade" time.
-    - *Goal:* < 50ms.
+### The "Soldier" (AWS/DigitalOcean) - **Execution**
+*   **Role:** Boring, reliable, never sleeps.
+*   **Specs:** 1 vCPU, 2GB RAM is enough.
+*   **Job:** Receive signals (or model weights) from The Beast, listen to WebSocket, send orders.
+*   **Stack:** `PM2` (Process Manager), `Nginx` (Reverse Proxy), `PostgreSQL` (Lightweight log storage).
 
 ---
 
@@ -146,21 +148,79 @@ How do we improve? We don't guess. We have a factory.
 
 ---
 
-## 9. Immediate "Attack Plan" Tasks
+## 9. Comprehensive "Senior Quant" Engineering Tasks (The 20-Step Ladder)
 
-### Q-TASK-001: Implement Regime Detection (The Brain)
-- **File:** `argus_py/regime/detector.py`
-- **Logic:** Calculate Trend Strength and Volatility. Output a `RegimeState` enum.
+To go from $100 to $100k, we need to build these modules. This is a **6-month engineering roadmap**.
 
-### Q-TASK-002: Build "Hydra" Scalper (The Cash Flow)
-- **File:** `argus_py/strategies/hydra.py`
-- **Logic:** 5-minute timeframe. Bollinger Band mean reversion + Orderbook Imbalance confirmation.
-- **Why:** Keeps equity curve moving up during boring markets.
+### Phase I: Foundation & Data (Weeks 1-4)
+*   **Q-001: Commercial Data Pipeline**
+    *   *Goal:* Ingest real-time Trades & Orderbook Diff (Depth) from Binance Futures WebSocket.
+    *   *Tech:* Python `aiohttp`, `TimescaleDB` (local on Laptop).
+    *   *Why:* You cannot backtest HFT/Scalping strategies without Orderbook data.
+*   **Q-002: Tick Database Optimization**
+    *   *Goal:* Store millions of rows efficiently.
+    *   *Tech:* TimescaleDB with compression policies.
+    *   *Hardware:* Use laptop SSD NVMe speed.
+*   **Q-003: Raw Data Integrity Checker**
+    *   *Goal:* Detect gaps in data. "No missing candles".
+*   **Q-004: Latency Monitor Service**
+    *   *Goal:* Measure "internal tick-to-signal" latency. Target < 5ms processing time.
 
-### Q-TASK-003: Implement "Vol-Adjusted Sizing" (The Shield)
-- **File:** `argus_py/risk/sizer.py`
-- **Logic:** `qty = (equity * 0.01) / (ATR * 2)`.
-- **Why:** Prevents one bad volatile candle from wiping weeks of gains.
+### Phase II: The "Weather Station" (Weeks 5-8)
+*   **Q-005: Regime Detection Engine (V1)**
+    *   *Goal:* Code appendix B logic (VIX, ADX, Funding).
+    *   *Output:* `current_regime.json` updated every 5m.
+*   **Q-006: Global Market Breadth Module**
+    *   *Goal:* Calculate "% of coins above MA200", "Total Market Volume Delta".
+    *   *Why:* Don't long BTC if 90% of alts are dumping.
+*   **Q-007: Volatility Surface Mapper**
+    *   *Goal:* Map HV vs IV (Implied Volatility from Deribit).
+    *   *Signal:* If IV > HV significantly -> Sell Volatility (Phoenix).
+
+### Phase III: The Alpha Strategies (Weeks 9-16)
+*   **Q-008: "Hydra" Scalper Implementation**
+    *   *Goal:* Code Appendix A logic. Pure cash flow generator.
+    *   *Hardware:* Run on Cloud (low latency needed).
+*   **Q-009: "Orion" Trend Logic Refactor**
+    *   *Goal:* Add "Trailing Stop based on ATR" to let winners run longer.
+*   **Q-010: "Phoenix" Mean Reversion V2**
+    *   *Goal:* Add "Orderbook Imbalance" filter. Only fade wicks if orderbook supports it.
+*   **Q-011: "Titan" Smart DCA**
+    *   *Goal:* Auto-buy $10 daily, but *only* if `Regime != BEAR_TREND`.
+
+### Phase IV: Machine Learning & GPU Acceleration (Weeks 17-20)
+*   **Q-012: GPU-Accelerated Feature Engineering**
+    *   *Hardware:* Use RTX A3000M.
+    *   *Goal:* Compute 100+ technical indicators on 1m candles for 5 years in seconds using `cuDF` (RAPIDS) or vectorized numpy.
+*   **Q-013: XGBoost Signal Model**
+    *   *Hardware:* Train on Laptop GPU.
+    *   *Goal:* Predict "Next 5m Candle Direction".
+    *   *Inputs:* RSI, MACD, Orderbook Imbalance, Funding Rate.
+*   **Q-014: Local LLM Sentiment Node**
+    *   *Hardware:* Run Ollama (Mistral/Llama3) on RTX A3000M.
+    *   *Goal:* Scrape "CryptoTwitter" top accounts, feed to LLM, output 0-100 Sentiment Score. Zero API cost.
+
+### Phase V: Risk & Execution (Weeks 21-24)
+*   **Q-015: "Smart Execution" Algo (TWAP/Iceberg)**
+    *   *Goal:* Split large orders ($10k+) into small chunks to hide from the market.
+*   **Q-016: "Iron Risk" Guardrails Kernel**
+    *   *Goal:* Hard-coded limits. `if daily_loss > 3%: sys.exit()`.
+*   **Q-017: Portfolio Optimizer**
+    *   *Goal:* Use "Mean-Variance Optimization" to allocate capital between Hydra/Orion/Phoenix dynamically.
+
+---
+
+## 10. Execution Plan for "The Beast" (Laptop)
+
+Since you have powerful hardware, use it to generate an **Unfair Advantage**:
+
+1.  **Dedicated "Research" VM/Container:**
+    Use Docker to spin up a "Argus Lab" container with `JupyterLab`, `RAPIDS` (for GPU DF), and `TimescaleDB`.
+2.  **Backtest Grid:**
+    Write a script `optimize_hydra.py` that uses `multiprocessing` to run 16 variations of Hydra settings *simultaneously* on your i7.
+    *   Result: What takes others 1 week to test, you do in 2 hours.
+3.  **Local Training:**
+    Every weekend, retrain the XGBoost model on the RTX A3000M with the latest week's data. Upload the new model file `.json` to the Cloud Soldier.
 
 ---
 
