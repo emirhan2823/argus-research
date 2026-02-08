@@ -7,7 +7,32 @@
 | Author | Argus Staff Architect (Opus) |
 | Version | 3.0 |
 | Date | 2026-02-07T19:26:00+03:00 |
-| Status | ACTIVE |
+| Status | ACTIVE (Execution Sync Applied: 2026-02-08 09:10 UTC) |
+
+---
+
+# 0. EXECUTION SYNC (AUTHORITATIVE)
+
+> Bu dosyanın altındaki birçok contract/checklist satırı planlama şablonu olarak korunur.  
+> Güncel ve otoritatif uygulama durumu: `Docs/DELEGATED_TASKS.md` içindeki `Execution Status Ledger`.
+
+## 0.1 Year-1 Faz Durumu (P20-P24)
+
+| Faz | Durum | Kısa Özet | Kanıt |
+|-----|-------|-----------|-------|
+| P20 | `✅ DONE` | Telemetry, audit pipeline, kill-switch integration ve ENH1-ENH7 modülleri tamamlandı. | `Docs/DELEGATED_TASKS.md`, `Docs/AGENT_WORK_LOG_P20-005.md`, `Docs/AGENT_WORK_LOG_P20-009_P20-INTEG.md`, `Docs/AGENT_WORK_LOG_P20-ENH1_P20-ENH2_P20-ENH3.md`, `Docs/AGENT_WORK_LOG_P20-ENH4_to_P21-004.md` |
+| P21 | `✅ DONE` | Walk-forward, determinism, realism ve CI/packaging (hibrit gate) tamamlandı. | `Docs/DELEGATED_TASKS.md`, `Docs/AGENT_WORK_LOG_P20-ENH4_to_P21-004.md`, `Docs/AGENT_WORK_LOG_P21-003_VERIFY_HYBRID_GATE.md` |
+| P22 | `✅ DONE` | Portfolio manager, live broker safety, dashboard ve Chiron learner tamamlandı. | `Docs/DELEGATED_TASKS.md`, `Docs/AGENT_WORK_LOG_P21-003_P22-003_VERIFY_ROUND2.md` |
+| P23 | `✅ DONE` | Alerts, backup/restore, profiling, security hardening tamamlandı. | `Docs/DELEGATED_TASKS.md`, `Docs/AGENT_WORK_LOG_P21-003_P22-003_P23-001_P23-004.md` |
+| P24 | `✅ DONE` | Multi-exchange adapters, Telegram bot, ML signal model, compliance/reporting tamamlandı. | `Docs/DELEGATED_TASKS.md`, `Docs/AGENT_WORK_LOG_P24-001_P24-003.md`, `Docs/AGENT_WORK_LOG_P24-002_PLUS_REPORT_ENH_AND_LOCAL_TEST.md` |
+
+## 0.2 Yapılamayan / Açık Kalan Kalemler
+
+- Year-1 delegated task setinde `NOT STARTED` kalem kalmadı (`26/26 DONE`).
+- Contract dışı operasyon/iyileştirme backlog'u:
+  - `SOFT` risk seviyesinde seçici trade politikası kod implementasyonu (plan notu var, kod henüz yok).
+  - Full-repo strict `lint-all` temizlik sprinti (hibrit gate aktif; strict temizlik ayrı iş kalemi).
+  - Small-live geçişi için uzun paper soak + performans kapısı (operasyonel gate).
 
 ---
 

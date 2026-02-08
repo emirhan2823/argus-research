@@ -1,0 +1,57 @@
+default_language_version:
+  python: python3.12
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+        files: ^argus_py/(alerts|dashboard|security)/.*\.py$
+      - id: end-of-file-fixer
+        files: ^argus_py/(alerts|dashboard|security)/.*\.py$
+      - id: check-yaml
+        files: ^\.pre-commit-config\.yaml$
+      - id: check-json
+        files: ^$  # no JSON files in current scoped quality gate
+      - id: check-added-large-files
+        args: ['--maxkb=500']
+        files: ^argus_py/(alerts|dashboard|security)/.*\.py$
+      - id: check-merge-conflict
+        files: ^argus_py/(alerts|dashboard|security)/.*\.py$
+      - id: detect-private-key
+        files: ^argus_py/(alerts|dashboard|security)/.*\.py$
+
+  - repo: https://github.com/psf/black
+    rev: 24.1.1
+    hooks:
+      - id: black
+        language_version: python3.12
+        files: ^argus_py/(alerts|dashboard|security)/.*\.py$
+
+  - repo: https://github.com/pycqa/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        args: ["--profile", "black"]
+        files: ^argus_py/(alerts|dashboard|security)/.*\.py$
+
+  - repo: https://github.com/pycqa/flake8
+    rev: 7.0.0
+    hooks:
+      - id: flake8
+        args: ['--max-line-length=100', '--ignore=E203,W503']
+        files: ^argus_py/(alerts|dashboard|security)/.*\.py$
+
+  - repo: local
+    hooks:
+      - id: no-print-statements
+        name: No print() in production code
+        entry: bash -c 'grep -R --line-number "print(" argus_py/alerts argus_py/dashboard argus_py/security >/dev/null && exit 1 || exit 0'
+        language: system
+        pass_filenames: false
+
+      - id: no-large-csv
+        name: No CSV files > 1MB
+        entry: bash -c 'find argus_py/alerts argus_py/dashboard argus_py/security -name "*.csv" -size +1M | head -1 | grep . && exit 1 || exit 0'
+        language: system
+        pass_filenames: false

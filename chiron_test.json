@@ -1,0 +1,20 @@
+{
+  "records": {
+    "TREND": {
+      "regime": "TREND",
+      "weights": {
+        "orion": 0.2,
+        "aether": 0.2,
+        "hermes": 0.2,
+        "phoenix": 0.2,
+        "aegean": 0.2
+      },
+      "sample_count": 41,
+      "avg_pnl": -0.05024390243902439,
+      "win_rate": 0.0,
+      "sharpe": -0.15811388300841897,
+      "last_updated": "2026-02-07T23:28:13.580169"
+    }
+  },
+  "outcomes_count": 41
+}

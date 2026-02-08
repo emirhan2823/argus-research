@@ -200,3 +200,19 @@ class DataLoader:
         
         if errors > 0:
              print(f"WARNING: Found {errors} bars with invalid prices (<=0 or H<L)")
+
+
+def load_csv(filepath: str) -> List[Bar]:
+    """Compatibility helper used by verification scripts."""
+    return DataLoader.load_csv(filepath)
+
+
+def load_from_dir(directory: str, pattern: str = "*.csv", max_bars: int = None, symbol: str = None, strict_symbol: bool = False) -> MarketState:
+    """Compatibility helper used by verification scripts."""
+    return DataLoader.load_from_dir(
+        directory=directory,
+        pattern=pattern,
+        max_bars=max_bars,
+        symbol=symbol,
+        strict_symbol=strict_symbol,
+    )

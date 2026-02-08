@@ -2,6 +2,12 @@ from dataclasses import dataclass
 from typing import List, Optional, Dict, Tuple
 from argus_py.core.exchange_rules import ExchangeConfig
 from argus_py.risk.sizing import PositionSizer
+from argus_py.broker.realism import (
+    FeeModel,
+    RealismConfig,
+    RealismEngine,
+    SlippageModel,
+)
 
 import uuid
 
@@ -75,6 +81,20 @@ class PaperBroker:
             "max_notional_pct_of_equity": 100.0,
             "liq_safety_margin_pct": 20.0
         }
+        self.realism_engine = RealismEngine(
+            RealismConfig(
+                fees=FeeModel(
+                    taker_bps=float(self.realism.get("fee_bps", 4.0)),
+                    maker_bps=float(self.realism.get("maker_bps", 2.0)),
+                    funding_bps=float(self.realism.get("funding_bps_per_8h", 1.0)),
+                ),
+                slippage=SlippageModel(
+                    base_bps=float(self.realism.get("slippage_bps", 2.0)),
+                    size_impact_bps=float(self.realism.get("size_impact_bps", 1.0)),
+                    volatility_mult=float(self.realism.get("volatility_mult", 1.5)),
+                ),
+            )
+        )
         
         # Advanced Exit Config
         self.trailing_active = (exit_policy == "TRAILING_STOP")
@@ -87,7 +107,7 @@ class PaperBroker:
         if exit_policy == "FIXED_BRACKET":
              self.trailing_active = False
 
-    def _get_execution_price(self, price: float, side: str, is_entry: bool = True) -> float:
+    def _get_execution_price(self, price: float, side: str, is_entry: bool = True, quantity: float = 1.0, atr: Optional[float] = None) -> float:
         """
         Calculates execution price including Spread and Slippage.
         Price is usually 'close' or 'trigger' price.
@@ -101,8 +121,6 @@ class PaperBroker:
           Prompt said: "BUY entry = close * (1 + ... + ...)"
           Assuming non-bid-ask mode also applies basic slippage.
         """
-        fee_bps = self.realism.get("fee_bps", 4.0)
-        slip_bps = self.realism.get("slippage_bps", 2.0)
         spread_bps = self.realism.get("spread_bps", 1.0)
         use_bid_ask = self.realism.get("use_bid_ask", False)
         
@@ -110,19 +128,20 @@ class PaperBroker:
         # BUY (Entry or Exit Short) -> Pay more
         # SELL (Entry Short or Exit Long) -> Receive less
         
-        factor = 0.0
-        if use_bid_ask:
-            # Spread cost
-            factor += (spread_bps / 10000.0)
-            
-        # Slippage always against us
-        factor += (slip_bps / 10000.0)
-        
+        spread_factor = (spread_bps / 10000.0) if use_bid_ask else 0.0
         if side == "BUY":
-            return price * (1.0 + factor)
+            adjusted_price = price * (1.0 + spread_factor)
         elif side == "SELL":
-            return price * (1.0 - factor)
-        return price
+            adjusted_price = price * (1.0 - spread_factor)
+        else:
+            adjusted_price = price
+
+        return self.realism_engine.get_effective_price(
+            adjusted_price,
+            max(quantity, 0.0),
+            side,
+            atr=atr,
+        )
 
 
     def mark_to_market(self, symbol: str, current_price: float) -> float:
@@ -226,7 +245,7 @@ class PaperBroker:
                 rules.min_notional = 2.0
             
             # Realism: Calculate Real Execution Price
-            exec_price = self._get_execution_price(price, direction, is_entry=True)
+            exec_price = self._get_execution_price(price, direction, is_entry=True, quantity=1.0)
             
             sl_price = 0.0
             tp_price = 0.0
@@ -255,7 +274,7 @@ class PaperBroker:
             # Fee logic: bps on total Notional (Lev * Equity usually, but simpler: Qty * Price)
             # We pay fee on OPEN and CLOSE.
             # Fee BPS from config
-            fee_bps = self.realism.get("fee_bps", 4.0)
+            fee_bps = self.realism_engine.config.fees.taker_bps
             fee_rate = fee_bps / 10000.0
             
             # Recalculate max qty considering initial margin + open fee
@@ -356,10 +375,8 @@ class PaperBroker:
         return hashlib.sha1(raw.encode()).hexdigest()[:8]
 
     def place_order(self, symbol: str, side: str, price: float, quantity: float, sl: float = None, tp: float = None, timestamp: float = 0, mark_price: float = 0.0):
-        # Use dynamic fee
-        fee_bps = self.realism.get("fee_bps", 4.0)
         cost = price * quantity
-        comm = cost * (fee_bps / 10000.0)
+        comm = self.realism_engine.calculate_commission(quantity, price, is_taker=True)
         
         if mark_price == 0.0: mark_price = price # Fallback
         
@@ -392,11 +409,15 @@ class PaperBroker:
         # When closing SELL (Buying): Price is Ask (Higher)
         # Determining Side of closing trade:
         close_side = "SELL" if pos.side == "BUY" else "BUY"
-        final_price = self._get_execution_price(price, close_side, is_entry=False)
+        final_price = self._get_execution_price(
+            price,
+            close_side,
+            is_entry=False,
+            quantity=pos.quantity,
+        )
         
         revenue = final_price * pos.quantity
-        fee_bps = self.realism.get("fee_bps", 4.0)
-        comm = revenue * (fee_bps / 10000.0)
+        comm = self.realism_engine.calculate_commission(pos.quantity, final_price, is_taker=True)
         
         net = 0.0
         if pos.side == "BUY":

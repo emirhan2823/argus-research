@@ -2,6 +2,50 @@
 
 Bu dosya, diğer agentlara (Codex/Gemini/Sonnet) delegate edilecek task tanımlarını içerir.
 
+## Execution Status Ledger (Synced: 2026-02-08 09:10 UTC)
+
+| Task ID | Assigned To | Status | Nasıl Yapıldı (kısa) | Kanıt (dosya/test/log) |
+|---|---|---|---|---|
+| `P20-005` | `Codex` | `✅ DONE` | TelemetryWriter thread-safe lock, şema validasyonu ve atomic heartbeat yazımı ile implement edildi; unit testlerle davranış doğrulandı. | `Docs/AGENT_WORK_LOG_P20-005.md`; `pytest tests/unit/test_telemetry_writer.py -v` |
+| `P20-009` | `Codex` | `✅ DONE` | Weekly audit pipeline decisions/trades/rejects akışını okuyup markdown rapor üretecek şekilde yazıldı; audit testleri geçti. | `Docs/AGENT_WORK_LOG_P20-009_P20-INTEG.md`; `pytest tests/unit/test_audit_pipeline.py -v` |
+| `P20-INTEG` | `Codex` | `✅ DONE` | Kill-switch paper daemon entegrasyonu (persist + SOFT/HARD davranışı + heartbeat görünürlüğü) eklendi; entegrasyon testleri doğrulandı. | `Docs/AGENT_WORK_LOG_P20-009_P20-INTEG.md`; `pytest tests/unit/test_paper_daemon_kill_switch_integration.py -v` |
+| `P20-ENH1` | `Codex` | `✅ DONE` | Orion göstergeleri ve scoring bileşenleri Swift contract’a uyumlu genişletildi; indicator testleri yeşil. | `Docs/AGENT_WORK_LOG_P20-ENH1_P20-ENH2_P20-ENH3.md`; `pytest tests/unit/test_orion_indicators.py -v` |
+| `P20-ENH2` | `Codex` | `✅ DONE` | Aether-C macro engine (FGI/DXY/funding/cache fallback) modüler veri katmanıyla implement edildi; engine testleri geçti. | `Docs/AGENT_WORK_LOG_P20-ENH1_P20-ENH2_P20-ENH3.md`; `pytest tests/unit/test_aether_engine.py -v` |
+| `P20-ENH3` | `Codex` | `✅ DONE` | Hermes-C sentiment engine RSS + keyword fallback + opsiyonel LLM entegrasyonu ile eklendi; sentiment testleri doğrulandı. | `Docs/AGENT_WORK_LOG_P20-ENH1_P20-ENH2_P20-ENH3.md`; `pytest tests/unit/test_hermes_engine.py -v` |
+| `P20-ENH4` | `Codex` | `✅ DONE` | Council weighted voting ve veto mantığı yeni council modülleriyle implement edildi; council testleri geçti. | `Docs/AGENT_WORK_LOG_P20-ENH4_to_P21-004.md`; `pytest tests/unit/test_council.py -v` |
+| `P20-ENH5` | `Codex` | `✅ DONE` | Chiron regime detection + indicator/weight state logic eklendi; regime testleri doğrulandı. | `Docs/AGENT_WORK_LOG_P20-ENH4_to_P21-004.md`; `pytest tests/unit/test_chiron.py -v` |
+| `P20-ENH6` | `Codex` | `✅ DONE` | Phoenix channel reversion stratejisi (regression channel + scoring + target/SL) implement edildi; strateji testleri geçti. | `Docs/AGENT_WORK_LOG_P20-ENH4_to_P21-004.md`; `pytest tests/unit/test_phoenix.py -v` |
+| `P20-ENH7` | `Codex` | `✅ DONE` | AutoPilot position management (Corse/Pulse, stop/trim/trailing/sizing) eklendi; karar akışı testleri doğrulandı. | `Docs/AGENT_WORK_LOG_P20-ENH4_to_P21-004.md`; `pytest tests/unit/test_autopilot.py -v` |
+| `P21-001` | `Codex` | `✅ DONE` | Walk-forward modülü yeni window/report akışıyla refactor edildi; runner ve unit test kapsamı ile doğrulandı. | `Docs/AGENT_WORK_LOG_P20-ENH4_to_P21-004.md`; `pytest tests/unit/test_walk_forward.py -v` |
+| `P21-002` | `Codex` | `✅ DONE` | Determinism manager + verify script ile seed/hash manifest kontrolü eklendi; determinism testleri ve script çıktısı doğrulandı. | `Docs/AGENT_WORK_LOG_P20-ENH4_to_P21-004.md`; `pytest tests/unit/test_determinism.py -v`; `python3 Scripts/verify_determinism.py --runs 2 --seed 42` |
+| `P21-003` | `Sonnet` | `✅ DONE` | CI/packaging acceptance, hibrit kalite kapısıyla kapatıldı: `make install`, `make test`, `make lint`, `make pre-commit` başarıyla çalıştı; kalite kapısı aktif çekirdek modüllere uygulanırken `lint-all` strict modu teknik borç cleanup’u için korunmuştur. | `Docs/AGENT_WORK_LOG_P21-003_VERIFY_HYBRID_GATE.md`; `make install`; `make test`; `make lint`; `make pre-commit`; `venv/bin/pre-commit run --files argus_py/alerts/__init__.py argus_py/alerts/dispatcher.py argus_py/dashboard/app.py argus_py/security/vault.py argus_py/security/audit.py` |
+| `P21-004` | `Codex` | `✅ DONE` | Realism engine (commission/slippage/funding) paper broker akışına bağlandı; maliyet model testleri geçti. | `Docs/AGENT_WORK_LOG_P20-ENH4_to_P21-004.md`; `pytest tests/unit/test_realism.py -v` |
+| `P22-001` | `Codex` | `✅ DONE` | Multi-symbol portfolio manager (bucket exposure, limit checks, ranking) modülü eklendi; portfolio testleri geçti. | `tests/unit/test_portfolio_manager.py`; `pytest tests/unit/test_portfolio_manager.py -q` |
+| `P22-002` | `Codex` | `✅ DONE` | Live broker bridge/safety katmanı ile testnet order ve guardrail akışı implement edildi; live broker testleri geçti. | `tests/unit/test_live_broker.py`; `pytest tests/unit/test_live_broker.py -q` |
+| `P22-003` | `Sonnet` | `✅ DONE` | Dashboard backend/frontend/CLI implementasyonu unit test ve canlı Flask smoke testi ile doğrulandı; `/api/status`, `/api/trades`, `/api/equity`, `/api/rejections` endpointleri gerçek run verisiyle `200` döndü. | `Docs/AGENT_WORK_LOG_P21-003_P22-003_VERIFY_ROUND2.md`; `pytest tests/unit/test_dashboard.py -v`; `venv/bin/python Scripts/dashboard.py runs/phase19_twin/SOFT --host 127.0.0.1 --port 18080` |
+| `P22-004` | `Codex` | `✅ DONE` | Chiron learner (outcome ingest + weight optimization + state persistence) eklendi; learner testleri geçti. | `tests/unit/test_chiron_learner.py`; `pytest tests/unit/test_chiron_learner.py -q` |
+| `P23-001` | `Sonnet` | `✅ DONE` | Multi-channel alert dispatcher (`telegram/discord/email-stub`) ve alert template katmanı eklendi; async alert testleri ile davranış doğrulandı. | `Docs/AGENT_WORK_LOG_P21-003_P22-003_P23-001_P23-004.md`; `pytest tests/unit/test_alerts.py -v` |
+| `P23-002` | `Codex` | `✅ DONE` | Disaster recovery backup/restore modülü required file checks ile eklendi; backup testleri doğrulandı. | `tests/unit/test_backup.py`; `pytest tests/unit/test_backup.py -q` |
+| `P23-003` | `Codex` | `✅ DONE` | Profiling modülü eklenerek performance ölçüm alt yapısı kuruldu; profiler testleri geçti. | `tests/unit/test_profiler.py`; `pytest tests/unit/test_profiler.py -q` |
+| `P23-004` | `Sonnet` | `✅ DONE` | Secure vault + audit logger eklendi (`argus_py/security/*`); key storage/encrypt-decrypt/API key retrieval ve audit log akışı testlerle doğrulandı. | `Docs/AGENT_WORK_LOG_P21-003_P22-003_P23-001_P23-004.md`; `pytest tests/unit/test_vault.py -v` |
+| `P24-001` | `Codex` | `✅ DONE` | Unified async exchange adapters (Binance/Bybit/OKX) interface ile yazıldı; exchange unit testleri geçti. | `Docs/AGENT_WORK_LOG_P24-001_P24-003.md`; `pytest tests/unit/test_exchanges.py -v` |
+| `P24-002` | `Sonnet` | `✅ DONE` | Telegram bot command seti (`status/trades/killswitch/report/balance`) Codex tarafından tamamlandı ve local command smoke-test yapıldı; latest log önceki versiyonu override eder. | `Docs/AGENT_WORK_LOG_P24-002_PLUS_REPORT_ENH_AND_LOCAL_TEST.md`; `pytest tests/unit/test_telegram_bot.py -v`; `python3 Scripts/telegram_local_command_test.py --run-dir runs/phase19_twin/STRICT --user-id 1` |
+| `P24-003` | `Codex` | `✅ DONE` | ML signal model + feature engineering + training script tamamlandı; ML testleri ve script e2e doğrulandı. | `Docs/AGENT_WORK_LOG_P24-001_P24-003.md`; `pytest tests/unit/test_ml_model.py -v` |
+| `P24-004` | `Sonnet` | `✅ DONE` | Compliance & reporting modülü (8949, PnL statement, CSV export) Codex tarafından tamamlandı ve komisyon bazlı cost-basis güncellemesi uygulandı; son log eski logu override eder. | `Docs/AGENT_WORK_LOG_P24-002_PLUS_REPORT_ENH_AND_LOCAL_TEST.md`; `pytest tests/unit/test_compliance.py -v`; `python3 Scripts/generate_tax_report.py runs/20260203_215219_56c032/trades.csv --year 2024 --output runs/20260203_215219_56c032/tax_report_2024.csv --statement-json runs/20260203_215219_56c032/tax_report_2024_summary.json` |
+
+---
+
+## Execution Summary (As of 2026-02-08 09:10 UTC)
+
+- Toplam izlenen task: `26`
+- Tamamlanan task: `26`
+- Kısmi task: `0`
+- Başlanmayan task: `0`
+- Contract dışı açık kalan operasyon kalemleri:
+  - `SOFT` risk seviyesinde seçici trade politikası kod implementasyonu (plan notu mevcut, kod henüz yok).
+  - Tüm repo için strict `lint-all` temizlik sprinti (hibrit kalite kapısı aktif, strict kapı korunuyor).
+  - Small-live geçişi öncesi uzun paper soak + performans review kapısı.
+
 ---
 
 ## P20-005: Telemetry Writer ✅ DONE

@@ -1,98 +1,242 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
 from typing import List, Optional
-from argus_py.data.market_state import Bar
+
 from argus_py.council.defs import Vote
-import pandas as pd
-import numpy as np
+from argus_py.data.market_state import Bar
+from argus_py.models.orion.indicators import IndicatorService
+
+
+@dataclass
+class OrionScoreComponents:
+    structure: float  # 0-35
+    trend: float  # 0-25
+    momentum: float  # 0-25
+    pattern: float  # 0-15
+
 
 class OrionEngine:
     """
-    Orion Voter: Trend Confirmation.
-    Uses ADX(14) for Trend Strength and SMA(50) for Trend Direction.
+    Orion voter with multi-indicator technical scoring.
+
+    Backward compatibility:
+    - returns Vote(module="Orion", direction/confidence/score/reasons/metadata)
+    - keeps metadata fields used elsewhere: adx, atr, trend_active
     """
-    
-    def __init__(self, adx_period=14, sma_period=50):
+
+    def __init__(self, adx_period: int = 14, lookback: int = 260):
         self.adx_period = adx_period
-        self.sma_period = sma_period
-        
+        self.lookback = lookback
+
     def calculate(self, history: List[Bar]) -> Optional[Vote]:
-        if len(history) < max(self.adx_period, self.sma_period) * 2:
-            return Vote("Orion", "FLAT", 0.0, 50.0, ["Insufficient Data"], metadata={"orion_valid": False, "reason": "WARMUP"})
-            
-        # Optimize: Take last 100 bars
-        subset = history[-100:]
-        df = pd.DataFrame([vars(b) for b in subset])
-        
-        # 1. ADX Calculation
-        # TR, +DM, -DM
-        df['tr0'] = abs(df['high'] - df['low'])
-        df['tr1'] = abs(df['high'] - df['close'].shift(1))
-        df['tr2'] = abs(df['low'] - df['close'].shift(1))
-        df['tr'] = df[['tr0', 'tr1', 'tr2']].max(axis=1)
-        
-        df['up_move'] = df['high'] - df['high'].shift(1)
-        df['down_move'] = df['low'].shift(1) - df['low']
-        
-        df['plus_dm'] = np.where((df['up_move'] > df['down_move']) & (df['up_move'] > 0), df['up_move'], 0)
-        df['minus_dm'] = np.where((df['down_move'] > df['up_move']) & (df['down_move'] > 0), df['down_move'], 0)
-        
-        # Smooth
-        # ADX smoothing is specific (Wilder's). Using EWM as approx or Simple Rolling/Alpha?
-        # Standard ADX uses Wilder's Smoothing (alpha = 1/n)
-        alpha = 1 / self.adx_period
-        
-        # Helper for Wilder's
-        def wilders(series, n):
-            return series.ewm(alpha=1/n, adjust=False).mean()
-            
-        df['atr'] = wilders(df['tr'], self.adx_period)
-        df['plus_di'] = 100 * wilders(df['plus_dm'], self.adx_period) / df['atr']
-        df['minus_di'] = 100 * wilders(df['minus_dm'], self.adx_period) / df['atr']
-        df['dx'] = 100 * abs(df['plus_di'] - df['minus_di']) / (df['plus_di'] + df['minus_di'])
-        df['adx'] = wilders(df['dx'], self.adx_period)
-        
-        # 2. SMA
-        df['sma'] = df['close'].rolling(window=self.sma_period).mean()
-        
-        last = df.iloc[-1]
-        
-        # Logic
-        adx = last['adx']
-        price = last['close']
-        sma = last['sma']
-        
-        direction = "FLAT"
-        confidence = 0.0
-        
-        # Trend Filter
-        if adx > 25:
-            # Strong Trend
-            if price > sma:
-                direction = "LONG"
-                confidence = min(1.0, (adx - 20) / 40.0) # Scale confidence with ADX strength
-            elif price < sma:
-                direction = "SHORT"
-                confidence = min(1.0, (adx - 20) / 40.0)
-        else:
-            # Weak Signal
-            confidence = 0.2
-            if price > sma: direction = "LONG"
-            else: direction = "SHORT"
-            
-        score = 50 + (confidence * 50 if direction == "LONG" else -confidence * 50)
-        
-        meta = {
+        min_bars = max(200, self.lookback // 2)
+        if len(history) < min_bars:
+            return Vote(
+                "Orion",
+                "FLAT",
+                0.0,
+                50.0,
+                ["Insufficient Data"],
+                metadata={"orion_valid": False, "reason": "WARMUP"},
+            )
+
+        subset = history[-self.lookback :]
+        highs = [b.high for b in subset]
+        lows = [b.low for b in subset]
+        closes = [b.close for b in subset]
+        price = closes[-1]
+
+        sma50 = IndicatorService.sma(closes, 50)
+        sma200 = IndicatorService.sma(closes, 200)
+        ema12 = IndicatorService.ema(closes, 12)
+        ema26 = IndicatorService.ema(closes, 26)
+
+        bb_upper, bb_mid, bb_lower = IndicatorService.bollinger(closes)
+        adx_series = IndicatorService.adx(highs, lows, closes, self.adx_period)
+        atr_series = IndicatorService.atr(highs, lows, closes, self.adx_period)
+
+        rsi_series = IndicatorService.rsi(closes)
+        macd_line, macd_signal, macd_hist = IndicatorService.macd(closes)
+        stoch_k, stoch_d = IndicatorService.stochastic(highs, lows, closes)
+
+        structure = self._score_structure(
+            price=price,
+            sma50_last=self._last_valid(sma50),
+            sma200_last=self._last_valid(sma200),
+            bb_lower_last=self._last_valid(bb_lower),
+            bb_upper_last=self._last_valid(bb_upper),
+        )
+        trend = self._score_trend(
+            adx_last=self._last_valid(adx_series, default=0.0),
+            ema12_last=ema12[-1] if ema12 else price,
+            ema26_last=ema26[-1] if ema26 else price,
+            price=price,
+        )
+        momentum = self._score_momentum(
+            rsi_last=self._last_valid(rsi_series, default=50.0),
+            macd_hist_last=macd_hist[-1] if macd_hist else 0.0,
+            stoch_k_last=stoch_k[-1] if stoch_k else 50.0,
+            stoch_d_last=stoch_d[-1] if stoch_d else 50.0,
+        )
+        pattern = self._detect_divergence(closes, rsi_series)
+
+        components = OrionScoreComponents(
+            structure=structure,
+            trend=trend,
+            momentum=momentum,
+            pattern=pattern,
+        )
+
+        total = max(0.0, min(100.0, components.structure + components.trend + components.momentum + components.pattern))
+
+        direction, confidence = self._to_vote_direction(total)
+
+        reasons = [
+            f"Structure={components.structure:.1f}/35",
+            f"Trend={components.trend:.1f}/25",
+            f"Momentum={components.momentum:.1f}/25",
+            f"Pattern={components.pattern:.1f}/15",
+            f"Total={total:.1f}/100",
+        ]
+
+        adx_last = self._last_valid(adx_series, default=0.0)
+        atr_last = self._last_valid(atr_series, default=0.0)
+        rsi_last = self._last_valid(rsi_series, default=50.0)
+        bb_squeeze = IndicatorService.bollinger_squeeze(bb_upper, bb_mid, bb_lower)
+        macd_cross = IndicatorService.macd_crossover(macd_line, macd_signal)
+
+        metadata = {
             "orion_valid": True,
-            "adx": adx,
-            "atr": last['atr'],
-            "sma_dist": (price - sma) / sma if sma else 0.0,
-            "trend_active": adx > 25
+            "adx": adx_last,
+            "atr": atr_last,
+            "rsi": rsi_last,
+            "macd_hist": macd_hist[-1] if macd_hist else 0.0,
+            "stoch_k": stoch_k[-1] if stoch_k else 50.0,
+            "stoch_d": stoch_d[-1] if stoch_d else 50.0,
+            "structure": components.structure,
+            "trend": components.trend,
+            "momentum": components.momentum,
+            "pattern": components.pattern,
+            "trend_active": adx_last > 25.0,
+            "bb_squeeze": bb_squeeze,
+            "macd_crossover": macd_cross,
+            "score_components": {
+                "structure": components.structure,
+                "trend": components.trend,
+                "momentum": components.momentum,
+                "pattern": components.pattern,
+            },
         }
-        
+
         return Vote(
             module="Orion",
             direction=direction,
             confidence=confidence,
-            score=score,
-            reasons=[f"ADX={adx:.1f}", f"Price vs SMA: {'Above' if price > sma else 'Below'}"],
-            metadata=meta
+            score=total,
+            reasons=reasons,
+            metadata=metadata,
         )
+
+    def _score_structure(
+        self,
+        price: float,
+        sma50_last: Optional[float],
+        sma200_last: Optional[float],
+        bb_lower_last: Optional[float],
+        bb_upper_last: Optional[float],
+    ) -> float:
+        score = 0.0
+
+        if sma50_last is not None and sma200_last is not None:
+            if price > sma50_last and price > sma200_last:
+                score += 15.0
+            if sma50_last > sma200_last:
+                score += 10.0
+
+        # Oversold opportunity near lower band, with mild bonus for upper-band strength.
+        if bb_lower_last is not None and price < bb_lower_last:
+            score += 10.0
+        elif bb_upper_last is not None and price > bb_upper_last:
+            score += 5.0
+
+        return max(0.0, min(35.0, score))
+
+    def _score_trend(self, adx_last: float, ema12_last: float, ema26_last: float, price: float) -> float:
+        score = 0.0
+
+        if adx_last >= 25.0:
+            score += 12.0
+        elif adx_last >= 20.0:
+            score += 8.0
+        elif adx_last >= 15.0:
+            score += 4.0
+
+        if ema12_last > ema26_last:
+            score += 8.0
+        if price > ema12_last:
+            score += 5.0
+
+        return max(0.0, min(25.0, score))
+
+    def _score_momentum(
+        self,
+        rsi_last: float,
+        macd_hist_last: float,
+        stoch_k_last: float,
+        stoch_d_last: float,
+    ) -> float:
+        score = 0.0
+
+        if rsi_last < 30.0:
+            score += 10.0
+        elif rsi_last > 70.0:
+            score -= 5.0
+        elif 45.0 <= rsi_last <= 65.0:
+            score += 3.0
+
+        if macd_hist_last > 0.0:
+            score += 8.0
+
+        if stoch_k_last > stoch_d_last:
+            score += 7.0
+
+        return max(0.0, min(25.0, score))
+
+    def _detect_divergence(self, closes: List[float], rsi: List[Optional[float]]) -> float:
+        if len(closes) < 10 or len(rsi) < 10:
+            return 0.0
+
+        recent_prices = closes[-8:]
+        recent_rsi = [x for x in rsi[-8:] if x is not None]
+        if len(recent_rsi) < 6:
+            return 0.0
+
+        price_delta = recent_prices[-1] - recent_prices[0]
+        rsi_delta = recent_rsi[-1] - recent_rsi[0]
+
+        # Bullish divergence: price down while RSI up.
+        if price_delta < 0 and rsi_delta > 0:
+            return 15.0
+
+        # Bearish divergence mildly penalizes by giving no pattern credit.
+        return 0.0
+
+    def _to_vote_direction(self, total_score: float) -> tuple[str, float]:
+        if total_score >= 60.0:
+            confidence = min(1.0, (total_score - 50.0) / 50.0)
+            return "LONG", confidence
+        if total_score <= 40.0:
+            confidence = min(1.0, (50.0 - total_score) / 50.0)
+            return "SHORT", confidence
+        return "FLAT", 0.2
+
+    def _last_valid(self, values: List[Optional[float]], default: Optional[float] = None) -> Optional[float]:
+        for value in reversed(values):
+            if value is not None:
+                return value
+        return default
+
+
+# Backward-compatible type alias used by council integration contracts.
+OrionVote = Vote

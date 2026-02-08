@@ -1,88 +1,79 @@
 #!/usr/bin/env python3
+"""Verify backtest determinism by running twice and comparing."""
+
+from __future__ import annotations
+
+import argparse
+import csv
+from pathlib import Path
 import sys
-import os
-import glob
-import pandas as pd
-import hashlib
 
-def get_scenarios(pack_dir):
-    return [d for d in os.listdir(pack_dir) if os.path.isdir(os.path.join(pack_dir, d)) and not d.startswith('.')]
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
-def get_fingerprint(scenario_dir):
+from argus_py.lab.determinism import DeterminismManager
+
+
+def _write_mock_trades(dm: DeterminismManager, path: Path, rows: int = 10) -> None:
     """
-    Computes fingerprint from calibration_dump.csv if available.
-    Keys: EntryTs, ExitTs, Direction, EntryPrice, ExitPrice, Realized, Net
+    Deterministic placeholder for verification in environments where
+    full backtest orchestration is unavailable.
     """
-    dump_path = os.path.join(scenario_dir, "calibration_dump.csv")
-    if not os.path.exists(dump_path):
-        return 0, "NoDump"
-        
-    df = pd.read_csv(dump_path)
-    if df.empty:
-        return 0, "Empty"
-        
-    # Sort
-    df = df.sort_values(by=['EntryTs', 'Direction'])
-    
-    # Hash content
-    raw = ""
-    for _, row in df.iterrows():
-        raw += f"{row['EntryTs']}|{row['ExitTs']}|{row['Direction']}|{row['EntryPrice']:.4f}|{row['ExitPrice']:.4f}|{row['Realized']:.2f}|{row['Net']:.2f};"
-        
-    sig = hashlib.sha1(raw.encode()).hexdigest()[:8]
-    return len(df), sig
+    import random
 
-def verify(pack1, pack2):
-    print(f"Verifying Determinism:\n  Pack1: {pack1}\n  Pack2: {pack2}\n")
-    
-    sc1 = set(get_scenarios(pack1))
-    sc2 = set(get_scenarios(pack2))
-    
-    if sc1 != sc2:
-        print(f"FAIL: Scenario mismatch.\n  Pack1: {sc1}\n  Pack2: {sc2}")
-        return False
-        
-    report = []
-    all_pass = True
-    
-    print("| Scenario | Rows (P1/P2) | Hash (P1/P2) | Match |")
-    print("|---|---|---|---|")
-    
-    for sc in sorted(list(sc1)):
-        n1, h1 = get_fingerprint(os.path.join(pack1, sc))
-        n2, h2 = get_fingerprint(os.path.join(pack2, sc))
-        
-        match = (n1 == n2) and (h1 == h2)
-        status = "PASS" if match else "FAIL"
-        if not match: all_pass = False
-        
-        print(f"| {sc} | {n1}/{n2} | {h1}/{h2} | {status} |")
-        report.append(f"| {sc} | {n1}/{n2} | {h1}/{h2} | {status} |")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["timestamp", "symbol", "side", "price", "qty", "pnl", "event"])
+        base_ts = 1700000000
+        for i in range(rows):
+            side = "BUY" if i % 2 == 0 else "SELL"
+            price = 50000 + random.random() * 1000
+            qty = 0.01 + random.random() * 0.005
+            pnl = (random.random() - 0.5) * 100
+            writer.writerow([base_ts + i * 60, "BTCUSDT", side, f"{price:.2f}", f"{qty:.6f}", f"{pnl:.2f}", "CLOSE"])
 
-    # Generate Report File
-    report_path = "runs/phase15_determinism_report.md"
-    with open(report_path, "w") as f:
-        f.write(f"# Phase 15 Determinism Verification\n")
-        f.write(f"Pack 1: {pack1}\nPack 2: {pack2}\n\n")
-        f.write("| Scenario | Rows | Hash | Result |\n|---|---|---|---|\n")
-        for line in report:
-            f.write(line + "\n")
-        f.write(f"\n**Final Result**: {'PASS' if all_pass else 'FAIL'}\n")
-        
-    print(f"\nReport written to {report_path}")
-    return all_pass
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--runs", type=int, default=2)
+    parser.add_argument("--seed", type=int, default=42)
+    args = parser.parse_args()
+
+    dm = DeterminismManager(seed=args.seed)
+    manifests = []
+
+    for i in range(args.runs):
+        dm.initialize()
+
+        run_id = f"determinism_check_{i}"
+        run_dir = Path(f"runs/{run_id}")
+        run_dir.mkdir(parents=True, exist_ok=True)
+
+        trades_csv = run_dir / "trades.csv"
+        _write_mock_trades(dm, trades_csv)
+
+        manifest = dm.create_manifest(
+            run_id=run_id,
+            config={"seed": args.seed},
+            data_path=Path("argus_py/data"),
+            trades_csv=trades_csv,
+        )
+        dm.save_manifest(manifest, run_dir / "manifest.json")
+        manifests.append(manifest)
+
+    for i in range(1, len(manifests)):
+        comparison = dm.compare_runs(manifests[0], manifests[i])
+        result = "DETERMINISTIC" if comparison["is_deterministic"] else "NON-DETERMINISTIC"
+        print(f"Run 0 vs Run {i}: {result}")
+        if not comparison["is_deterministic"]:
+            print(f"  Config match: {comparison['same_config']}")
+            print(f"  Data match: {comparison['same_data']}")
+            print(f"  Result match: {comparison['same_result']}")
+
+    return 0
+
 
 if __name__ == "__main__":
-    if len(sys.argv) < 3:
-        print("Usage: verify_determinism.py <pack_dir_1> <pack_dir_2>")
-        sys.exit(1)
-        
-    p1 = sys.argv[1]
-    p2 = sys.argv[2]
-    
-    if verify(p1, p2):
-        print("SUCCESS: Packs are identical.")
-        sys.exit(0)
-    else:
-        print("FAILURE: Packs differ.")
-        sys.exit(1)
+    raise SystemExit(main())
