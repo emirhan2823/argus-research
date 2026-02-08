@@ -1,8 +1,9 @@
 # Argus Future Vision & Reference Integration
 
 **Created:** 2026-02-07  
-**Status:** Strategic Planning + Execution Sync Applied (2026-02-08 09:10 UTC)  
-**Timeline:** Year 2+
+**Status:** COMPLETE - Full Strategic Blueprint (2026-02-08)  
+**Timeline:** Year 2+ (2026-2030)  
+**Sections:** 18 (Year-1 Summary + Year-2 Vision + Reference Repos + Growth Strategy + 24/7 Ops + Gate System + Risk + Strategies)
 
 ---
 
@@ -814,4 +815,802 @@ class FactorPipeline:
 
 ---
 
+## 8. 24/7 Otonom Calisma Mimarisi
+
+### 8.1 Temel Felsefe
+
+Kripto piyasasi 7/24 acik. Gece 03:00'te gelen likidation cascade'i kacirmak, en kolay parayi kacirmak demek. Sistem **insanin uyudugu saatlerde bile** tam otomatik calismali.
+
+### 8.2 Hibrit Altyapi: Beast + Soldier
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                     ARGUS HYBRID INFRASTRUCTURE                      │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  "THE BEAST" (Yerel Laptop)              "THE SOLDIER" (Cloud VPS)   │
+│  ┌───────────────────────────┐           ┌──────────────────────┐   │
+│  │  i7-11800H / 32GB / A3000M│           │  1-2 vCPU / 2-4GB   │   │
+│  │                           │           │                      │   │
+│  │  - Arastirma & Backtest   │  Model/   │  - 24/7 Execution    │   │
+│  │  - ML Training (GPU)      │  Config   │  - WebSocket Listen  │   │
+│  │  - HyperOpt (16 paralel)  │ ──────▶  │  - Order Routing     │   │
+│  │  - LLM Sentiment (local)  │  Sync     │  - Heartbeat         │   │
+│  │  - Walk-Forward Optim.    │           │  - Kill-Switch       │   │
+│  └───────────────────────────┘           └──────────────────────┘   │
+│                                                                      │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**Beast Kullanim Alanlari:**
+- CPU (8c/16t): 16 paralel backtest -> HyperOpt 100x daha hizli
+- RAM (32GB): 5 yillik 1m tick verisi memory'de analiz
+- GPU (RTX A3000M 6GB): XGBoost/LightGBM GPU egitimi, Ollama ile lokal LLM (Llama3 Q4)
+
+**Soldier Spec:**
+- Instance: `t3.medium` (2 vCPU, 4GB) veya `c5.large` (compute optimized)
+- Lokasyon: `ap-northeast-1` (Tokyo) - Binance sunucusuna yakin
+- OS: Ubuntu 22.04 LTS Minimal
+
+### 8.3 Process Yonetimi
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  PM2 Process Manager                                     │
+├─────────────────────────────────────────────────────────┤
+│                                                          │
+│  pm2 start Scripts/paper_daemon.py --name argus-core     │
+│  pm2 start Scripts/dashboard.py --name argus-web         │
+│  pm2 start Scripts/year2_autopilot.py --name argus-night │
+│                                                          │
+│  Auto-restart on crash                                   │
+│  Memory limit watchdog                                   │
+│  Log rotation                                            │
+│                                                          │
+├─────────────────────────────────────────────────────────┤
+│  Nginx Reverse Proxy + Certbot SSL                       │
+│  Dashboard: https://argus.yourdomain.com                 │
+│  API: https://api.argus.yourdomain.com                   │
+└─────────────────────────────────────────────────────────┘
+```
+
+### 8.4 Gece Autopilot Dongusu
+
+Her gece (01:00 lokal) otomatik calisan batch:
+
+| Adim | Script | Cikti |
+|------|--------|-------|
+| 1. Determinizm Check | `Scripts/verify_determinism.py` | Pass/Fail |
+| 2. Metrik Paketi | `Scripts/year2_generate_metrics.py` | `metrics.json` |
+| 3. Walk-Forward Refresh | `Scripts/sprint1_walkforward_12m.py` | window-level CSV |
+| 4. Haftalik Audit | `Scripts/weekly_audit.py` | `weekly_audit.json` |
+| 5. Sinyal Audit | `Scripts/phase20_signal_audit.py` | `signal_audit.md` |
+| 6. ML Model Refresh | `Scripts/train_ml_model.py` | `signal_model.lgb` |
+| 7. TopHunter Sweep | `Scripts/tophunter_sweep.py` | `tophunter_tuning.md` |
+| 8. Strateji Governance | `Scripts/strategy_registry.py` | `strategy_governance.md` |
+
+**Fallback Kurallari:**
+- Bir profil `MAX_RESTARTS_PER_HOUR` asarsa, sadece o profil durdurulur
+- Heartbeat > 180s stale ise, yalniz o profil restart edilir
+- Kill-switch `HARD/HALT` ise: yeni giris yok, mevcut pozisyonlar politikaya gore
+
+### 8.5 Monitoring & Alert Stack
+
+```
+Health Check (her dakika cron):
+├── localhost:8080/health ping
+├── PM2 status kontrolu
+├── Heartbeat freshness (< 3 dk)
+└── Portfolio DD watchdog (> 5% -> HARD KILL)
+
+Alert Kanallari:
+├── Telegram Bot (anlik)
+├── Discord Webhook (anlik)
+└── Email (gecikme tolere edilir)
+```
+
+| Alert | Tetikleyici | Kanal |
+|-------|-------------|-------|
+| `alert_kill_switch` | Risk level `SOFT/HARD/HALT` | Telegram + Discord |
+| `alert_heartbeat_stale` | > 3 dk heartbeat yok | Telegram |
+| `alert_execution_anomaly` | Slippage > p99 | Telegram + Discord |
+| `alert_drift_spike` | Drift > gate threshold 2x ust uste | Telegram |
+| `alert_night_batch_fail` | Artifact eksik 06:00'a kadar | Telegram + Email |
+
+### 8.6 Uptime Hedefleri
+
+| Faz | Hedef Uptime | RTO |
+|-----|-------------|-----|
+| Paper | >= 99.0% | 1 dk (auto-restart) |
+| Micro-live | >= 99.5% | 1 dk |
+| Live | >= 99.7% | 30 sn |
+| Scale | >= 99.9% | 15 sn (multi-region) |
+
+---
+
+## 9. 3 Haneden 6-7 Haneye: Sermaye Buyume Yol Haritasi
+
+### 9.1 Matematiksel Gerceklik
+
+$100'dan $100,000'e = **1000x** buyume. Tek lineer strateji ile kisa surede imkansiz (yikim riski olmadan).
+
+**Kazanma Formulu:**
+```
+Buyume = (Edge x Frekans) - (Risk + Maliyet)
+```
+
+- **Edge** = Strateji kalitesi (pozitif beklenti)
+- **Frekans** = Islem sayisi (bilesik getiri hizi)
+- **Risk** = Drawdown kontrolu (hayatta kalma)
+- **Maliyet** = Fee + slippage + latency
+
+### 9.2 Buyume Fazlari
+
+| Faz | Sermaye | Odak | Stratejiler | Risk/Trade | Tahmini Sure |
+|-----|---------|------|-------------|------------|-------------|
+| **Micro** | $100 - $1,000 | Agresif buyume, yuksek frekans | Hydra Scalp + Titan DCA | 2% | 6 ay |
+| **Base** | $1,000 - $10,000 | Stabilite, trend ekleme | + Orion Trend | 1.5% | 12 ay |
+| **Acceleration** | $10,000 - $50,000 | Diversifikasyon | + Phoenix Revert + Argo Arb | 1% | 18 ay |
+| **6-Figure** | $50,000 - $100,000+ | Sermaye koruma | Portfolio balancing + DeFi yield | 0.5-1% | 24 ay |
+
+### 9.3 Era Bazli Detay (4 Yillik Bakis)
+
+| Era | Donem | Sermaye | Mod | Kaynak |
+|-----|-------|---------|-----|--------|
+| Era 0: Foundation | 2026 H1 | $30 - $500 | Paper + backtest | Kisisel birikim |
+| Era 1: Proof | 2026 H2 | $500 - $2,000 | Paper 24/7 | Birikim + kucuk getiri |
+| Era 2: Pilot | 2027 | $2,000 - $10,000 | Kucuk canli | Getiri + birikim |
+| Era 3: Scale | 2028 | $10,000 - $50,000 | Multi-strateji | Bilesik getiri |
+| Era 4: Professional | 2029 | $50,000 - $250,000 | Kurumsal ops | Bilesik + (dis sermaye?) |
+| Era 5: Maturity | 2030+ | $250,000+ | Otonom makine | Bilesik getiri |
+
+### 9.4 Sermaye Kurallari (Degismez)
+
+1. **Kaybedebileceginizi risk edin.** Ilk $10K birikim + is gelirinizden, sistem getirisinden degil.
+2. **Bilesikleyin, cekmeyin.** $50K'ye kadar tum getirileri yeniden yatirin.
+3. **Kovalamak yok.** Sistem %10 dususteyse, "kurtarmak" icin ekstra para eklemeyin.
+4. **Yavas olceklendirin.** Pozisyon artisi yalniz 3+ ay pozitif performanstan sonra.
+5. **Ayristirin.** Trading sermayesi != Acil durum fonu != Yasam giderleri.
+
+### 9.5 Bilesik Getiri Projeksiyonu (Baslangic: $100)
+
+| Aylik Getiri | 12 Ay Sonrasi | 24 Ay Sonrasi | 36 Ay Sonrasi | 48 Ay Sonrasi |
+|-------------|---------------|---------------|---------------|---------------|
+| %3 | $143 | $203 | $289 | $411 |
+| %5 | $180 | $323 | $580 | $1,040 |
+| %8 | $252 | $634 | $1,594 | $4,010 |
+| %10 | $314 | $985 | $3,091 | $9,700 |
+| %15 | $535 | $2,862 | $15,308 | $81,871 |
+
+> **Not:** Saf bilesik getiri hesabidir. Gercekte drawdown, fee, slippage ve disi birikim eklenince tablo degisir. Ancak %8-10 tutarli aylik getiri ile $100K'ya 3-4 yilda ulasmak matematiksel olarak mumkun.
+
+### 9.6 "Senior Quant" Direktifleri
+
+1. **Fee ile savasmayin.** Kucuk hesapta taker fee oldurucu. **Her zaman Limit Order (Post-Only)** kullanin (acil cikislar haric).
+2. **Execution = Alpha.** Slippage de bir fee'dir. TWAP ve Chase-Limit mantigi implement edin.
+3. **Veri = Edge.** Herkesin fiyat verisi var. **Orderbook Imbalance** ve **Liquidation Cascade** verisini alin.
+4. **Korelasyon = Gizli Risk.** BTC ve ETH %90 korelasyondaysa, her ikisinin pozisyonunu yariya dusurun.
+
+---
+
+## 10. Strateji Portfolyosu ("Futbol Takimi")
+
+### 10.1 Neden Tek Strateji Yetmez
+
+Tek bir yildiz oyuncuya guvenmeyin. Bir takim kurun. Her piyasa kosulunda en az bir strateji kazanc saglayacak sekilde diversifiye edin.
+
+### 10.2 Strateji Envanteri
+
+| Strateji | Rejim Uygunlugu | Hedef | Timeframe | Mevcut Durum |
+|----------|-----------------|-------|-----------|-------------|
+| **Orion Trend** | Bull/Bear Trend | Buyuk hareketleri yakala (haftalik) | 1h-4h | Mevcut (Refine) |
+| **Phoenix Revert** | High Vol Choppy | Wichleri fade et | 15m-1h | Mevcut (Refine) |
+| **Hydra Scalp** | Low Vol Calm | 5-15m kucuk scalplar | 5m-15m | YENI |
+| **Argo Arbitrage** | Any | Risksiz spread / funding farming | Tick-level | YENI |
+| **Titan HODL** | Bull Trend | Akilli DCA (sadece dip alim) | 1d | YENI |
+| **TopHunter Short** | Bear/Chop | Yapisal kirilim sonrasi short | 1h | Paper-Only |
+
+### 10.3 Rejim-Strateji Matrisi
+
+```
+Rejim = BULL_TREND  ->  Orion (Long) + Titan DCA       -> Phoenix OFF, Hydra LOW
+Rejim = BEAR_TREND  ->  Orion (Short) + TopHunter       -> Titan OFF, Hydra LOW
+Rejim = HIGH_VOL    ->  Phoenix + Grid                   -> Orion OFF (trend'de oldurur)
+Rejim = LOW_VOL     ->  Hydra Scalp + Argo Funding      -> Orion BEKLE, Phoenix BEKLE
+```
+
+### 10.4 Strateji Lifecycle
+
+```
+FIKIR -> HIPOTEZ -> BACKTEST -> WALK-FORWARD -> PAPER -> LIVE -> MONITOR -> EMEKLILIK
+```
+
+**Gate Metrikleri:**
+- Backtest Gate: Profit Factor > 1.2, Sharpe > 0.5
+- Walk-Forward Gate: %60+ pencerede pozitif beklenti
+- Paper Gate: Paper sonuclari backtest'in %20'si icinde
+- Emeklilik Tetikleyicileri: 30 gun DD > threshold VEYA 60 gun PF < 1.0
+
+### 10.5 Portfolyo Kurallari
+
+| Kural | Limit |
+|-------|-------|
+| Maks strateji sayisi | 10 |
+| Min strateji sayisi | 2 |
+| Maks tek strateji alokasyonu | %30 |
+| Maks stratejiler arasi korelasyon | 0.5 |
+| Maks alokasyon icin gereken track record | 6 ay |
+
+---
+
+## 11. Market Rejim Motoru ("Hava Istasyonu")
+
+### 11.1 Neden Gerekli
+
+Tek bir strateji tum hava kosullarinda kazanamaz. "Hava Istasyonu" (Rejim Dedektoru) stratejileri otomatik degistirir.
+
+### 11.2 Rejim Siniflandirmasi
+
+Her 4 saatte bir piyasa durumunu 4 kovaya siniflandir:
+
+| Rejim | HV Rank | ADX | Funding | Aktif Strateji |
+|-------|---------|-----|---------|----------------|
+| **BULL_TREND** | Any | > 25 | > 0 | Orion (Long), Titan |
+| **BEAR_TREND** | Any | > 25 | < 0 | Orion (Short), TopHunter |
+| **HIGH_VOL_CHOP** | > 80 percentile | < 25 | Any | Phoenix, Grid |
+| **LOW_VOL_CALM** | < 40 percentile | < 20 | Any | Hydra, Argo |
+
+### 11.3 Girdiler
+
+| Girdi | Kaynak | Kullanim |
+|-------|--------|----------|
+| VIX Proxy | Crypto HV (24h rolling) | Volatilite seviyesi |
+| ADX(14) | Fiyat verisi | Trend gucu |
+| Avg Funding Rate (3d) | Binance/Bybit API | Piyasa sentiment |
+| Long/Short Ratio | Exchange API | Kalabalik pozisyon |
+| On-Chain Inflow | Glassnode / CryptoQuant | Balina hareketi |
+| Market Breadth | CoinGecko (% coins > MA200) | Genel piyasa sagligi |
+
+### 11.4 Contract Tasarimi
+
+**Dosya:** `argus_py/regime/classifier.py` (PLANLI)
+
+- `MarketRegime` enum: `BULL_TREND`, `BEAR_TREND`, `HIGH_VOL_CHOP`, `LOW_VOL_CALM`
+- `RegimeSnapshot` dataclass: regime, confidence, hv_percentile, adx_value, avg_funding_3d, market_breadth, timestamp
+- `RegimeClassifier` sinifi:
+  - `classify(hv_rank, adx, funding, breadth) -> RegimeSnapshot`
+  - `get_active_strategies(regime) -> list` (rejime gore hangi stratejiler aktif)
+  - `_calc_confidence(...)` (siniflandirma guveni 0-1)
+
+**Olusturulacak Dosyalar:**
+1. `argus_py/regime/__init__.py`
+2. `argus_py/regime/classifier.py` (~150 satir)
+3. `argus_py/regime/data_sources.py` (API entegrasyonu)
+4. `tests/unit/test_regime_classifier.py`
+
+---
+
+## 12. 7 Motor Kripto Adaptasyonu
+
+### 12.1 Motor Envanteri ve Kapsam
+
+Swift legacy'de 7 analiz motoru var. Python kripto implementasyonundaki durum:
+
+| # | Motor | Legacy (Swift) | Kripto (Python) | Gap | Oncelik |
+|---|-------|----------------|-----------------|-----|---------|
+| 1 | **ORION** | Full (RSI,MACD,BB,ATR,Stoch) | Partial (ADX,SMA) | 5+ indikatoru eksik | HIGH |
+| 2 | **ATLAS** | Fundamental (FMP P/E,ROE) | Yok | On-chain adaptasyon gerek | HIGH |
+| 3 | **AETHER** | Macro (FRED,VIX,DXY) | Yok | Kripto macro gerek | HIGH |
+| 4 | **HERMES** | News AI (RSS+Groq) | Yok | Ayni mimari portu | MEDIUM |
+| 5 | **PHOENIX** | Channel Reversion | Mevcut (taslak) | Refine gerek | OK |
+| 6 | **COUNCIL** | Weighted Voting | Mevcut | Farkli formul | OK |
+| 7 | **CHIRON** | ML Weight Learning | Yok | Trade gecmisi lazim | PHASE 2 |
+
+### 12.2 ATLAS-C: On-Chain Fundamental Analiz
+
+**Legacy ATLAS** sirket bilancolarini analiz eder (P/E, ROE, Borc). Kripto'da bilancu yok ama on-chain metrikleri var.
+
+| Legacy Metrik | Kripto Karsiligi | Veri Kaynagi |
+|---------------|------------------|-------------|
+| P/E Ratio | NVT Ratio (Market Cap / Tx Volume) | CoinGecko / Glassnode |
+| ROE | Protocol Revenue / TVL | DefiLlama, Token Terminal |
+| Gross Margin | Protocol Revenue / Emissions | Token Terminal |
+| Growth Rate | TVL Growth, Volume Growth | DefiLlama |
+| N/A | MVRV Ratio (MC / Realized Cap) | Glassnode |
+| N/A | Exchange Reserve | CryptoQuant |
+| N/A | Active Addresses | Glassnode |
+| N/A | Funding Rate | Binance API |
+
+**Contract Tasarimi:** `argus_py/models/atlas/atlas_c.py` (PLANLI)
+
+- `OnChainScore` dataclass: nvt_score, mvrv_score, exchange_reserve, active_addresses, funding_rate, composite
+- `AtlasCrypto` sinifi: Weighted average ile composite skor hesaplar
+- Agirliklar: NVT %25, MVRV %25, Exchange Reserve %20, Active Addresses %15, Funding %15
+
+### 12.3 AETHER-C: Kripto Makro Ortam
+
+| Kategori | Legacy | Kripto Karsiligi | API |
+|----------|--------|------------------|-----|
+| Risk Indikatoru | VIX | Crypto Fear & Greed Index | Alternative.me |
+| Para Politikasi | Fed Funds Rate | Stablecoin Supply Change | CoinGecko |
+| Enflasyon Proxy | CPI | Bitcoin Dominance | CoinGecko |
+| Risk Asset Momentum | SPY | Total Crypto Market Cap | CoinGecko |
+| Guvenli Liman | GLD | USDT Dominance | CoinGecko |
+| Doviz Gucu | DXY | DXY (ayni) | Yahoo Finance |
+| Oncul Gosterge | Initial Claims | Whale Wallet Movement | Glassnode |
+
+**Contract Tasarimi:** `argus_py/models/aether/aether_c.py` (PLANLI)
+
+- `MacroRegime` enum: `RISK_ON`, `RISK_OFF`, `NEUTRAL`
+- `AetherCrypto` sinifi:
+  - Fear & Greed (%30 agirlik) + BTC Dominance (%20) + MCap Trend (%30) + DXY (%20)
+  - Skor > 65 = RISK_ON, < 35 = RISK_OFF, arasi NEUTRAL
+
+### 12.4 HERMES-C: Kripto Haber Sentiment
+
+Mimari Legacy ile ayni: RSS -> LLM -> Score
+
+**Kripto RSS Kaynaklari:**
+- CoinDesk, CoinTelegraph, The Block, Decrypt
+- CoinTelegraph TR, BloombergHT (BIST icin)
+
+**AI Pipeline:**
+1. RSS headline'lari topla
+2. Groq'a (Llama 3.1) veya Lokal Ollama'ya gonder
+3. Sentiment + confidence cikar
+4. Kaynaklarda aggregate et
+
+**Contract Tasarimi:** `argus_py/models/hermes/hermes_c.py` (PLANLI)
+
+- `LLMSentimentEngine`: Ollama endpoint'e baglanir (zero-cost lokal LLM)
+- `SentimentResult` dataclass: score (-1 to 1), summary, entities
+- GPU kullanimi: RTX A3000M uzerinde Llama3 Q4 quantized model
+
+### 12.5 CHIRON: Ogrenme Motoru (Phase 2)
+
+**On Kosul:** 50+ tamamlanmis trade ile telemetri (decisions.csv, trades.csv)
+**Mevcut Durum:** Telemetri mevcut, ogrenme dongusu henuz yok
+
+**Contract Tasarimi:** `argus_py/learning/chiron.py` (PLANLI)
+
+- Her rejim icin en iyi agirlik setini bulma
+- Objective: maximize Sharpe, minimize DD
+- Trade sonuclarina gore motor agirliklarini optimize etme
+
+### 12.6 Kripto Council Agirliklari (Onerilen)
+
+```
+Technical (Orion-C):  45%   # Fiyat aksiyonu kripto'da baskin
+On-Chain (Atlas-C):   25%   # Fundamentaller daha az onemli
+Macro (Aether-C):     20%   # Makro donguleri onemli
+Sentiment (Hermes-C): 10%   # Gurultu/sinyal orani dusuk
+```
+
+### 12.7 Implementasyon Takvimi
+
+| Hafta | Gorev | Motor | Tahmini Sure |
+|-------|-------|-------|-------------|
+| H1-H2 | Orion Enhancement (RSI,MACD,BB,Stoch) | ORION | 4-6 saat |
+| H3-H4 | Aether-C Kripto Macro | AETHER | 6-8 saat |
+| H5-H6 | Hermes-C News Sentiment | HERMES | 4-6 saat |
+| H7-H8 | Atlas-C On-Chain | ATLAS | 6-8 saat |
+| H9 | Phoenix Aggregator Refine | PHOENIX | 3-4 saat |
+| H10+ | Chiron Learning (50+ trade sonrasi) | CHIRON | 8-10 saat |
+
+**Toplam:** 30-40 saat, 12 hafta
+
+---
+
+## 13. Paper -> Micro-Live -> Live Gate Sistemi
+
+### 13.1 Gate Felsefesi
+
+Hicbir asamaya kanitlanmadan gecilemez. Her gate'in sayisal gecis kriteri var.
+
+### 13.2 Gate A: Paper -> Micro-Live
+
+| Metrik | Gecis Esigi | Basarisizlik | Kaynak |
+|--------|-------------|-------------|--------|
+| Max Drawdown | <= %6.0 (30 gun rolling) | > %6.0 | heartbeat.json, weekly_audit |
+| Uptime | >= %99.0 | < %99.0 | status.log |
+| Slippage | median <= 6 bps, p95 <= 12 bps | Ust sinir asilirsa | trades.csv |
+| Hata Orani | <= %0.20 bar basina | > %0.20 | rejects.csv |
+| Trade Sayisi | >= 200 gecerli paper trade | < 200 | trades.csv |
+| Drift | <= 10 bps median | > 10 bps | signal_audit |
+
+**Promosyon Kurali:** Tum metrikler **2 ardisik haftalik review'da** gecmeli.
+
+### 13.3 Gate B: Micro-Live -> Live
+
+| Metrik | Gecis Esigi | Basarisizlik | Kaynak |
+|--------|-------------|-------------|--------|
+| Max Drawdown | <= %4.0 (45 gun rolling) | > %4.0 | broker equity |
+| Uptime | >= %99.5 | < %99.5 | heartbeat |
+| Slippage Delta | median <= +4 bps, p95 <= +10 bps | Ust sinir | model vs live fills |
+| Hata Orani | <= %0.10 kritik hata/bar | > %0.10 | rejects/errors |
+| Trade Sayisi | >= 100 micro-live fill | < 100 | micro-live trades.csv |
+| Drift | paper vs micro-live <= %15 relative | > %15 | paired-run drift |
+
+**Promosyon Kurali:** Tum metrikler pass + kill-switch hicbir zaman `HARD/HALT`'da 1 cycle'dan fazla kalmamis olmali.
+
+### 13.4 Gate C: Live Scale-Up (Stage-1 -> Stage-2)
+
+| Metrik | Gecis Esigi | Kaynak |
+|--------|-------------|--------|
+| 90 gun Max DD | <= %5.0 | live equity curve |
+| Calisma Stabilitesi | >= %99.7 | heartbeat + supervisor |
+| Slippage Stabilitesi | p95 <= 12 bps | fills vs model |
+| Incident Rate | 0 cozulmemis kritik incident | incident log |
+| Trade Throughput | >= 250 fill / 90 gun | trades.csv |
+| Drift Stabilitesi | aylik trend artmayan | aylik drift paketi |
+
+### 13.5 Stage Progression Timeline
+
+```
+Paper Trading (3+ ay)
+    |
+    v  Gate A Pass
+Micro-Live (3+ ay, max $100 risk)
+    |
+    v  Gate B Pass  
+Live Stage-1 (3+ ay, conservative risk)
+    |
+    v  Gate C Pass
+Live Stage-2 (olceklendirme)
+    |
+    v  90 gun daha stability
+Full Scale (portfolio diversifikasyonu)
+```
+
+### 13.6 Risk Profili Progresyonu
+
+| Parametre | Paper | Micro-Live | Live S1 | Live S2 |
+|-----------|-------|-----------|---------|---------|
+| `dailyLossCap` | %3.0 | %2.0 | %1.5 | %1.0 |
+| `maxRiskPerTrade` | %1.0 | %0.50 | %0.35 | %0.25 |
+| `maxConcurrentPos` | 3 | 2 | 2 | 3 |
+| `minCashReserve` | %10 | %20 | %25 | %20 |
+
+---
+
+## 14. Risk Yonetimi: "Iron Risk" Detay
+
+### 14.1 Iron Risk Felsefesi
+
+> "Hayatta kalma > Kar. %50 kaybedersen, sifira donmek icin %100 kazanman lazim."
+
+Risk yonetimi sistemin **cekirdegine** kodlanir. Bypass edilemez.
+
+### 14.2 5 Katmanli Risk Hiyerarsisi
+
+```
+Katman 1: POZISYON RISKI
+  - Her trade'de stop-loss (zorunlu)
+  - Maks sermayenin %1-2'si pozisyon basina
+  - ATR bazli dinamik boyutlandirma
+
+Katman 2: STRATEJI RISKI
+  - Strateji basina maks DD: %10
+  - Track record'a gore alokasyon
+  - Dusuk performansta otomatik azaltma
+
+Katman 3: PORTFOLYO RISKI
+  - Toplam maks DD: %15
+  - Korelasyon izleme
+  - Sektor/varlik diversifikasyonu
+
+Katman 4: OPERASYONEL RISK
+  - Sistem sagligi izleme
+  - Failover proseduru
+  - Manuel override yetkinligi
+
+Katman 5: VAROLUSSEL RISK
+  - Kill-switch (tum trading'i durdur)
+  - Sermaye cekme tetikleyicisi
+  - Tam sistem kapatma proseduru
+```
+
+### 14.3 Pozisyon Boyutlandirma Formulu
+
+```
+Position Size = (Hesap * Risk%) / (ATR * 1.5)
+
+Ornek:
+  Hesap = $10,000
+  Risk = %1 = $100
+  ATR = $500
+  Stop Distance = $500 * 1.5 = $750
+  Position Size = $100 / $750 = 0.133 BTC
+
+Kural: Position Size asla hesabin %20'sinden fazla olamaz
+```
+
+**Prensip:** Volatil piyasada daha kucuk pozisyon, sakin piyasada daha buyuk pozisyon.
+
+### 14.4 Korelasyon Kontrol
+
+- BTC-ETH korelasyonu > 0.7 ise: her iki pozisyonu `(1 - corr/2)` ile carp
+- Ornek: corr = 0.9 -> scale = 0.55 -> her pozisyon neredeyse yariya iner
+- Amac: Birbirine bagli varliklarda cift risk almamak
+
+### 14.5 Kill-Switch Protokolu
+
+| Tetikleyici | Level | Aksiyon |
+|-------------|-------|---------|
+| Gunluk kayip > %3 | `SOFT` | Yeni giris durdur, mevcut pozisyonlar devam |
+| Gunluk kayip > %5 | `HARD` | Tum yeni islemler durdur |
+| Toplam DD > %10 | `HALT` | Tum pozisyonlari kapat, 24 saat sogurum |
+| 5 ardisik kayip | `SOFT` | 30 dk yeni giris yok |
+| Sistem hatasi | `HARD` | Alert + inceleme bekle |
+| Manuel tetik | `HALT` | Tam durdurma, manuel restart gerekir |
+
+### 14.6 Kill-Switch Sonrasi Recovery
+
+1. `SOFT` recovery: Otomatik, sonraki bar'da normal devam
+2. `HARD` recovery: 12 saat paper-only zorunlu
+3. `HALT` recovery: Manuel restart + incident raporu zorunlu
+
+### 14.7 Cooldown Kurallari
+
+| Kural | Deger |
+|-------|-------|
+| Loss streak cooldown | 3 ardisik kayip -> 30 dk pause |
+| Yuksek volatilite cooldown | Slippage p95 esik asarsa -> 15 dk pause |
+| Post-kill-switch cooldown | HARD'dan recovery -> 12 saat paper-only |
+| SOFT selective mode | Yalniz yuksek conviction giris, %25-40 normal boyut |
+
+---
+
+## 15. Alpha Factory & Arastirma Pipeline'i
+
+### 15.1 Surec
+
+```
+Veri Golu -> Factor Lab -> Walk-Forward -> Paper Soak -> Production
+     |            |              |              |              |
+  Ingest:    Test 100+      Her Pazar:      30+ gun        Mezun
+  OHLCV +    sinyal         Son 6 ay        paper          strateji
+  Orderbook  candidate      uzerinde        trading
+  + Twitter  IC > 0.05      retrain         Paper ~
+  + Whale    survivors      Son 2 hafta     Backtest
+                            unseen test
+```
+
+### 15.2 Factor Lab
+
+Her hafta 100+ sinyal adayini test eden otomatik pipeline:
+
+- Girdiler: Teknik (RSI, MACD, BB, Stoch, ADX, OBV), On-chain (NVT, MVRV, Exchange Reserve), Sentiment (Fear & Greed, LLM Score), Microstructure (OBI, Volume Delta), Cross-asset (BTC Dominance, DXY, SPY corr)
+- Degerlendirme: IC (Information Coefficient) hesapla, IC > 0.05 olanlari promote et
+- Hit Rate: Faktor yonu ile gelecek getiri yonunun eslestigi oran
+
+### 15.3 Walk-Forward Optimizer
+
+```
+Her Pazar:
+1. Son 6 ayin verisinde parametreleri optimize et
+2. Son 2 haftalik (gorunmeyen) veride test et
+3. Verimli ise -> config.yaml'i guncelle
+4. Verimli degilse -> mevcut config'i koru
+```
+
+### 15.4 Arastirma Ritmi
+
+| Frekans | Aktivite |
+|---------|----------|
+| Gunluk | Telemetri inceleme, anomali taramasi |
+| Haftalik | Performans review, factor screening |
+| Aylik | Strateji retrospektifi, yeni hipotez |
+| Ceyreklik | Mimari review, teknik borc degerlendirmesi |
+
+### 15.5 GPU-Hizlandirilmis Feature Engineering
+
+Beast'in RTX A3000M'i ile:
+- 100+ teknik indikatoru 5 yillik 1m veri uzerinde saniyeler icinde hesapla (cuDF / RAPIDS)
+- XGBoost/LightGBM modellerini GPU'da egit
+- Lokal LLM (Ollama Mistral/Llama3) ile zero-cost sentiment analizi
+- 16 paralel multiprocessing ile optimize_hydra.py tipi grid search
+
+---
+
+## 16. 4 Yillik Master Plan Ozeti (2026-2030)
+
+### 16.1 Era 0: Foundation (2026 H1)
+- **Sermaye:** $30 -> $500
+- **Mod:** Paper + backtest
+- **Basari:** 12M walk-forward pozitif beklenti, DD < %15, 30 gun kesintisiz calisma
+- **Yapma:** Canli para yatirma, getiri optimize etme
+
+### 16.2 Era 1: Proof (2026 H2)
+- **Sermaye:** $500 -> $2,000
+- **Mod:** Paper 24/7 (gercek zamanli veri ile)
+- **Basari:** 6 ay kesintisiz paper, Sharpe > 0.5, DD < %12
+- **Aktivite:** Haftalik performans review, aylik strateji retrospektifi
+
+### 16.3 Era 2: Pilot (2027)
+- **Sermaye:** $2,000 -> $10,000
+- **Mod:** Kucuk canli + paper genisleme
+- **Basari:** 12 ay canli (blow-up yok), pozitif getiri, DD < %10, ikinci varlik sinifi
+- **Risk:** Trade basina maks %1, gunluk %5 hard stop
+
+### 16.4 Era 3: Scale (2028)
+- **Sermaye:** $10,000 -> $50,000
+- **Mod:** Multi-strateji, multi-asset
+- **Basari:** 3+ strateji pozitif, Portfolio Sharpe > 0.8, DD < %8
+- **Yeni:** Strateji alokasyon motoru, rejim tespiti cross-asset, ML feedback loop v1
+
+### 16.5 Era 4: Professional (2029)
+- **Sermaye:** $50,000 -> $250,000
+- **Mod:** Kurumsal seviye operasyon
+- **Basari:** 3+ yillik denetlenebilir track record, DD < %6, Uptime > %99.5
+- **Degerlendir:** Dis sermaye (arkadaslar/aile), yasal yapi, sigorta
+
+### 16.6 Era 5: Maturity (2030+)
+- **Sermaye:** $250,000+
+- **Mod:** Otonom bilesik makine
+- **Karakter:** Minimal mudahale, arastirma pipeline'indan yeni stratejiler, basarisiz stratejiler otomatik emekli, operator rolu gozlem
+
+### 16.7 Her Gun Sorun: "Sistem bugun hayatta kaldi mi?"
+
+```
+Evet -> Bilesikle.
+Hayir -> Nedenini ogren.
+Tum oyun bu.
+```
+
+---
+
+## 17. Basarisizlik Modlari ve Onleme Cercevesi
+
+### 17.1 Argus Nasil Olur?
+
+| Mod | Olasilik | Etki | Onleme |
+|-----|----------|------|--------|
+| **Blow-up (Buyuk Kayip)** | Orta | Olumcul | Hard stop, kill-switch, DD limit |
+| **Yavas Kanama** | Yuksek | Olumcul | Duzenli review, strateji emekliligi |
+| **Teknik Ariza** | Orta | Yuksek | Monitoring, redundancy, backup |
+| **Duygusal Override** | Yuksek | Yuksek | Otomasyon, kurallar, disiplin |
+| **Regulasyon** | Dusuk | Yuksek | Uyum farkindaligi, yasal yapi |
+| **Rejim Degisimi** | Yuksek | Orta | Diversifikasyon, rejim tespiti |
+| **Tukenmislik** | Yuksek | Yuksek | Otomasyon, surdurulebilir tempo |
+| **Asiri Muhendislik** | Orta | Orta | KISS prensibi, hizli ship |
+| **Yetersiz Muhendislik** | Orta | Yuksek | Test, validasyon, kalite |
+
+### 17.2 Onleme Cercevesi
+
+**Teknik Arizalar:**
+- Otomatik test suite (pytest), CI/CD pipeline
+- Monitoring + alerting, Rollback yetkinligi
+
+**Trading Basarisizliklari:**
+- Pozisyon limitleri, Stop-loss (zorunlu)
+- Drawdown korumalari, Kill-switch
+
+**Insan Basarisizliklari:**
+- Otomasyon > Manuel
+- Kurallar > Takdir
+- Dokumantasyon > Hafiza
+- Review > Guven
+
+**Stratejik Basarisizliklar:**
+- Duzenli retrospektif, Dis geri bildirim
+- Pivot istekliligi, Kotu stratejileri erken oldur
+
+### 17.3 Incident Drill (3 Ayda Bir)
+
+**Prosedur:**
+1. Anomali simule et (stale heartbeat / error spike)
+2. Alert'in ateslendigini dogrula
+3. Triage: `soak_status.sh` + `status_reader.py`
+4. Containment: Kill-switch seviyesini dogrula
+5. Recovery: Restart + heartbeat dogrulama
+6. Postmortem: Incident template + kok neden + aksiyon
+
+---
+
+## 18. Hydra / Argo / Titan: Yeni Strateji Planlari
+
+### 18.1 HYDRA SCALP: Dusuk Volatilite Scalper
+
+**Objective:** Dusuk volatilite rejimlerinde karli kucuk scalplar.
+**Timeframe:** 5m ve 15m
+**Pairler:** Yalniz yuksek likidite (BTC, ETH, SOL)
+
+**Alpha Faktorleri:**
+1. **Bollinger Band Mean Reversion:** Fiyat alt banda dokunur + ADX < 25 + RSI < 30
+2. **Orderbook Imbalance (OBI):** `(BidVol - AskVol) / (BidVol + AskVol) > 0.2`
+3. **Volume Delta:** Son 3 mum'da alis hacmi > satis hacmi
+
+**Execution:**
+- Order Type: LIMIT (Maker) at BestBid
+- Chase: 10 sn icinde dolmazsa, reprice (maks 3 deneme)
+- TP: Band Basis (SMA 20) veya +%0.4
+- SL: 1.5x ATR entry altinda veya -%0.3 sabit
+
+**Gate:** Paper soak min 200 trade, DD <= %3, Win Rate >= %55, PF >= 1.3
+
+**Dosya Plani:** `argus_py/strategies/hydra.py`
+
+---
+
+### 18.2 ARGO ARBITRAGE: Funding Rate Farmer
+
+**Objective:** Borsalar arasi funding rate farki veya spot-futures basis trade ile risksiz spread yakalama.
+
+**Strateji Turleri:**
+1. **Funding Rate Arb:** Pozitif funding'de spot long + perp short -> funding geliri topla
+2. **Cross-Exchange Spread:** Binance vs Bybit fiyat farki > fee+slippage ise simultane al/sat
+3. **Basis Trade:** Spot vs quarterly futures spread
+
+**Esik:** Min funding threshold = %0.05 per 8h = yillik ~%18.25
+
+**Mantik:**
+- Pozitif funding: short perp + long spot -> her 8 saatte funding geliri al
+- Negatif funding: long perp + short spot (margin gerekir)
+- Delta-neutral olmali (net piyasa riski sifir)
+
+**Risk:** Market riski yok (delta-neutral), ancak execution risk ve likidite riski var.
+
+**Gate:** 6 ay paper soak, pozitif toplam getiri, maks DD < %2
+
+**Dosya Plani:** `argus_py/strategies/argo.py`
+
+---
+
+### 18.3 TITAN DCA: Akilli Ortalama Maliyet
+
+**Objective:** Gunluk otomatik $X alim, ama **yalniz** rejim `BEAR_TREND` **degilse**.
+
+**Mantik:**
+- Normal DCA: her gun $10 al (koru)
+- Akilli DCA: dip'lerde daha cok al, tepe'lerde daha az al
+- RSI < 30 -> 2x multiplier (dip'te 2 kat al)
+- RSI < 40 -> 1.5x multiplier
+- RSI > 70 -> 0.5x multiplier (pahali'da yarim al)
+- ATH'den %30+ dususte -> ek 1.5x bonus
+- Rejim = BEAR_TREND -> 0 (hic alma, bekle)
+
+**Gate:** 6 ay paper soak, toplam getiri > basit DCA getirisi, DD < %15
+
+**Dosya Plani:** `argus_py/strategies/titan.py`
+
+---
+
+### 18.4 Yeni Strateji Implementasyon Takvimi
+
+| Strateji | Baslangic | Tahmini Sure | Bagimlilik |
+|----------|-----------|-------------|------------|
+| Hydra Scalp | Rejim motoru hazir oldugunda | 15 saat | Regime Classifier + OBI veri |
+| Argo Arb | Multi-exchange connector hazir | 20 saat | REF-003 (hummingbot pattern) |
+| Titan DCA | Rejim motoru hazir | 8 saat | Regime Classifier |
+| TopHunter Short | Simdiden spec mevcut | 10 saat | Pivot detection |
+
+**Toplam Yeni Strateji Eforu:** ~53 saat
+
+---
+
+# EXECUTION PRIORITY MATRIX
+
+| Oncelik | Gorev | Tahmini Sure | Bagimlilik |
+|---------|-------|-------------|------------|
+| P0 | Rejim Motoru (Section 11) | 10 saat | Veri API'leri |
+| P0 | Paper 24/7 Stabilite (Section 8) | 8 saat | PM2 + monitoring |
+| P1 | Orion Enhancement (7 motor, Section 12) | 6 saat | Mevcut kod |
+| P1 | Gate A Metrik Altyapisi (Section 13) | 6 saat | Telemetri |
+| P1 | Iron Risk Kernel (Section 14) | 8 saat | Kill-switch mevcut |
+| P2 | Hydra Scalp Stratejisi (Section 18) | 15 saat | P0 rejim motoru |
+| P2 | Aether-C Macro (Section 12) | 8 saat | API entegrasyonu |
+| P2 | Titan DCA (Section 18) | 8 saat | P0 rejim motoru |
+| P3 | Hermes-C Sentiment (Section 12) | 6 saat | RSS + LLM |
+| P3 | Atlas-C On-Chain (Section 12) | 8 saat | Glassnode/CoinGecko |
+| P3 | Argo Arbitrage (Section 18) | 20 saat | Multi-exchange |
+| P4 | Chiron Learning (Section 12) | 10 saat | 50+ trade |
+| P4 | Factor Lab Automasyonu (Section 15) | 12 saat | Feature store |
+
+**Toplam Tahmini Efor:** ~125 saat (~3 ay part-time, hafta 10 saat)
+
+---
+
+**Status:** FUTURE_VISION.md v2.0 - Tum bolumler tamamlandi  
+**Son Guncelleme:** 2026-02-08  
 **Document End**
