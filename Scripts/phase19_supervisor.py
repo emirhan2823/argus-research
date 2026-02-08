@@ -1,11 +1,9 @@
-
-import sys
 import os
+import signal
+import subprocess
+import sys
 import time
 import json
-import subprocess
-import signal
-import psutil
 from datetime import datetime, timedelta
 from pathlib import Path
 from collections import deque
@@ -19,189 +17,249 @@ TWIN_ROOT = REPO_ROOT / "runs/phase19_twin"
 MAX_RESTARTS_PER_HOUR = 5
 STALE_THRESHOLD_SECONDS = 180
 
-# Daemon Configurations
-DAEMONS = {
+# Profile configurations
+PROFILE_CONFIGS = {
     "STRICT": {
         "run_dir": TWIN_ROOT / "STRICT",
-        "min_adx": 35.0
+        "min_adx": 35.0,
+        "max_exp_move_bps": 80.0,
+        "interval": "1m",
+        "strategy": "council",
     },
     "SOFT": {
         "run_dir": TWIN_ROOT / "SOFT",
         "min_adx": 20.0,
-        "soft_defense_override": True
-    }
+        "max_exp_move_bps": 80.0,
+        "interval": "1m",
+        "strategy": "council",
+        "soft_defense_override": True,
+        "safe_paper": True,
+    },
+    "TOPHUNTER": {
+        "run_dir": TWIN_ROOT / "TOPHUNTER",
+        "min_adx": 20.0,
+        "max_exp_move_bps": 120.0,
+        "interval": "1h",
+        "strategy": "tophunter_short_v1",
+        "safe_paper": True,
+        "tophunter_adx_max": 20.0,
+        "tophunter_pivot_left": 2,
+        "tophunter_pivot_right": 2,
+        "tophunter_daily_loss_cap_pct": 1.5,
+        "tophunter_max_risk_trade_pct": 0.5,
+        "tophunter_max_open_positions": 1,
+        "tophunter_loss_cooldown_bars": 3,
+    },
 }
+DEFAULT_PROFILES = ["STRICT", "SOFT", "TOPHUNTER"]
 
-def log(msg):
+
+def log(msg: str) -> None:
     ts = datetime.now().isoformat()
     entry = f"[{ts}] [SUPERVISOR] {msg}"
     print(entry)
-    with open(LOG_DIR / "supervisor.log", "a") as f:
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    with open(LOG_DIR / "supervisor.log", "a", encoding="utf-8") as f:
         f.write(entry + "\n")
 
+
+def parse_enabled_profiles() -> list[str]:
+    raw = os.environ.get("ARGUS_SUPERVISOR_PROFILES", ",".join(DEFAULT_PROFILES))
+    requested = [item.strip().upper() for item in raw.split(",") if item.strip()]
+    enabled: list[str] = []
+    for profile in requested:
+        if profile in PROFILE_CONFIGS and profile not in enabled:
+            enabled.append(profile)
+    if not enabled:
+        enabled = ["STRICT", "SOFT"]
+    return enabled
+
+
 class Supervisor:
-    def __init__(self):
-        # State per daemon: { "STRICT": { "proc": Popen, "restarts": deque, "pid_file": Path, "hb_file": Path } }
+    def __init__(self, profiles: list[str]):
+        self.profiles = profiles
         self.state = {}
-        for did, cfg in DAEMONS.items():
+
+        for did in self.profiles:
+            cfg = PROFILE_CONFIGS[did]
+            cfg["run_dir"].mkdir(parents=True, exist_ok=True)
             self.state[did] = {
                 "proc": None,
                 "restarts": deque(),
                 "config": cfg,
                 "pid_file": cfg["run_dir"] / "daemon.pid",
                 "hb_file": cfg["run_dir"] / "heartbeat.json",
-                "log_prefix": f"daemon_{did}"
+                "log_prefix": f"daemon_{did}",
             }
-            # Ensure dirs
-            cfg["run_dir"].mkdir(parents=True, exist_ok=True)
-            
-    def check_running(self, did):
+
+    def check_running(self, did: str) -> bool:
         proc = self.state[did]["proc"]
         if proc is None:
             return False
         return proc.poll() is None
-        
-    def start_daemon(self, did):
+
+    def _build_command(self, did: str) -> list[str]:
+        cfg = self.state[did]["config"]
+        cmd = [
+            "caffeinate",
+            "-dimsu",
+            sys.executable,
+            "-u",
+            str(REPO_ROOT / "Scripts/paper_daemon.py"),
+            "--daemon_id",
+            did,
+            "--run_dir",
+            str(cfg["run_dir"]),
+            "--min_adx",
+            str(cfg["min_adx"]),
+            "--max_exp_move_bps",
+            str(cfg.get("max_exp_move_bps", 80.0)),
+            "--interval",
+            str(cfg.get("interval", "1m")),
+            "--strategy",
+            str(cfg.get("strategy", "council")),
+        ]
+
+        if cfg.get("soft_defense_override", False):
+            cmd.append("--soft_defense_override")
+        if cfg.get("safe_paper", False):
+            cmd.append("--safe_paper")
+
+        if cfg.get("strategy") == "tophunter_short_v1":
+            cmd.extend([
+                "--tophunter_adx_max",
+                str(cfg.get("tophunter_adx_max", 20.0)),
+                "--tophunter_pivot_left",
+                str(cfg.get("tophunter_pivot_left", 2)),
+                "--tophunter_pivot_right",
+                str(cfg.get("tophunter_pivot_right", 2)),
+                "--tophunter_daily_loss_cap_pct",
+                str(cfg.get("tophunter_daily_loss_cap_pct", 1.5)),
+                "--tophunter_max_risk_trade_pct",
+                str(cfg.get("tophunter_max_risk_trade_pct", 0.5)),
+                "--tophunter_max_open_positions",
+                str(cfg.get("tophunter_max_open_positions", 1)),
+                "--tophunter_loss_cooldown_bars",
+                str(cfg.get("tophunter_loss_cooldown_bars", 3)),
+            ])
+
+        return cmd
+
+    def start_daemon(self, did: str) -> None:
         s = self.state[did]
-        
-        # Rate Limit Check
+
+        # Rate limit
         now = datetime.now()
         while s["restarts"] and (now - s["restarts"][0]) > timedelta(hours=1):
             s["restarts"].popleft()
-            
+
         if len(s["restarts"]) >= MAX_RESTARTS_PER_HOUR:
-            log(f"CRITICAL: [{did}] Max restarts ({MAX_RESTARTS_PER_HOUR}/hr) exceeded. Giving up on {did}.")
+            log(f"CRITICAL: [{did}] restart budget exceeded ({MAX_RESTARTS_PER_HOUR}/hr).")
             return
-            
-        log(f"Starting Daemon [{did}]...")
-        
-        # Log File
+
+        log(f"Starting daemon [{did}]...")
         ts_str = datetime.now().strftime("%Y%m%d_%H%M%S")
         d_log = LOG_DIR / f"{s['log_prefix']}_run_{ts_str}.log"
-        
-        # Command
-        # python3 -u scripts/paper_daemon.py --daemon_id DID --run_dir PATH --min_adx VAL --max_exp_move_bps 80
-        cmd = [
-            "caffeinate", "-dimsu", 
-            sys.executable, "-u", str(REPO_ROOT / "Scripts/paper_daemon.py"),
-            "--daemon_id", did,
-            "--run_dir", str(s["config"]["run_dir"]),
-            "--min_adx", str(s["config"]["min_adx"]),
-            "--max_exp_move_bps", "80.0"
-        ]
-        
-        if s["config"].get("soft_defense_override", False):
-            cmd.append("--soft_defense_override")
-            
-        if s["config"].get("safe_paper", False):
-            cmd.append("--safe_paper")
-        
+        cmd = self._build_command(did)
+
         try:
-            with open(d_log, "a") as out_f:
+            with open(d_log, "a", encoding="utf-8") as out_f:
                 s["proc"] = subprocess.Popen(
                     cmd,
                     stdout=out_f,
                     stderr=subprocess.STDOUT,
                     cwd=str(REPO_ROOT),
-                    preexec_fn=os.setsid
+                    preexec_fn=os.setsid,
                 )
-            
+
             s["restarts"].append(now)
-            log(f"Daemon [{did}] Started. PID={s['proc'].pid}. Log={d_log}")
-            
-            # Write PID
-            with open(s["pid_file"], "w") as f:
+            log(f"Daemon [{did}] started PID={s['proc'].pid}. Log={d_log}")
+            with open(s["pid_file"], "w", encoding="utf-8") as f:
                 f.write(str(s["proc"].pid))
-                
+
         except Exception as e:
             log(f"Failed to start daemon [{did}]: {e}")
-            
-    def check_heartbeat(self, did):
+
+    def check_heartbeat(self, did: str) -> bool:
         s = self.state[did]
         hb_file = s["hb_file"]
-        
         if not hb_file.exists():
-            # Grace period logic could be here, but simpler:
-            # If proc is running, and file missing for long time -> stale.
-            # For now, similar to before: ignore if missing (assuming startup)
             return True
-            
+
         try:
-            with open(hb_file, "r") as f:
+            with open(hb_file, "r", encoding="utf-8") as f:
                 hb = json.load(f)
-                
             ts_str = hb.get("ts_iso")
-            if not ts_str: return True
-            
+            if not ts_str:
+                return True
+
             hb_ts = datetime.fromisoformat(ts_str)
             delta = (datetime.now() - hb_ts).total_seconds()
-            
             if delta > STALE_THRESHOLD_SECONDS:
-                log(f"HEARTBEAT STALE [{did}]: {delta:.1f}s > {STALE_THRESHOLD_SECONDS}s. Restarting...")
+                log(f"HEARTBEAT STALE [{did}] {delta:.1f}s > {STALE_THRESHOLD_SECONDS}s.")
                 return False
-                
             return True
-            
         except Exception as e:
-            log(f"Error reading heartbeat [{did}]: {e}")
+            log(f"Heartbeat parse error [{did}]: {e}")
             return True
 
-    def kill_daemon(self, did):
+    def kill_daemon(self, did: str) -> None:
         s = self.state[did]
-        if s["proc"]:
-            log(f"Killing Daemon [{did}] PID {s['proc'].pid}...")
+        if not s["proc"]:
+            return
+
+        pid = s["proc"].pid
+        log(f"Stopping daemon [{did}] PID {pid}...")
+        try:
+            os.killpg(os.getpgid(pid), signal.SIGTERM)
             try:
-                os.killpg(os.getpgid(s["proc"].pid), signal.SIGTERM)
-                try:
-                    s["proc"].wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    os.killpg(os.getpgid(s["proc"].pid), signal.SIGKILL)
-            except Exception as e:
-                log(f"Kill error [{did}]: {e}")
+                s["proc"].wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                os.killpg(os.getpgid(pid), signal.SIGKILL)
+        except Exception as e:
+            log(f"Stop error [{did}]: {e}")
+        finally:
             s["proc"] = None
 
-    def run(self):
-        # Register Signal Handler
+    def run(self) -> None:
         signal.signal(signal.SIGTERM, self.shutdown)
         signal.signal(signal.SIGINT, self.shutdown)
-        
-        # Write Supervisor PID
+
         TWIN_ROOT.mkdir(parents=True, exist_ok=True)
         LOG_DIR.mkdir(parents=True, exist_ok=True)
-        
-        # We put supervisor PID in TWIN_ROOT
+
         sup_pid_file = TWIN_ROOT / "supervisor.pid"
-        with open(sup_pid_file, "w") as f:
+        with open(sup_pid_file, "w", encoding="utf-8") as f:
             f.write(str(os.getpid()))
-            
-        log("Twin Supervisor Running.")
-        
+
+        log(f"Supervisor running with profiles: {', '.join(self.profiles)}")
+
         while True:
-            for did in self.state:
+            for did in self.profiles:
                 if not self.check_running(did):
-                    log(f"Daemon [{did}] not running. Starting...")
+                    log(f"Daemon [{did}] is down, starting...")
                     self.start_daemon(did)
-                    time.sleep(2) # Stagger starts
+                    time.sleep(2)
                 else:
                     if not self.check_heartbeat(did):
                         self.kill_daemon(did)
-            
             time.sleep(10)
 
-    def cleanup(self):
-        log("Cleaning up...")
-        for did in self.state:
+    def cleanup(self) -> None:
+        log("Cleanup started")
+        for did in self.profiles:
             self.kill_daemon(did)
-            
+
         sup_pid_file = TWIN_ROOT / "supervisor.pid"
         if sup_pid_file.exists():
-            os.remove(sup_pid_file)
+            sup_pid_file.unlink()
 
-    def shutdown(self, signum, frame):
-        log(f"Received signal {signum}. Shutting down.")
+    def shutdown(self, signum, _frame) -> None:
+        log(f"Signal {signum} received, shutting down")
         self.cleanup()
         sys.exit(0)
 
+
 if __name__ == "__main__":
-    sup = Supervisor()
-    sup.run()
+    profiles = parse_enabled_profiles()
+    Supervisor(profiles).run()
