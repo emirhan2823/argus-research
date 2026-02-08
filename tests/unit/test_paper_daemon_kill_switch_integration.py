@@ -89,3 +89,24 @@ def test_heartbeat_contains_risk_level(tmp_path):
 
     payload = json.loads((tmp_path / "heartbeat.json").read_text(encoding="utf-8"))
     assert payload["risk_level"] == "HARD"
+
+
+def test_append_reject_normalizes_empty_code_and_detail(tmp_path):
+    daemon = PaperDaemon(_cfg(tmp_path))
+    daemon.append_reject(_bar(), "", "")
+
+    rejects = (tmp_path / "rejects.csv").read_text(encoding="utf-8")
+    assert "REJECT_UNKNOWN" in rejects
+    assert "No detail provided" in rejects
+
+
+def test_heartbeat_also_writes_structured_metrics_json(tmp_path):
+    daemon = PaperDaemon(_cfg(tmp_path))
+    daemon.update_heartbeat(last_bar=_bar())
+
+    metrics = json.loads((tmp_path / "metrics.json").read_text(encoding="utf-8"))
+    assert "bars_seen" in metrics
+    assert "trades_total" in metrics
+    assert "rejects_total" in metrics
+    assert "errors_total" in metrics
+    assert "strategy_id_breakdown" in metrics

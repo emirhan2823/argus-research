@@ -28,6 +28,7 @@ from argus_py.broker.paper import PaperBroker, TradeFill
 from argus_py.data.reporting import Reporter
 from argus_py.data.market_state import Bar
 from argus_py.telemetry.schema import TelemetryEvent
+from argus_py.telemetry.reject_schema import normalize_reject, validate_reject
 from argus_py.risk.kill_switch import KillSwitch, KillSwitchConfig, check_and_activate
 import argparse
 
@@ -71,6 +72,7 @@ DEFAULT_CONFIG = {
     "tophunter_daily_loss_cap_pct": 1.5,
     "tophunter_max_open_positions": 1,
     "tophunter_loss_cooldown_bars": 3,
+    "heartbeat_interval_sec": 5,
     
     # Config Objects Mock (Will be populated in main)
     "args": None
@@ -93,6 +95,8 @@ class PaperDaemon:
         # Phase 19.5 Telemetry Files
         self.heartbeat_file = self.run_dir / "heartbeat.json"
         self.heartbeat_tmp = self.run_dir / "heartbeat.json.tmp"
+        self.metrics_file = self.run_dir / "metrics.json"
+        self.metrics_tmp = self.run_dir / "metrics.json.tmp"
         self.decisions_csv = self.run_dir / "decisions.csv"
         self.decisions_jsonl = self.run_dir / "decisions.jsonl"
         self.rejects_csv = self.run_dir / "rejects.csv"
@@ -110,12 +114,17 @@ class PaperDaemon:
         self.health = {
             "last_error": None,
             "consecutive_errors": 0,
+            "errors_total": 0,
             "start_time_iso": datetime.now().isoformat()
         }
+        self.last_heartbeat_push_ts = 0.0
+        self.heartbeat_interval_sec = max(1, int(self.cfg.get("heartbeat_interval_sec", 5)))
         self.consecutive_losses = 0
         self.tophunter_cooldown_remaining = 0
         self.api_error_timestamps = deque(maxlen=2048)
         self.api_errors_1h = 0
+        self.strategy_counters = {}
+        self._touch_strategy_bucket(self._resolve_strategy_id(None))
         
         # Ensure CSV Headers
         self._init_csvs()
@@ -207,12 +216,69 @@ class PaperDaemon:
     def log_error(self, context):
         self.health["last_error"] = f"{context} @ {datetime.now().isoformat()}"
         self.health["consecutive_errors"] += 1
+        self.health["errors_total"] += 1
         with open(self.error_log, "a") as f:
             f.write(f"--- ERROR in {context} @ {datetime.now()} ---\n")
             traceback.print_exc(file=f)
         traceback.print_exc()
-        # Force Heartbeat Update to reflect error
-        self.update_heartbeat()
+        # Force heartbeat+metrics update to reflect error state.
+        hb_bar = self.history_bars[-1] if self.history_bars else None
+        self._maybe_write_heartbeat(last_bar=hb_bar, force=True)
+
+    def _resolve_strategy_id(self, strategy_tags):
+        if strategy_tags and strategy_tags.get("strategy_id"):
+            return str(strategy_tags.get("strategy_id")).strip() or "UNKNOWN_STRATEGY"
+        strategy_name = str(self.cfg.get("strategy", "council")).lower()
+        if strategy_name == "tophunter_short_v1":
+            return "TOPHUNTER_SHORT_V1"
+        if strategy_name == "council":
+            return "COUNCIL_BASELINE"
+        return strategy_name.upper() if strategy_name else "UNKNOWN_STRATEGY"
+
+    def _touch_strategy_bucket(self, strategy_id):
+        sid = strategy_id or "UNKNOWN_STRATEGY"
+        if sid not in self.strategy_counters:
+            self.strategy_counters[sid] = {
+                "decisions": 0,
+                "rejects": 0,
+                "trades": 0,
+            }
+        return sid
+
+    def _write_metrics(self, last_bar=None):
+        last_bar_iso = None
+        if last_bar is not None:
+            try:
+                last_bar_iso = datetime.fromtimestamp(last_bar.timestamp).isoformat()
+            except Exception:
+                last_bar_iso = None
+        payload = {
+            "ts_iso": datetime.now().isoformat(),
+            "run_id": self.cfg.get("run_id", "unknown"),
+            "daemon_id": self.cfg.get("daemon_id", "UNKNOWN"),
+            "strategy_mode": self.cfg.get("strategy", "council"),
+            "last_closed_bar_iso": last_bar_iso,
+            "bars_seen": self.counters.get("bars_seen", 0),
+            "decisions_total": self.counters.get("decisions_total", 0),
+            "trades_total": self.counters.get("trades_total", 0),
+            "rejects_total": self.counters.get("rejects_total", 0),
+            "errors_total": self.health.get("errors_total", 0),
+            "last_error": self.health.get("last_error"),
+            "api_errors_1h": self.api_errors_1h,
+            "risk_level": self.kill_switch.get_level().value,
+            "strategy_id_breakdown": self.strategy_counters,
+        }
+        with open(self.metrics_tmp, "w") as f:
+            json.dump(payload, f, indent=2)
+        os.replace(self.metrics_tmp, self.metrics_file)
+
+    def _maybe_write_heartbeat(self, last_bar=None, force=False):
+        now = time.time()
+        should_write = force or ((now - self.last_heartbeat_push_ts) >= self.heartbeat_interval_sec)
+        if not should_write:
+            return
+        self.update_heartbeat(last_bar=last_bar)
+        self.last_heartbeat_push_ts = now
 
     def _init_csvs(self):
         # Decisions
@@ -250,6 +316,7 @@ class PaperDaemon:
                     "stale_seconds": 0, # Calculated by consumer
                     "last_error": self.health["last_error"],
                     "consecutive_errors": self.health["consecutive_errors"],
+                    "errors_total": self.health["errors_total"],
                     "uptime_start": self.health["start_time_iso"]
                 }
             }
@@ -270,6 +337,7 @@ class PaperDaemon:
             with open(self.heartbeat_tmp, "w") as f:
                 json.dump(hb, f, indent=2)
             os.replace(self.heartbeat_tmp, self.heartbeat_file)
+            self._write_metrics(last_bar=last_bar)
             
         except Exception as e:
             print(f"Heartbeat Error: {e}")
@@ -321,6 +389,8 @@ class PaperDaemon:
 
     def append_decision(self, bar, verdict, router_res, score, exp_move, adx, strategy_tags=None):
         self.counters["decisions_total"] += 1
+        sid = self._touch_strategy_bucket(self._resolve_strategy_id(strategy_tags))
+        self.strategy_counters[sid]["decisions"] += 1
         ts_iso = datetime.now().isoformat()
         bar_ts_iso = datetime.fromtimestamp(bar.timestamp).isoformat()
         reasons = verdict.metadata.get("block_reason", "")
@@ -366,7 +436,15 @@ class PaperDaemon:
             f.write(json.dumps(event) + "\n")
 
     def append_reject(self, bar, code, detail, strategy_tags=None):
+        code, detail = normalize_reject(code, detail)
+        try:
+            validate_reject(code, detail)
+        except Exception as e:
+            code = "REJECT_SCHEMA_INVALID"
+            detail = f"Schema validation failed: {e}"
         self.counters["rejects_total"] += 1
+        sid = self._touch_strategy_bucket(self._resolve_strategy_id(strategy_tags))
+        self.strategy_counters[sid]["rejects"] += 1
         ts_iso = datetime.now().isoformat()
         bar_ts_iso = datetime.fromtimestamp(bar.timestamp).isoformat()
         tags_text = self._format_strategy_tags(strategy_tags)
@@ -394,6 +472,8 @@ class PaperDaemon:
             
     def append_trade(self, fill):
         self.counters["trades_total"] += 1
+        sid = self._touch_strategy_bucket(self._resolve_strategy_id(None))
+        self.strategy_counters[sid]["trades"] += 1
         ts_iso = datetime.now().isoformat()
         
         # CSV
@@ -502,6 +582,7 @@ class PaperDaemon:
         
         try:
             while True:
+                heartbeat_bar = self.history_bars[-1] if self.history_bars else None
                 try:
                     # 2. Fetch Data
                     klines = self.fetch_klines(limit=2)
@@ -523,10 +604,8 @@ class PaperDaemon:
                             self.save_state("kill_switch_halt")
                             break
                         last_ts = candidate_bar.timestamp
+                        heartbeat_bar = candidate_bar
                         self.save_state("new_bar_processed")
-                        
-                        # Heartbeat
-                        self.update_heartbeat(last_bar=candidate_bar)
                         self.health["consecutive_errors"] = 0 # Reset health on success
                         
                         with open(self.hb_log, "a") as f:
@@ -534,9 +613,6 @@ class PaperDaemon:
                             f.write(entry)
                             
                     time.sleep(5) 
-                    # Refresh heartbeat even if no new bar (keep alive) - every 12 loops (approx 1 min) ?
-                    # Or just every loop? cheap enough.
-                    self.update_heartbeat(last_bar=None if not self.history_bars else self.history_bars[-1]) 
                     
                 except KeyboardInterrupt:
                     print("Stopping...")
@@ -546,6 +622,8 @@ class PaperDaemon:
                     self.log_error("RUN_LOOP_EXCEPTION")
                     self._record_api_error()
                     time.sleep(10)
+                finally:
+                    self._maybe_write_heartbeat(last_bar=heartbeat_bar)
         finally:
             self._persist_kill_switch()
                 
@@ -881,6 +959,7 @@ if __name__ == "__main__":
     parser.add_argument("--tophunter_max_risk_trade_pct", type=float, default=0.5, help="TopHunter max risk %% per trade")
     parser.add_argument("--tophunter_max_open_positions", type=int, default=1)
     parser.add_argument("--tophunter_loss_cooldown_bars", type=int, default=3)
+    parser.add_argument("--heartbeat_interval_sec", type=int, default=5)
     
     args = parser.parse_args()
     
@@ -909,6 +988,7 @@ if __name__ == "__main__":
     cfg["tophunter_daily_loss_cap_pct"] = args.tophunter_daily_loss_cap_pct
     cfg["tophunter_max_open_positions"] = args.tophunter_max_open_positions
     cfg["tophunter_loss_cooldown_bars"] = args.tophunter_loss_cooldown_bars
+    cfg["heartbeat_interval_sec"] = max(1, int(args.heartbeat_interval_sec))
     # Convert percentages to fractions (1.0 -> 0.01)
     cfg["max_risk_trade_pct"] = args.max_risk_trade_pct / 100.0
     cfg["tophunter_max_risk_trade_pct"] = args.tophunter_max_risk_trade_pct / 100.0
