@@ -119,18 +119,66 @@ Scripts/soak_service.sh status
 Scripts/soak_service.sh stop
 ```
 
+### Windows 7/24 Node (PowerShell)
+
+Kurulum:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File Scripts\win_prepare.ps1
+```
+
+Paper soak start:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File Scripts\win_soak_start.ps1 -Strategy council
+```
+
+Durum:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File Scripts\win_soak_status.ps1
+```
+
+Stop:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File Scripts\win_soak_stop.ps1
+```
+
+Smoke:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File Scripts\win_soak_smoke.ps1 -Strategy council
+```
+
+Dashboard:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File Scripts\win_dashboard_start.ps1 -RunDir runs/year2/paper_main -Host 127.0.0.1 -Port 18081
+powershell -ExecutionPolicy Bypass -File Scripts\win_dashboard_status.ps1
+powershell -ExecutionPolicy Bypass -File Scripts\win_dashboard_stop.ps1
+```
+
+Boot'ta otomatik baslatma (Task Scheduler):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File Scripts\win_soak_task.ps1 -Action install -Strategy council -RunDir runs/year2/paper_main
+powershell -ExecutionPolicy Bypass -File Scripts\win_soak_task.ps1 -Action status
+```
+
 ### Log ve Runtime Konumu
 
 - Run dizini: `runs/year2/paper_main`
 - PID dosyası: `runs/year2/paper_main/daemon.pid`
 - Daemon log: `runs/year2/paper_main/daemon.log`
+- Daemon err log (Windows): `runs/year2/paper_main/daemon.err.log`
 - Service log: `runs/year2/paper_main/service.log`
 - Heartbeat: `runs/year2/paper_main/heartbeat.json`
 - Metrics: `runs/year2/paper_main/metrics.json`
 
 ### Koruma Notu
 
-`Scripts/soak_start.sh`, `Scripts/soak_status.sh`, `Scripts/soak_stop.sh`, `Scripts/soak_smoke.sh`, `Scripts/soak_service.sh` dosyaları **ARGUS CORE INFRA** kapsamındadır ve gelecekteki cleanup/refactor çalışmalarında korunmalıdır.
+`Scripts/soak_start.sh`, `Scripts/soak_status.sh`, `Scripts/soak_stop.sh`, `Scripts/soak_smoke.sh`, `Scripts/soak_service.sh`, `Scripts/win_soak_start.ps1`, `Scripts/win_soak_status.ps1`, `Scripts/win_soak_stop.ps1`, `Scripts/win_soak_smoke.ps1` dosyalari **ARGUS CORE INFRA** kapsamindadir ve gelecekteki cleanup/refactor calismalarinda korunmalidir.
 
 ## 📱 Ekran Görüntüleri
 

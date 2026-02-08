@@ -34,4 +34,4 @@
 - Runbook: `Docs/YEAR2_AUTOPILOT_RUNBOOK.md`.
 
 ## Core Infra Preservation
-- Do not delete: `Scripts/soak_start.sh`, `Scripts/soak_status.sh`, `Scripts/soak_stop.sh`, `Scripts/soak_smoke.sh`, `Scripts/soak_service.sh`.
+- Do not delete: `Scripts/soak_start.sh`, `Scripts/soak_status.sh`, `Scripts/soak_stop.sh`, `Scripts/soak_smoke.sh`, `Scripts/soak_service.sh`, `Scripts/win_soak_start.ps1`, `Scripts/win_soak_status.ps1`, `Scripts/win_soak_stop.ps1`, `Scripts/win_soak_smoke.ps1`.

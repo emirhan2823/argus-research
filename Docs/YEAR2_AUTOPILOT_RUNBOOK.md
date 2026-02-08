@@ -159,3 +159,44 @@ Service logs:
 ```bash
 Scripts/soak_service.sh logs
 ```
+
+## 7) Windows 7/24 Node
+
+Prepare:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File Scripts\win_prepare.ps1
+```
+
+Start paper soak:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File Scripts\win_soak_start.ps1 -Strategy council -RunDir runs/year2/paper_main
+```
+
+Status:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File Scripts\win_soak_status.ps1 -RunDir runs/year2/paper_main
+```
+
+Stop:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File Scripts\win_soak_stop.ps1 -RunDir runs/year2/paper_main
+```
+
+Dashboard:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File Scripts\win_dashboard_start.ps1 -RunDir runs/year2/paper_main -Host 127.0.0.1 -Port 18081
+powershell -ExecutionPolicy Bypass -File Scripts\win_dashboard_status.ps1 -RunDir runs/year2/paper_main
+powershell -ExecutionPolicy Bypass -File Scripts\win_dashboard_stop.ps1 -RunDir runs/year2/paper_main
+```
+
+Task Scheduler (boot + logon):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File Scripts\win_soak_task.ps1 -Action install -Strategy council -RunDir runs/year2/paper_main
+powershell -ExecutionPolicy Bypass -File Scripts\win_soak_task.ps1 -Action status
+```

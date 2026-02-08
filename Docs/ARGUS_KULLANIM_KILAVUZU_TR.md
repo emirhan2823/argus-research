@@ -47,6 +47,70 @@ cat runs/phase19_twin/STRICT/daemon_state.json
 python3 Scripts/weekly_audit.py runs/phase19_twin/SOFT/ --week 2026-W06
 ```
 
+## Windows 7/24 Node Kurulumu
+
+Windows laptop'i paper daemon node'u olarak calistirmak icin:
+
+### 1) Repo clone + PowerShell terminal
+
+```powershell
+cd C:\argus-terminal
+```
+
+### 2) Ortami hazirla
+
+```powershell
+powershell -ExecutionPolicy Bypass -File Scripts\win_prepare.ps1
+```
+
+### 3) Paper daemon baslat
+
+```powershell
+powershell -ExecutionPolicy Bypass -File Scripts\win_soak_start.ps1 -Strategy council -RunDir runs/year2/paper_main
+```
+
+### 4) Durumu izle
+
+```powershell
+powershell -ExecutionPolicy Bypass -File Scripts\win_soak_status.ps1 -RunDir runs/year2/paper_main
+```
+
+### 5) Dashboard ac
+
+```powershell
+powershell -ExecutionPolicy Bypass -File Scripts\win_dashboard_start.ps1 -RunDir runs/year2/paper_main -Host 127.0.0.1 -Port 18081
+```
+
+### 6) Durdur
+
+```powershell
+powershell -ExecutionPolicy Bypass -File Scripts\win_soak_stop.ps1 -RunDir runs/year2/paper_main
+powershell -ExecutionPolicy Bypass -File Scripts\win_dashboard_stop.ps1 -RunDir runs/year2/paper_main
+```
+
+### 7) Boot'ta otomatik baslatma (Task Scheduler)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File Scripts\win_soak_task.ps1 -Action install -Strategy council -RunDir runs/year2/paper_main
+powershell -ExecutionPolicy Bypass -File Scripts\win_soak_task.ps1 -Action status
+```
+
+Kaldirma:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File Scripts\win_soak_task.ps1 -Action remove
+```
+
+### 8) RAM/GPU gucunu arastirmada kullan
+
+Paper daemon agirlikla CPU/network isidir. Windows laptop RAM/GPU kapasitesini asagidaki arastirma komutlarinda kullan:
+
+```powershell
+venv\Scripts\python.exe Scripts\tophunter_sweep.py --data-dir data\BTCUSDT\1h --days 30 --out reports\year2\tophunter_tuning.md
+venv\Scripts\python.exe Scripts\nightly_eval.py --run-dir runs\year2\paper_main --reports-dir reports\year2
+venv\Scripts\python.exe Scripts\train_ml_model.py --input runs\training_data.csv --output models\signal_model.lgb
+```
+
 ## Gunluk Operasyon Akisi
 
 ### A) Durum kontrolu
@@ -151,6 +215,7 @@ Standart dosyalar:
 - `rejects.csv`: reject nedenleri
 - `heartbeat.json`: canli durum snapshot
 - `daemon_state.json`: daemon state
+- `daemon.err.log`: Windows'ta daemon stderr logu
 
 Hizli kontrol:
 ```bash
