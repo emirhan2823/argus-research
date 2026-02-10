@@ -3,15 +3,25 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Mapping, Optional
+from typing import Mapping, Optional, Protocol
 
 from src.core.constants import ENGINE_HERMES, ENGINE_PHOENIX, REGIME_CRISIS, REGIME_TO_ENGINE
 from src.core.types import EngineSignal, FeatureVector, RegimeState
 
 
+class EngineProtocol(Protocol):
+    def generate_signal(
+        self,
+        *,
+        regime: RegimeState,
+        features: FeatureVector,
+    ) -> Optional[EngineSignal]:
+        ...
+
+
 @dataclass
 class RegimeRouter:
-    engines: Mapping[str, object]
+    engines: Mapping[str, EngineProtocol]
 
     def route(self, *, regime: RegimeState, features: FeatureVector) -> Optional[EngineSignal]:
         if regime.regime == REGIME_CRISIS:

@@ -71,7 +71,7 @@ def compute_technical_features(df: pd.DataFrame) -> dict[str, Optional[float]]:
         features["parkinson_vol"] = None
 
     # Bollinger Band width
-    bb = ta.bbands(close, length=20, std=2.0)
+    bb = ta.bbands(close, length=20)
     if bb is not None and len(bb.columns) >= 3:
         bbu = bb.iloc[-1, 0]  # upper
         bbl = bb.iloc[-1, 2]  # lower

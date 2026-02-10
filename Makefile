@@ -1,4 +1,4 @@
-.PHONY: install test lint lint-all lint-types format clean run-daemon stop-daemon status pre-commit test-all test-coverage test-integration dev-sync
+.PHONY: install test lint lint-all lint-types lint-v2 format clean run-daemon stop-daemon status pre-commit test-all test-coverage test-integration test-stress dev-sync
 
 PYTHON := python3
 VENV := venv
@@ -19,6 +19,9 @@ test:
 test-integration:
 	$(PYTEST) tests/integration/ -v --tb=short
 
+test-stress:
+	$(PYTEST) tests/stress/ -v --tb=short
+
 test-all:
 	$(PYTEST) tests/ -v --tb=short
 
@@ -30,6 +33,10 @@ lint:
 
 lint-types:
 	$(VENV)/bin/mypy $(LINT_PATHS) --ignore-missing-imports
+
+lint-v2:
+	$(VENV)/bin/mypy src --strict
+	$(VENV)/bin/python -m ruff check src tests/stress
 
 lint-all:
 	$(VENV)/bin/flake8 argus_py/ Scripts/

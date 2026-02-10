@@ -11,6 +11,7 @@ from datetime import datetime
 from collections import deque
 from argparse import Namespace
 from pathlib import Path
+from typing import Dict, Optional
 
 # --- ABSOLUTE PATH SETUP ---
 # Script is in scripts/, so repo_root is parent
@@ -25,15 +26,25 @@ from argus_py.execution import UrgencyLevel
 from argus_py.strategy.router import ModeRouter
 from argus_py.strategy.tophunter_short import evaluate_tophunter_short_v1
 from argus_py.risk.regime import RegimeDetector
-from argus_py.runner.v2_runtime import V2RuntimeBridge
+from argus_py.runner.runtime_selector import select_runtime
 from argus_py.strategy.lifecycle import StrategyState
-from argus_py.asset_router import AssetRouter
+from argus_py.strategy.registry_guard import StrategyRegistryGuard
 from argus_py.broker.paper import PaperBroker, TradeFill
 from argus_py.data.reporting import Reporter
 from argus_py.data.market_state import Bar
 from argus_py.telemetry.schema import TelemetryEvent
 from argus_py.telemetry.reject_schema import normalize_reject, validate_reject
 from argus_py.risk.kill_switch import KillSwitch, KillSwitchConfig, check_and_activate
+from argus_py.ops.macro_event_guard import MacroEventGuard
+from argus_py.ops.hermes_position_manager_v2 import HermesPositionManagerV2, urgency_from_score
+from argus_py.ops.advisory_cards import write_advisory_card
+from argus_py.portfolio.allocator import PortfolioAllocatorV1
+from argus_py.portfolio.exposure_controller import ExposureController, ExposureLimits, PositionExposure
+from argus_py.risk.correlation import CorrelationRiskMonitor
+from argus_py.risk.entry_quality import EntryQualityScorer
+from argus_py.risk.execution_quality_gate import ExecutionQualityGate, ExecutionQualityInput
+from argus_py.ops.data_quality_sentinel import DataQualitySentinel
+from argus_py.risk.regime_policy_packs import RegimePolicyResolver
 import argparse
 
 # --- CONFIGURATION (Adx35_Exp80) ---
@@ -70,6 +81,27 @@ DEFAULT_CONFIG = {
     "mode": "legacy",
     "asset_class": "crypto",
     "venue_id": "auto",
+    "macro_events_file": None,
+    "strategy_registry_file": REPO_ROOT / "runs/year2/governance/strategy_registry.json",
+    "disabled_strategies_file": REPO_ROOT / "runs/year2/governance/disabled_strategies.json",
+    "allocator_risk_budget_pct": 1.0,
+    "allocator_max_asset_exposure_pct": 35.0,
+    "allocator_assumed_stop_loss_pct": 2.0,
+    "correlation_threshold": 0.7,
+    "correlation_min_scale": 0.3,
+    "advisory_cards_enabled": True,
+    "execution_quality_gate_enabled": True,
+    "execution_quality_threshold": 0.55,
+    "execution_quality_min_expected_move_bps": 3.0,
+    "exposure_total_cap_pct": 90.0,
+    "exposure_symbol_cap_pct": 35.0,
+    "exposure_asset_cap_crypto_pct": 75.0,
+    "exposure_asset_cap_stock_pct": 70.0,
+    "exposure_asset_cap_defi_pct": 40.0,
+    "data_quality_sentinel_enabled": True,
+    "sentinel_degraded_threshold": 0.70,
+    "sentinel_halt_threshold": 0.40,
+    "regime_policy_pack": "legacy",
     # Strategy selection
     "strategy": "council",
     "tophunter_adx_max": 20.0,
@@ -88,7 +120,9 @@ DEFAULT_CONFIG = {
 class PaperDaemon:
     def __init__(self, config):
         self.cfg = config
-        self.mode = str(self.cfg.get("mode", "legacy")).lower()
+        self.mode_requested = str(self.cfg.get("mode", "legacy")).lower()
+        self.mode = self.mode_requested
+        self.runtime_boot_reason = "mode_unset"
         self.run_dir = Path(self.cfg["run_dir"])
         self.run_dir.mkdir(parents=True, exist_ok=True)
         
@@ -133,6 +167,7 @@ class PaperDaemon:
         self.api_errors_1h = 0
         self.strategy_counters = {}
         self._touch_strategy_bucket(self._resolve_strategy_id(None))
+        self.open_position_strategy: Dict[str, str] = {}
         self.v2_bridge = None
         self.last_v2_snapshot = None
         self.asset_router = None
@@ -150,7 +185,33 @@ class PaperDaemon:
             "aether": 0.0,
             "hermes": 0.0,
         }
-        
+        self._risk_sizing = {
+            "allocator_reason": "N/A",
+            "allocator_allowed_risk_pct": 0.0,
+            "correlation_scale": 1.0,
+            "correlation_max_abs": 0.0,
+            "correlation_reason": "N/A",
+            "exposure_scale": 1.0,
+            "exposure_reason": "N/A",
+        }
+        self._last_execution_quality = None
+        self._last_sentinel = None
+        self._last_regime_policy = None
+        self._pnl_attribution = {
+            "by_strategy": {},
+            "by_asset_class": {},
+            "by_venue": {},
+        }
+        self.event_counters = {
+            "macro_blocks_total": 0,
+            "strategy_disabled_blocks_total": 0,
+            "hermes_actions_total": 0,
+            "advisory_cards_total": 0,
+            "execution_quality_blocks_total": 0,
+            "sentinel_halts_total": 0,
+            "exposure_blocks_total": 0,
+        }
+
         # Ensure CSV Headers
         self._init_csvs()
         
@@ -194,17 +255,61 @@ class PaperDaemon:
         self.council = Council()
         self.router = ModeRouter()
         self.regime_detector = RegimeDetector()
-        if self.mode == "v2":
-            self.asset_router = AssetRouter(
-                broker=self.broker,
-                asset_class=str(self.cfg.get("asset_class", "crypto")),
-                venue_id=str(self.cfg.get("venue_id", "auto")),
+        self.macro_guard = MacroEventGuard(self._macro_events_path())
+        self.strategy_registry_guard = StrategyRegistryGuard(
+            paths=[
+                Path(self.cfg.get("strategy_registry_file")),
+                Path(self.cfg.get("disabled_strategies_file")),
+            ]
+        )
+        self.hermes_position_manager = HermesPositionManagerV2(self.broker)
+        self.allocator = PortfolioAllocatorV1(
+            risk_budget_pct=float(self.cfg.get("allocator_risk_budget_pct", 1.0)),
+            max_asset_exposure_pct=float(self.cfg.get("allocator_max_asset_exposure_pct", 35.0)),
+            assumed_stop_loss_pct=float(self.cfg.get("allocator_assumed_stop_loss_pct", 2.0)),
+        )
+        self.correlation_monitor = CorrelationRiskMonitor(
+            threshold=float(self.cfg.get("correlation_threshold", 0.7)),
+            min_scale=float(self.cfg.get("correlation_min_scale", 0.3)),
+        )
+        self.entry_quality_scorer = EntryQualityScorer(
+            min_quality_threshold=float(self.cfg.get("execution_quality_threshold", 0.55))
+        )
+        self.execution_quality_gate = ExecutionQualityGate(
+            threshold=float(self.cfg.get("execution_quality_threshold", 0.55)),
+            min_expected_move_bps=float(self.cfg.get("execution_quality_min_expected_move_bps", 3.0)),
+            max_slippage_bps=float(self.cfg.get("slippage_bps", 2.0)) * 3.0,
+            max_spread_bps=float(self.cfg.get("spread_bps", 1.0)) * 4.0,
+        )
+        self.exposure_controller = ExposureController(
+            limits=ExposureLimits(
+                total_cap_pct=float(self.cfg.get("exposure_total_cap_pct", 90.0)),
+                per_symbol_cap_pct=float(self.cfg.get("exposure_symbol_cap_pct", 35.0)),
+                per_asset_caps_pct={
+                    "crypto": float(self.cfg.get("exposure_asset_cap_crypto_pct", 75.0)),
+                    "stock": float(self.cfg.get("exposure_asset_cap_stock_pct", 70.0)),
+                    "defi": float(self.cfg.get("exposure_asset_cap_defi_pct", 40.0)),
+                },
             )
-            self._asset_tags = self.asset_router.telemetry_tags()
-            self.v2_bridge = V2RuntimeBridge(self.cfg, self.run_dir, self.broker)
+        )
+        self.data_quality_sentinel = DataQualitySentinel(
+            interval=str(self.cfg.get("interval", "1m")),
+            degraded_threshold=float(self.cfg.get("sentinel_degraded_threshold", 0.70)),
+            halt_threshold=float(self.cfg.get("sentinel_halt_threshold", 0.40)),
+        )
+        self.regime_policy_resolver = RegimePolicyResolver(str(self.cfg.get("regime_policy_pack", "legacy")))
+        runtime = select_runtime(self.cfg, self.run_dir, self.broker)
+        self.mode = runtime.final_mode
+        self.runtime_boot_reason = runtime.reason
+        self.asset_router = runtime.asset_router
+        self.v2_bridge = runtime.v2_bridge
+        self._asset_tags = runtime.asset_tags
+        if self.mode == "v2":
             print("V2_RUNTIME: enabled (MODE=v2)")
         else:
-            print("V2_RUNTIME: disabled (MODE=legacy)")
+            print(f"V2_RUNTIME: disabled (MODE=legacy) reason={self.runtime_boot_reason}")
+            if self.mode_requested == "v2":
+                print("V2_RUNTIME: requested v2 but falling back to legacy for safety.")
         
         # Runtime
         self.history_bars = [] 
@@ -223,6 +328,22 @@ class PaperDaemon:
                 print(f"Error loading state: {e}")
         return {}
 
+    def _macro_events_path(self) -> Optional[Path]:
+        cfg_path = self.cfg.get("macro_events_file")
+        if cfg_path:
+            p = Path(cfg_path)
+            if not p.is_absolute():
+                p = REPO_ROOT / p
+            return p
+        default_path = self.run_dir / "macro_events.json"
+        return default_path
+
+    def _strategy_registry_disabled(self, strategy_id: str) -> tuple[bool, str]:
+        try:
+            return self.strategy_registry_guard.is_disabled(strategy_id)
+        except Exception as exc:
+            return False, f"registry_guard_error:{exc}"
+
     def save_state(self, reason="update"):
         try:
             state = {
@@ -237,6 +358,9 @@ class PaperDaemon:
                     "min_adx": self.cfg["min_adx"],
                     "strategy": self.cfg.get("strategy", "council"),
                     "mode": self.mode,
+                    "mode_requested": self.mode_requested,
+                    "mode_final": self.mode,
+                    "runtime_boot_reason": self.runtime_boot_reason,
                     "asset_class": self.cfg.get("asset_class", "crypto"),
                     "venue_id": self.cfg.get("venue_id", "auto"),
                 }
@@ -295,6 +419,26 @@ class PaperDaemon:
             }
         return sid
 
+    def _add_pnl_bucket(self, bucket: str, key: str, pnl: float):
+        if bucket not in self._pnl_attribution:
+            self._pnl_attribution[bucket] = {}
+        m = self._pnl_attribution[bucket]
+        if key not in m:
+            m[key] = {"trades": 0, "realized_pnl": 0.0}
+        m[key]["trades"] += 1
+        m[key]["realized_pnl"] += float(pnl)
+
+    def _broker_position_exposures(self, market_price: float) -> list[PositionExposure]:
+        out: list[PositionExposure] = []
+        asset_class = str(self._asset_tags.get("asset_class", self.cfg.get("asset_class", "crypto")))
+        for symbol, pos in getattr(self.broker, "details", {}).items():
+            qty = abs(float(getattr(pos, "quantity", 0.0)))
+            notional = qty * float(market_price)
+            if notional <= 0:
+                continue
+            out.append(PositionExposure(symbol=str(symbol), asset_class=asset_class, notional=notional))
+        return out
+
     def _write_metrics(self, last_bar=None):
         last_bar_iso = None
         if last_bar is not None:
@@ -307,6 +451,9 @@ class PaperDaemon:
             "run_id": self.cfg.get("run_id", "unknown"),
             "daemon_id": self.cfg.get("daemon_id", "UNKNOWN"),
             "mode": self.mode,
+            "mode_requested": self.mode_requested,
+            "mode_final": self.mode,
+            "runtime_boot_reason": self.runtime_boot_reason,
             "strategy_mode": self.cfg.get("strategy", "council"),
             "last_closed_bar_iso": last_bar_iso,
             "bars_seen": self.counters.get("bars_seen", 0),
@@ -318,11 +465,17 @@ class PaperDaemon:
             "api_errors_1h": self.api_errors_1h,
             "risk_level": self.kill_switch.get_level().value,
             "strategy_id_breakdown": self.strategy_counters,
+            "event_counters": self.event_counters,
+            "risk_sizing": self._risk_sizing,
             "asset_class": self._asset_tags.get("asset_class"),
             "venue_id": self._asset_tags.get("venue_id"),
             "asset_class_requested": self._asset_tags.get("asset_class_requested"),
             "venue_id_requested": self._asset_tags.get("venue_id_requested"),
             "asset_adapter_id": self._asset_tags.get("adapter_id"),
+            "execution_quality": self._last_execution_quality,
+            "sentinel": self._last_sentinel,
+            "regime_policy": self._last_regime_policy,
+            "pnl_attribution_live": self._pnl_attribution,
         }
         if self.v2_bridge is not None:
             payload["v2"] = self.v2_bridge.metrics_payload()
@@ -350,9 +503,19 @@ class PaperDaemon:
                 f.write("ts_iso,bar_ts_iso,symbol,code,detail\n")
 
         # Trades (Simple Mirror)
-        if not self.trades_csv.exists():
+        self.trades_csv_mode = "extended"
+        if self.trades_csv.exists():
+            try:
+                head = self.trades_csv.read_text(encoding="utf-8").splitlines()[0].strip().lower()
+            except Exception:
+                head = ""
+            if head == "ts_iso,symbol,side,price,qty,pnl,event":
+                self.trades_csv_mode = "legacy"
+        else:
             with open(self.trades_csv, "w") as f:
-                f.write("ts_iso,symbol,side,price,qty,pnl,event\n")
+                f.write(
+                    "ts_iso,symbol,side,price,qty,commission,pnl,event,mark_price,fill_price,slip_applied,spread_applied,asset_class,venue_id,strategy_id\n"
+                )
 
     def update_heartbeat(self, last_bar=None):
         try:
@@ -369,6 +532,9 @@ class PaperDaemon:
                     "id": self.cfg["daemon_id"],
                     "min_adx": self.cfg["min_adx"],
                     "mode": self.mode,
+                    "mode_requested": self.mode_requested,
+                    "mode_final": self.mode,
+                    "runtime_boot_reason": self.runtime_boot_reason,
                     "asset_class": self._asset_tags.get("asset_class"),
                     "venue_id": self._asset_tags.get("venue_id"),
                     "asset_adapter_id": self._asset_tags.get("adapter_id"),
@@ -450,6 +616,204 @@ class PaperDaemon:
             self.kill_switch_active = level.value in {"HARD", "HALT"}
             return True
         return False
+
+    def _current_asset_exposure_pct(self, market_price: float) -> float:
+        pos = self.broker.details.get(self.cfg["symbol"])
+        if pos is None:
+            return 0.0
+        notional = abs(float(pos.quantity) * float(market_price))
+        equity = max(1e-9, float(self.broker.equity))
+        return (notional / equity) * 100.0
+
+    def _apply_v2_risk_sizing(self, risk_pct: float, market_price: float) -> tuple[float, Optional[str]]:
+        requested = max(0.0, float(risk_pct))
+        if self.mode != "v2":
+            self._risk_sizing = {
+                "allocator_reason": "legacy_mode",
+                "allocator_allowed_risk_pct": requested * 100.0,
+                "correlation_scale": 1.0,
+                "correlation_max_abs": 0.0,
+                "correlation_reason": "legacy_mode",
+                "exposure_scale": 1.0,
+                "exposure_reason": "legacy_mode",
+            }
+            return requested, None
+
+        exposure_pct = self._current_asset_exposure_pct(market_price)
+        alloc = self.allocator.allocate_single_asset(
+            requested_risk_pct=requested,
+            current_asset_exposure_pct=exposure_pct,
+        )
+        if alloc.blocked:
+            self._risk_sizing = {
+                "allocator_reason": alloc.reason,
+                "allocator_allowed_risk_pct": 0.0,
+                "correlation_scale": 1.0,
+                "correlation_max_abs": 0.0,
+                "correlation_reason": "allocator_blocked",
+                "exposure_scale": 0.0,
+                "exposure_reason": "allocator_blocked",
+            }
+            return 0.0, alloc.reason
+
+        allowed = float(alloc.allowed_risk_pct) / 100.0
+        corr_scale = 1.0
+        corr_max_abs = 0.0
+        corr_reason = "insufficient_history"
+        try:
+            closes = [float(b.close) for b in self.history_bars[-180:]]
+            if len(closes) >= 40:
+                base = pd.Series(closes, dtype=float)
+                prices = pd.DataFrame(
+                    {
+                        self.cfg["symbol"]: base.values,
+                        "BENCH_SYNTH": base.rolling(window=5, min_periods=1).mean().values,
+                    }
+                )
+                notional = {
+                    self.cfg["symbol"]: max(0.0, float(self.broker.equity) * allowed),
+                    "BENCH_SYNTH": max(0.0, float(self.broker.equity) * allowed),
+                }
+                _, details = self.correlation_monitor.scale_positions(prices, notional)
+                det = details.get(self.cfg["symbol"])
+                if det is not None:
+                    corr_scale = float(det.scale)
+                    corr_max_abs = float(det.max_abs_corr)
+                    corr_reason = str(det.reason)
+        except Exception as exc:
+            corr_reason = f"correlation_error:{exc}"
+            corr_scale = 1.0
+            corr_max_abs = 0.0
+
+        final_risk = max(0.0, allowed * corr_scale)
+        stop_ratio = max(0.0001, float(self.cfg.get("allocator_assumed_stop_loss_pct", 2.0)) / 100.0)
+        candidate_notional = (float(self.broker.equity) * final_risk) / stop_ratio
+        exposure_decision = self.exposure_controller.decide(
+            equity=float(self.broker.equity),
+            existing_positions=self._broker_position_exposures(market_price),
+            candidate_symbol=str(self.cfg["symbol"]),
+            candidate_asset_class=str(self._asset_tags.get("asset_class", self.cfg.get("asset_class", "crypto"))),
+            candidate_notional=max(0.0, candidate_notional),
+        )
+        if not exposure_decision.accepted:
+            self._risk_sizing = {
+                "allocator_reason": alloc.reason,
+                "allocator_allowed_risk_pct": float(alloc.allowed_risk_pct),
+                "correlation_scale": corr_scale,
+                "correlation_max_abs": corr_max_abs,
+                "correlation_reason": corr_reason,
+                "exposure_scale": 0.0,
+                "exposure_reason": exposure_decision.reason,
+            }
+            self.event_counters["exposure_blocks_total"] += 1
+            return 0.0, f"EXPOSURE_BLOCK:{exposure_decision.reason}"
+        final_risk = max(0.0, final_risk * float(exposure_decision.scale))
+        self._risk_sizing = {
+            "allocator_reason": alloc.reason,
+            "allocator_allowed_risk_pct": float(alloc.allowed_risk_pct),
+            "correlation_scale": corr_scale,
+            "correlation_max_abs": corr_max_abs,
+            "correlation_reason": corr_reason,
+            "exposure_scale": float(exposure_decision.scale),
+            "exposure_reason": exposure_decision.reason,
+            "exposure_snapshot": {
+                "total_exposure_pct": exposure_decision.snapshot.total_exposure_pct,
+                "symbol_exposure_pct": exposure_decision.snapshot.symbol_exposure_pct,
+                "asset_exposure_pct": exposure_decision.snapshot.asset_exposure_pct,
+            },
+        }
+        return final_risk, None
+
+    def _apply_macro_guard(self, bar: Bar, verdict, strategy_tags=None):
+        if self.mode != "v2" or verdict.decision != "GO":
+            return verdict
+        block, detail = self.macro_guard.should_block_entry(
+            ts=float(bar.timestamp),
+            asset_class=str(self._asset_tags.get("asset_class", self.cfg.get("asset_class", "crypto"))),
+            symbol=str(self.cfg.get("symbol", "")),
+        )
+        if not block:
+            return verdict
+        verdict.decision = "BLOCK"
+        self.event_counters["macro_blocks_total"] += 1
+        self.reporter.log_reject(bar.timestamp, self.cfg["symbol"], "MACRO_EVENT_BLACKOUT", detail)
+        self.append_reject(bar, "MACRO_EVENT_BLACKOUT", detail, strategy_tags=strategy_tags)
+        return verdict
+
+    def _apply_strategy_disable_guard(self, bar: Bar, verdict, strategy_tags=None):
+        if self.mode != "v2" or verdict.decision != "GO":
+            return verdict
+        strategy_id = self._resolve_strategy_id(strategy_tags)
+        disabled, reason = self._strategy_registry_disabled(strategy_id)
+        if not disabled:
+            return verdict
+        verdict.decision = "BLOCK"
+        self.event_counters["strategy_disabled_blocks_total"] += 1
+        detail = f"{strategy_id}: {reason}"
+        self.reporter.log_reject(bar.timestamp, self.cfg["symbol"], "STRATEGY_DISABLED", detail)
+        self.append_reject(bar, "STRATEGY_DISABLED", detail, strategy_tags=strategy_tags)
+        return verdict
+
+    def _apply_hermes_position_actions(self, bar: Bar):
+        if self.mode != "v2":
+            return
+        if self.last_v2_snapshot is None:
+            return
+        if not self.broker.details:
+            return
+        score = float(self.last_v2_snapshot.hermes_score)
+        urgency = urgency_from_score(score)
+        for symbol in list(self.broker.details.keys()):
+            try:
+                outcome = self.hermes_position_manager.apply(
+                    symbol=symbol,
+                    sentiment_score=score,
+                    urgency=urgency,
+                    market_price=float(bar.close),
+                    timestamp=float(bar.timestamp),
+                )
+                if not outcome.handled:
+                    continue
+                self.event_counters["hermes_actions_total"] += 1
+                if outcome.action == "CLOSE_POSITION":
+                    fill = self.broker.trades[-1] if self.broker.trades else None
+                    if fill is not None:
+                        self.append_trade(fill, strategy_tags={"strategy_id": self.open_position_strategy.get(symbol, "UNKNOWN_STRATEGY")})
+            except Exception:
+                self.log_error("HERMES_POSITION_ACTION_FAILED")
+
+    def _emit_advisory_card(self, bar: Bar, verdict, strategy_tags, stop_price: Optional[float], tp_price: Optional[float]):
+        if self.mode != "v2":
+            return
+        if not bool(self.cfg.get("advisory_cards_enabled", True)):
+            return
+        if verdict.decision != "GO":
+            return
+        try:
+            strategy_id = self._resolve_strategy_id(strategy_tags)
+            if tp_price is None:
+                tp_price = float(bar.close) * (1.04 if str(verdict.direction).upper() == "BUY" else 0.96)
+            if stop_price is None:
+                stop_price = float(bar.close) * (0.98 if str(verdict.direction).upper() == "BUY" else 1.02)
+            tp_levels = [tp_price] if tp_price is not None else []
+            out = write_advisory_card(
+                run_dir=self.run_dir,
+                symbol=self.cfg["symbol"],
+                side=verdict.direction,
+                entry_price=float(bar.close),
+                stop_price=stop_price,
+                take_profit_levels=tp_levels,
+                rationale=str(verdict.rationale),
+                strategy_id=strategy_id,
+                asset_class=str(self._asset_tags.get("asset_class", self.cfg.get("asset_class", "crypto"))),
+                venue_id=str(self._asset_tags.get("venue_id", self.cfg.get("venue_id", "auto"))),
+                bar_timestamp=float(bar.timestamp),
+                quality_score=(self._last_execution_quality or {}).get("score"),
+                quality_grade=(self._last_execution_quality or {}).get("grade"),
+            )
+            self.event_counters["advisory_cards_total"] += 1
+        except Exception:
+            self.log_error("ADVISORY_CARD_FAILED")
 
     def append_decision(self, bar, verdict, router_res, score, exp_move, adx, strategy_tags=None):
         self.counters["decisions_total"] += 1
@@ -544,14 +908,27 @@ class PaperDaemon:
         if self.v2_bridge is not None:
             self.v2_bridge.on_reject(event)
             
-    def append_trade(self, fill):
+    def append_trade(self, fill, strategy_tags=None):
         self.counters["trades_total"] += 1
-        sid = self._touch_strategy_bucket(self._resolve_strategy_id(None))
+        sid = self._touch_strategy_bucket(self._resolve_strategy_id(strategy_tags))
         self.strategy_counters[sid]["trades"] += 1
         ts_iso = datetime.now().isoformat()
-        
+
+        mark_price = float(getattr(fill, "mark_price", fill.price))
+        fill_price = float(getattr(fill, "fill_price", fill.price))
+        slip_applied = float(getattr(fill, "slip_applied", 0.0))
+        spread_applied = float(getattr(fill, "spread_applied", 0.0))
+        commission = float(getattr(fill, "commission", 0.0))
+
         # CSV
-        row = f"{ts_iso},{fill.symbol},{fill.side},{fill.price:.2f},{fill.quantity:.4f},{fill.pnl:.2f},{fill.event}\n"
+        if getattr(self, "trades_csv_mode", "extended") == "legacy":
+            row = f"{ts_iso},{fill.symbol},{fill.side},{fill.price:.2f},{fill.quantity:.4f},{fill.pnl:.2f},{fill.event}\n"
+        else:
+            row = (
+                f"{ts_iso},{fill.symbol},{fill.side},{fill.price:.8f},{fill.quantity:.8f},{commission:.8f},"
+                f"{fill.pnl:.8f},{fill.event},{mark_price:.8f},{fill_price:.8f},{slip_applied:.8f},"
+                f"{spread_applied:.8f},{self._asset_tags.get('asset_class')},{self._asset_tags.get('venue_id')},{sid}\n"
+            )
         with open(self.trades_csv, "a") as f:
             f.write(row)
             
@@ -559,7 +936,7 @@ class PaperDaemon:
         # Split open/close based on fill event or PnL?
         # Fill event usually 'ENTRY' or 'STOP'/'PROFIT'.
         # Assuming broker fills structure.
-        if fill.pnl == 0.0 and fill.event in ["ENTRY", "signal"]: 
+        if fill.pnl == 0.0 and str(fill.event).upper() in {"ENTRY", "SIGNAL", "OPEN"}:
             event = TelemetryEvent.trade_open(
                 daemon_id=self.cfg["daemon_id"],
                 run_id=self.cfg.get("run_id", "unknown"),
@@ -608,6 +985,23 @@ class PaperDaemon:
                     pnl=float(fill.pnl),
                     timestamp=float(fill.timestamp),
                 )
+        if abs(float(fill.pnl)) > 1e-12:
+            self._add_pnl_bucket("by_strategy", sid, float(fill.pnl))
+            self._add_pnl_bucket(
+                "by_asset_class",
+                str(self._asset_tags.get("asset_class", self.cfg.get("asset_class", "unknown"))),
+                float(fill.pnl),
+            )
+            self._add_pnl_bucket(
+                "by_venue",
+                str(self._asset_tags.get("venue_id", self.cfg.get("venue_id", "unknown"))),
+                float(fill.pnl),
+            )
+        # Keep position-strategy map aligned with broker state.
+        if str(fill.event).upper() in {"OPEN", "ENTRY"}:
+            self.open_position_strategy[str(fill.symbol)] = sid
+        elif str(fill.event).upper() not in {"REJECTED"}:
+            self.open_position_strategy.pop(str(fill.symbol), None)
 
     def fetch_klines(self, limit=100):
         if self.mode == "v2" and self.asset_router is not None:
@@ -751,6 +1145,31 @@ class PaperDaemon:
         self.history_bars.append(bar)
         if len(self.history_bars) > 2000:
             self.history_bars.pop(0) 
+
+        sentinel_score = 1.0
+        sentinel_halt = False
+        if self.mode == "v2" and bool(self.cfg.get("data_quality_sentinel_enabled", True)):
+            try:
+                sentinel = self.data_quality_sentinel.evaluate(self.history_bars, now_ts=time.time())
+                sentinel_score = float(sentinel.score)
+                sentinel_halt = bool(sentinel.halt_new_entries)
+                self._last_sentinel = {
+                    "score": sentinel.score,
+                    "band": sentinel.band,
+                    "reason": sentinel.reason,
+                }
+                if sentinel_halt:
+                    self.event_counters["sentinel_halts_total"] += 1
+            except Exception as exc:
+                sentinel_halt = True
+                self._last_sentinel = {
+                    "score": 0.0,
+                    "band": "HALT",
+                    "reason": f"sentinel_error:{exc}",
+                }
+                self.event_counters["sentinel_halts_total"] += 1
+        else:
+            self._last_sentinel = {"score": sentinel_score, "band": "DISABLED", "reason": "sentinel_off"}
         
         strategy_name = str(self.cfg.get("strategy", "council")).lower()
         use_tophunter = strategy_name == "tophunter_short_v1"
@@ -784,6 +1203,15 @@ class PaperDaemon:
             if snap is not None:
                 self.last_v2_snapshot = snap
                 regime = snap.regime_legacy
+        regime_policy = self.regime_policy_resolver.resolve(regime)
+        self._last_regime_policy = {
+            "pack": self.regime_policy_resolver.name,
+            "regime": regime,
+            "risk_multiplier": regime_policy.risk_multiplier,
+            "min_adx_bonus": regime_policy.min_adx_bonus,
+            "max_exp_multiplier": regime_policy.max_exp_multiplier,
+            "cooldown_bars": regime_policy.cooldown_bars,
+        }
         ae_vote = self.aegean.calculate(history)
         or_vote = self.orion.calculate(history)
         self._last_engine_signals["orion"] = float(or_vote.score if or_vote else 0.0)
@@ -792,6 +1220,7 @@ class PaperDaemon:
             self._last_engine_signals["atlas"] = float(self.last_v2_snapshot.atlas_score)
             self._last_engine_signals["aether"] = float(self.last_v2_snapshot.aether_score)
             self._last_engine_signals["hermes"] = float(self.last_v2_snapshot.hermes_score)
+            self._apply_hermes_position_actions(bar)
         
         # 2. MRIE & Router
         slope_raw = ae_vote.metadata.get('slope', 0.0)
@@ -914,12 +1343,14 @@ class PaperDaemon:
         # Gates
         # Risk Mult
         r_risk_mult = 1.0
+        r_risk_mult *= float(regime_policy.risk_multiplier)
+        r_risk_mult *= max(0.10, float(sentinel_score))
         if not use_tophunter:
             if router_res['policy'] == "caution_v5":
-                r_risk_mult = 0.7
+                r_risk_mult *= 0.7
             elif router_res['policy'] == "defense_flat":
                 if self.cfg.get("soft_defense_override", False):
-                    r_risk_mult = 0.2
+                    r_risk_mult *= 0.2
                 else:
                     r_risk_mult = 0.0
 
@@ -929,7 +1360,7 @@ class PaperDaemon:
                 self.append_reject(bar, "ROUTER_DEFENSE", "Risk=0.0")
 
             # Min ADX
-            min_adx = self.cfg["min_adx"]
+            min_adx = self.cfg["min_adx"] + float(regime_policy.min_adx_bonus)
             if router_res['policy'] == "caution_v5":
                 min_adx += 10.0
 
@@ -939,7 +1370,7 @@ class PaperDaemon:
                 self.append_reject(bar, "MIN_ADX", f"{adx_m:.1f} < {min_adx}")
 
             # Max Exp
-            max_exp = self.cfg["max_exp_move_bps"]
+            max_exp = self.cfg["max_exp_move_bps"] * float(regime_policy.max_exp_multiplier)
             em_check = verdict.metadata.get('expected_move', 0.0)
             if verdict.decision == "GO" and em_check > max_exp:
                 verdict.decision = "BLOCK"
@@ -962,6 +1393,12 @@ class PaperDaemon:
                 detail = f"Cooldown active: {self.tophunter_cooldown_remaining} bars remaining"
                 self.reporter.log_reject(bar.timestamp, self.cfg["symbol"], "REJECT_COOLDOWN", detail)
                 self.append_reject(bar, "REJECT_COOLDOWN", detail, strategy_tags=strategy_tags)
+
+        if verdict.decision == "GO" and sentinel_halt:
+            verdict.decision = "BLOCK"
+            detail = f"score={sentinel_score:.3f} reason={self._last_sentinel.get('reason', 'unknown')}"
+            self.reporter.log_reject(bar.timestamp, self.cfg["symbol"], "SENTINEL_HALT", detail)
+            self.append_reject(bar, "SENTINEL_HALT", detail, strategy_tags=strategy_tags)
 
         if verdict.decision == "GO" and self.daily_stop_active:
             verdict.decision = "BLOCK"
@@ -1002,7 +1439,68 @@ class PaperDaemon:
                     self.append_reject(bar, detail, self.v2_bridge.last_lifecycle_reason, strategy_tags=strategy_tags)
             except Exception:
                 self.log_error("V2_LIFECYCLE_EVAL_FAILED")
-            
+
+        verdict = self._apply_strategy_disable_guard(bar, verdict, strategy_tags=strategy_tags)
+        verdict = self._apply_macro_guard(bar, verdict, strategy_tags=strategy_tags)
+        if self.mode == "v2" and bool(self.cfg.get("execution_quality_gate_enabled", True)):
+            try:
+                volume_vals = [float(x.volume) for x in self.history_bars[-20:]]
+                volume_mean = float(np.mean(volume_vals)) if volume_vals else max(1.0, float(bar.volume))
+                volume_ratio = float(bar.volume) / max(1.0, volume_mean)
+                regime_confidence = (
+                    float(self.last_v2_snapshot.regime_confidence)
+                    if self.last_v2_snapshot is not None
+                    else 0.65
+                )
+                ae_conf = float(getattr(ae_vote, "confidence", 0.0))
+                or_conf = float(getattr(or_vote, "confidence", 0.0))
+                expected_bps = float(verdict.metadata.get("expected_move", expected_move))
+                entry_quality = self.entry_quality_scorer.calculate(
+                    adx=float(adx_m),
+                    aegean_conviction=ae_conf,
+                    orion_conviction=or_conf,
+                    volume_ratio=volume_ratio,
+                    mrie_shift_score=max(0.0, min(1.0, 1.0 - regime_confidence)),
+                    council_decision="GO" if verdict.decision == "GO" else "BLOCK",
+                )
+                exec_quality = self.execution_quality_gate.evaluate(
+                    ExecutionQualityInput(
+                        adx=float(adx_m),
+                        expected_move_bps=expected_bps,
+                        volume_ratio=volume_ratio,
+                        regime_confidence=regime_confidence,
+                        aegean_confidence=ae_conf,
+                        orion_confidence=or_conf,
+                        slippage_bps_estimate=float(self.cfg.get("slippage_bps", 2.0)),
+                        spread_bps_estimate=float(self.cfg.get("spread_bps", 1.0)),
+                    )
+                )
+                blended_score = max(0.0, min(1.0, (float(entry_quality.score) + float(exec_quality.score)) / 2.0))
+                self._last_execution_quality = {
+                    "score": blended_score,
+                    "grade": ExecutionQualityGate.quality_grade(blended_score),
+                    "entry_quality_score": float(entry_quality.score),
+                    "execution_quality_score": float(exec_quality.score),
+                    "entry_quality_reason": entry_quality.rejection_reason,
+                    "execution_quality_reason": exec_quality.reason,
+                    "threshold": float(self.cfg.get("execution_quality_threshold", 0.55)),
+                }
+                if verdict.decision == "GO" and (not entry_quality.passed or not exec_quality.passed):
+                    verdict.decision = "BLOCK"
+                    detail = (
+                        f"entry={entry_quality.score:.3f} exec={exec_quality.score:.3f} "
+                        f"reason={exec_quality.reason}"
+                    )
+                    self.event_counters["execution_quality_blocks_total"] += 1
+                    self.reporter.log_reject(bar.timestamp, self.cfg["symbol"], "EXEC_QUALITY_LOW", detail)
+                    self.append_reject(bar, "EXEC_QUALITY_LOW", detail, strategy_tags=strategy_tags)
+            except Exception as exc:
+                self._last_execution_quality = {
+                    "score": 0.0,
+                    "grade": "D",
+                    "execution_quality_reason": f"quality_eval_error:{exc}",
+                }
+
         # Log Decision
         em_check = verdict.metadata.get('expected_move', expected_move)
         self.append_decision(
@@ -1020,7 +1518,9 @@ class PaperDaemon:
         exit_fill = self.broker.check_brackets(self.cfg["symbol"], bar.high, bar.low, bar.timestamp)
         if exit_fill:
              print(f"CLOSE {exit_fill.side} @ {exit_fill.price:.2f} PnL:{exit_fill.pnl:.2f} ({exit_fill.event})")
-             self.append_trade(exit_fill)
+             sid_hint = self.open_position_strategy.get(self.cfg["symbol"])
+             tags = {"strategy_id": sid_hint} if sid_hint else strategy_tags
+             self.append_trade(exit_fill, strategy_tags=tags)
              if exit_fill.pnl < 0:
                  self.consecutive_losses += 1
                  if use_tophunter:
@@ -1045,12 +1545,27 @@ class PaperDaemon:
                 if tophunter_signal:
                     custom_sl_price = tophunter_signal.stop_price
                     custom_tp_price = tophunter_signal.tp2_price
+
+            risk_pct, alloc_block_reason = self._apply_v2_risk_sizing(risk_pct=risk_pct, market_price=float(bar.close))
+            if alloc_block_reason:
+                verdict.decision = "BLOCK"
+                self.reporter.log_reject(bar.timestamp, self.cfg["symbol"], "ALLOCATOR_BLOCK", alloc_block_reason)
+                self.append_reject(bar, "ALLOCATOR_BLOCK", alloc_block_reason, strategy_tags=strategy_tags)
+                return
             
             # SAFE PAPER: Enforce min floor if we are taking a trade (risk > 0 or safe_mode override)
             if risk_pct > 0 or self.cfg.get("safe_paper", False):
                  min_r = self.cfg.get("min_risk_pct", 0.1)
                  if risk_pct < min_r:
                      risk_pct = min_r # Bump to floor
+
+            self._emit_advisory_card(
+                bar=bar,
+                verdict=verdict,
+                strategy_tags=strategy_tags,
+                stop_price=custom_sl_price,
+                tp_price=custom_tp_price,
+            )
             
             # Execute Strategy (Entry)
             print(f"EXEC_ATTEMPT: ts={bar.timestamp} daemon={self.cfg['daemon_id']} decision={verdict.decision} dir={verdict.direction} risk={risk_pct:.4f} price={bar.close} bal={self.broker.balance:.2f} score={edge_score:.2f}")
@@ -1086,7 +1601,8 @@ class PaperDaemon:
             if success:
                 print(f"OPEN {verdict.direction} @ {bar.close} [Score:{edge_score:.2f}]")
                 self.reporter.log_decision(verdict, mode_process=None, capital_profile="ACTIVE")
-                if self.broker.trades: self.append_trade(self.broker.trades[-1])
+                if self.broker.trades:
+                    self.append_trade(self.broker.trades[-1], strategy_tags=strategy_tags)
             else:
                 print(f"TRADE REJECTED: {reason} [RiskPct:{risk_pct*100:.2f}%]")
                 # Log to rejects
@@ -1102,7 +1618,7 @@ class PaperDaemon:
                     pnl=0.0,
                     event="REJECTED"
                 )
-                self.append_trade(rej_fill)
+                self.append_trade(rej_fill, strategy_tags=strategy_tags)
 
         # elif verdict.decision == "EXIT":
         #    # CLI/Council does not generate EXIT signals currently.
@@ -1128,7 +1644,7 @@ if __name__ == "__main__":
     parser.add_argument("--interval", type=str, default="1m")
     parser.add_argument("--min_adx", type=float, default=35.0)
     parser.add_argument("--max_exp_move_bps", type=float, default=80.0)
-    parser.add_argument("--max_risk_trade_pct", type=float, default=1.0, help="Max risk % per trade")
+    parser.add_argument("--max_risk_trade_pct", type=float, default=1.0, help="Max risk percent per trade")
     parser.add_argument("--daily_loss_limit_pct", type=float, default=3.0, help="Daily loss hard stop %%")
     parser.add_argument("--kill_switch_dd_pct", type=float, default=15.0, help="Total drawdown kill switch %%")
     parser.add_argument("--soft_defense_override", action="store_true", help="Allow defense mode triggers with reduced risk.")
@@ -1138,6 +1654,28 @@ if __name__ == "__main__":
     parser.add_argument("--mode", type=str, default="legacy", choices=["legacy", "v2"])
     parser.add_argument("--asset-class", dest="asset_class", type=str, default="crypto", choices=["crypto", "stock", "defi"])
     parser.add_argument("--venue-id", dest="venue_id", type=str, default="auto")
+    parser.add_argument("--macro-events-file", dest="macro_events_file", type=str, default="")
+    parser.add_argument("--strategy-registry-file", dest="strategy_registry_file", type=str, default="")
+    parser.add_argument("--disabled-strategies-file", dest="disabled_strategies_file", type=str, default="")
+    parser.add_argument("--allocator-risk-budget-pct", dest="allocator_risk_budget_pct", type=float, default=1.0)
+    parser.add_argument("--allocator-max-asset-exposure-pct", dest="allocator_max_asset_exposure_pct", type=float, default=35.0)
+    parser.add_argument("--allocator-assumed-stop-loss-pct", dest="allocator_assumed_stop_loss_pct", type=float, default=2.0)
+    parser.add_argument("--correlation-threshold", dest="correlation_threshold", type=float, default=0.7)
+    parser.add_argument("--correlation-min-scale", dest="correlation_min_scale", type=float, default=0.3)
+    parser.add_argument("--advisory-cards", dest="advisory_cards", action="store_true", default=True)
+    parser.add_argument("--no-advisory-cards", dest="advisory_cards", action="store_false")
+    parser.add_argument("--execution-quality-threshold", dest="execution_quality_threshold", type=float, default=0.55)
+    parser.add_argument("--execution-quality-min-expected-move-bps", dest="execution_quality_min_expected_move_bps", type=float, default=3.0)
+    parser.add_argument("--disable-execution-quality-gate", dest="execution_quality_gate_enabled", action="store_false", default=True)
+    parser.add_argument("--disable-sentinel", dest="data_quality_sentinel_enabled", action="store_false", default=True)
+    parser.add_argument("--sentinel-degraded-threshold", dest="sentinel_degraded_threshold", type=float, default=0.70)
+    parser.add_argument("--sentinel-halt-threshold", dest="sentinel_halt_threshold", type=float, default=0.40)
+    parser.add_argument("--regime-policy-pack", dest="regime_policy_pack", type=str, default="legacy", choices=["legacy", "balanced", "strict"])
+    parser.add_argument("--exposure-total-cap-pct", dest="exposure_total_cap_pct", type=float, default=90.0)
+    parser.add_argument("--exposure-symbol-cap-pct", dest="exposure_symbol_cap_pct", type=float, default=35.0)
+    parser.add_argument("--exposure-asset-cap-crypto-pct", dest="exposure_asset_cap_crypto_pct", type=float, default=75.0)
+    parser.add_argument("--exposure-asset-cap-stock-pct", dest="exposure_asset_cap_stock_pct", type=float, default=70.0)
+    parser.add_argument("--exposure-asset-cap-defi-pct", dest="exposure_asset_cap_defi_pct", type=float, default=40.0)
     parser.add_argument("--tophunter_adx_max", type=float, default=20.0)
     parser.add_argument("--tophunter_pivot_left", type=int, default=2)
     parser.add_argument("--tophunter_pivot_right", type=int, default=2)
@@ -1171,6 +1709,27 @@ if __name__ == "__main__":
     cfg["mode"] = args.mode
     cfg["asset_class"] = args.asset_class
     cfg["venue_id"] = args.venue_id
+    cfg["macro_events_file"] = args.macro_events_file or cfg.get("macro_events_file")
+    cfg["strategy_registry_file"] = args.strategy_registry_file or cfg.get("strategy_registry_file")
+    cfg["disabled_strategies_file"] = args.disabled_strategies_file or cfg.get("disabled_strategies_file")
+    cfg["allocator_risk_budget_pct"] = float(args.allocator_risk_budget_pct)
+    cfg["allocator_max_asset_exposure_pct"] = float(args.allocator_max_asset_exposure_pct)
+    cfg["allocator_assumed_stop_loss_pct"] = float(args.allocator_assumed_stop_loss_pct)
+    cfg["correlation_threshold"] = float(args.correlation_threshold)
+    cfg["correlation_min_scale"] = float(args.correlation_min_scale)
+    cfg["advisory_cards_enabled"] = bool(args.advisory_cards)
+    cfg["execution_quality_threshold"] = float(args.execution_quality_threshold)
+    cfg["execution_quality_min_expected_move_bps"] = float(args.execution_quality_min_expected_move_bps)
+    cfg["execution_quality_gate_enabled"] = bool(args.execution_quality_gate_enabled)
+    cfg["data_quality_sentinel_enabled"] = bool(args.data_quality_sentinel_enabled)
+    cfg["sentinel_degraded_threshold"] = float(args.sentinel_degraded_threshold)
+    cfg["sentinel_halt_threshold"] = float(args.sentinel_halt_threshold)
+    cfg["regime_policy_pack"] = str(args.regime_policy_pack)
+    cfg["exposure_total_cap_pct"] = float(args.exposure_total_cap_pct)
+    cfg["exposure_symbol_cap_pct"] = float(args.exposure_symbol_cap_pct)
+    cfg["exposure_asset_cap_crypto_pct"] = float(args.exposure_asset_cap_crypto_pct)
+    cfg["exposure_asset_cap_stock_pct"] = float(args.exposure_asset_cap_stock_pct)
+    cfg["exposure_asset_cap_defi_pct"] = float(args.exposure_asset_cap_defi_pct)
     cfg["tophunter_adx_max"] = args.tophunter_adx_max
     cfg["tophunter_pivot_left"] = args.tophunter_pivot_left
     cfg["tophunter_pivot_right"] = args.tophunter_pivot_right
@@ -1224,6 +1783,12 @@ if __name__ == "__main__":
     print(f"  Strategy: {cfg['strategy']}")
     print(f"  Mode: {cfg['mode']}")
     print(f"  AssetClass: {cfg['asset_class']} | Venue: {cfg['venue_id']}")
+    print(
+        "  V2Extras:"
+        f" exec_gate={'on' if cfg['execution_quality_gate_enabled'] else 'off'}"
+        f" sentinel={'on' if cfg['data_quality_sentinel_enabled'] else 'off'}"
+        f" policy_pack={cfg['regime_policy_pack']}"
+    )
     print(f"  RunDir: {cfg['run_dir']}")
     
     d = PaperDaemon(cfg)

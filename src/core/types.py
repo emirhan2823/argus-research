@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -270,7 +270,7 @@ class TradeRecord(ArgusModel):
     confidence_at_entry: float
     stop_distance: float
     duration_hours: float
-    features_at_entry: dict
+    features_at_entry: dict[str, Any]
     reason_entry: str
     reason_exit: str
     execution_mode: str  # "auto" | "advisory"

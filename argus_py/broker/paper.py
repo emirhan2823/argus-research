@@ -371,6 +371,32 @@ class PaperBroker:
         """Compatibility alias used by risk kill-switch integration."""
         return self.close_all_positions(timestamp, price_dict)
 
+    def close_position(self, *, symbol: str, reason: str = "MANUAL", price: Optional[float] = None, timestamp: float = 0.0) -> Optional[TradeFill]:
+        """
+        Explicit close helper used by ops modules (e.g., HERMES position manager).
+        Falls back to entry price if explicit mark price is not provided.
+        """
+        if symbol not in self.details:
+            return None
+        pos = self.details[symbol]
+        close_price = float(price) if price is not None else float(pos.entry_price)
+        close_ts = float(timestamp) if timestamp > 0 else float(pos.creation_time or 0.0)
+        return self._close_position(symbol, close_price, str(reason), close_ts)
+
+    def modify_stop_loss(self, *, symbol: str, stop_price: float) -> bool:
+        pos = self.details.get(symbol)
+        if pos is None:
+            return False
+        pos.sl_price = float(stop_price)
+        return True
+
+    def modify_take_profit(self, *, symbol: str, tp_price: float) -> bool:
+        pos = self.details.get(symbol)
+        if pos is None:
+            return False
+        pos.tp_price = float(tp_price)
+        return True
+
     def _generate_stable_pid(self, symbol: str, timestamp: float, direction: str, price: float, unique_seq: int) -> str:
         """
         Generates a deterministic 8-char PositionID based on entry details + sequence counter.

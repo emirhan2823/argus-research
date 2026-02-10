@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 from src.core.types import Decision, ExecutionResult
 
@@ -17,7 +17,7 @@ class BrokerAdapter(Protocol):
         size: float,
         order_type: str,
         urgency: str,
-    ) -> dict:
+    ) -> dict[str, Any]:
         ...
 
 

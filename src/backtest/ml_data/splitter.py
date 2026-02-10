@@ -5,12 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+from numpy.typing import NDArray
 
 
 @dataclass(frozen=True)
 class PurgedFold:
-    train_idx: np.ndarray
-    test_idx: np.ndarray
+    train_idx: NDArray[np.int_]
+    test_idx: NDArray[np.int_]
 
 
 def purged_kfold_indices(n_rows: int, k: int, purge: int = 0) -> list[PurgedFold]:

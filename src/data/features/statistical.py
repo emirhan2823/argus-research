@@ -10,6 +10,7 @@ from typing import Optional
 
 import numpy as np
 import pandas as pd
+from numpy.typing import NDArray
 
 
 def compute_statistical_features(df: pd.DataFrame) -> dict[str, Optional[float]]:
@@ -58,7 +59,7 @@ def compute_statistical_features(df: pd.DataFrame) -> dict[str, Optional[float]]
     return features
 
 
-def _hurst_rs(data: np.ndarray) -> Optional[float]:
+def _hurst_rs(data: NDArray[np.float64]) -> Optional[float]:
     """Estimate Hurst exponent using rescaled range (R/S) method."""
     n = len(data)
     if n < 20:
@@ -96,7 +97,7 @@ def _hurst_rs(data: np.ndarray) -> Optional[float]:
     return float(np.clip(slope, 0.0, 1.0))
 
 
-def _shannon_entropy(data: np.ndarray, bins: int = 50) -> float:
+def _shannon_entropy(data: NDArray[np.float64], bins: int = 50) -> float:
     """Compute Shannon entropy of a distribution."""
     counts, _ = np.histogram(data, bins=bins)
     probs = counts / counts.sum()
@@ -104,7 +105,11 @@ def _shannon_entropy(data: np.ndarray, bins: int = 50) -> float:
     return float(-np.sum(probs * np.log2(probs)))
 
 
-def _frac_diff_last(prices: np.ndarray, d: float = 0.5, threshold: float = 1e-5) -> Optional[float]:
+def _frac_diff_last(
+    prices: NDArray[np.float64],
+    d: float = 0.5,
+    threshold: float = 1e-5,
+) -> Optional[float]:
     """Compute the last value of fractionally differentiated price series.
 
     Uses fixed-width window fractional differentiation (from mlfinlab).
@@ -114,20 +119,20 @@ def _frac_diff_last(prices: np.ndarray, d: float = 0.5, threshold: float = 1e-5)
         return None
 
     # Compute weights
-    weights = [1.0]
+    weights: list[float] = [1.0]
     for k in range(1, n):
         w = -weights[-1] * (d - k + 1) / k
         if abs(w) < threshold:
             break
         weights.append(w)
 
-    weights = np.array(weights[::-1])  # reverse for convolution
-    w_len = len(weights)
+    weights_arr: NDArray[np.float64] = np.array(weights[::-1], dtype=float)  # reverse for convolution
+    w_len = len(weights_arr)
 
     if w_len > n:
         return None
 
     # Apply to the last window
     window = prices[n - w_len : n]
-    result = float(np.dot(weights, window))
+    result = float(np.dot(weights_arr, window))
     return result

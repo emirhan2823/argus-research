@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import random
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -215,11 +216,19 @@ class ArgusPipeline:
                     continue
 
                 # Step 9: execution
+                execution_mode = self._execution_mode(asset_class)
+                advisory_fields: dict[str, Any] = {}
+                if execution_mode == "advisory":
+                    advisory_fields = self._build_advisory_fields(
+                        signal=signal,
+                        last_price=last_close,
+                    )
+
                 decision = Decision(
                     action=signal.bias,
                     asset_class=asset_class,
                     symbol=symbol,
-                    execution_mode=self._execution_mode(asset_class),
+                    execution_mode=execution_mode,
                     position_size=pre.adjusted_position_size,
                     leverage=1.0,
                     stop_loss=signal.stop_distance,
@@ -228,13 +237,22 @@ class ArgusPipeline:
                     engine=signal.engine,
                     reason="pipeline_entry",
                     timestamp=now,
+                    **advisory_fields,
                 )
                 ex_result = self.executor.execute(decision=decision)
 
                 # Step 10-11: telemetry + post
                 evt_type = "order_filled" if ex_result.success else "order_rejected"
                 self._log_event(evt_type, asset_class, reason=ex_result.reason)
-                outputs.append({"symbol": symbol, "status": "executed" if ex_result.success else "failed", "reason": ex_result.reason})
+                outputs.append(
+                    {
+                        "symbol": symbol,
+                        "status": "executed" if ex_result.success else "failed",
+                        "reason": ex_result.reason,
+                        "execution_mode": decision.execution_mode,
+                        "advisory_message": ex_result.advisory_message,
+                    }
+                )
 
         self.event_bus.publish(EventType.HEARTBEAT, {"run_id": self.ctx.run_id, "ts": now.isoformat()})
         return outputs
@@ -259,7 +277,48 @@ class ArgusPipeline:
         cfg = self.config.base.asset_classes.get(asset_class)
         if not cfg:
             return "advisory"
-        return cfg.execution_mode
+        requested = str(cfg.execution_mode).lower()
+        if requested != "auto":
+            return requested
+
+        # Safety fallback: if API keys are not available, move to advisory mode
+        # rather than attempting blind auto execution.
+        exchange = str(cfg.exchange or "").lower()
+        if exchange == "bingx":
+            if os.getenv("BINGX_API_KEY") and os.getenv("BINGX_API_SECRET"):
+                return "auto"
+            return "advisory"
+        return requested
+
+    @staticmethod
+    def _build_advisory_fields(*, signal: Any, last_price: float) -> dict[str, Any]:
+        expected = abs(float(getattr(signal, "expected_return", 0.01) or 0.01))
+        expected = max(0.005, min(expected, 0.10))
+        stop_dist = max(0.001, float(getattr(signal, "stop_distance", 0.01) or 0.01))
+        is_long = str(getattr(signal, "bias", "long")).lower() == "long"
+
+        if is_long:
+            tp1 = last_price * (1.0 + expected * 0.5)
+            tp2 = last_price * (1.0 + expected)
+            stop_hint = last_price * (1.0 - stop_dist)
+            conditional = [
+                f"If price reaches {tp1:.4f}, consider partial take profit.",
+                f"If price falls below {stop_hint:.4f}, close position.",
+            ]
+        else:
+            tp1 = last_price * (1.0 - expected * 0.5)
+            tp2 = last_price * (1.0 - expected)
+            stop_hint = last_price * (1.0 + stop_dist)
+            conditional = [
+                f"If price reaches {tp1:.4f}, consider partial take profit.",
+                f"If price rises above {stop_hint:.4f}, close position.",
+            ]
+
+        return {
+            "suggested_entry_price": float(last_price),
+            "tp_levels": [float(tp1), float(tp2)],
+            "conditional_alerts": conditional,
+        }
 
     def _log_event(self, event_type: str, asset_class: str, *, reason: str) -> None:
         evt = TelemetryEvent(

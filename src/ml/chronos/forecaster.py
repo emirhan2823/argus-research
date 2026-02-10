@@ -14,9 +14,9 @@ class ChronosForecaster:
 
     def __post_init__(self) -> None:
         self._backend = "naive"
-        self._pipeline = None
+        self._pipeline: object | None = None
         try:
-            from chronos import ChronosPipeline  # type: ignore
+            from chronos import ChronosPipeline
 
             self._pipeline = ChronosPipeline.from_pretrained(self.model_name)
             self._backend = "chronos"
@@ -36,7 +36,8 @@ class ChronosForecaster:
         if self._pipeline is not None:
             # Runtime-safe best-effort API usage for Chronos.
             try:
-                preds = self._pipeline.predict(values.tolist(), prediction_length=horizon)
+                predictor = getattr(self._pipeline, "predict")
+                preds = predictor(values.tolist(), prediction_length=horizon)
                 # Expected shape: [quantiles x horizon] or dict; normalize defensively.
                 arr = np.array(preds, dtype=float).reshape(-1)
                 median = float(np.median(arr))

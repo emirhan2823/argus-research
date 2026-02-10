@@ -42,9 +42,9 @@ class EventBus:
     """Simple synchronous pub/sub event bus."""
 
     def __init__(self) -> None:
-        self._subscribers: dict[str, list[Callable]] = {}
+        self._subscribers: dict[str, list[Callable[[Any], None]]] = {}
 
-    def subscribe(self, event_type: EventType, callback: Callable) -> None:
+    def subscribe(self, event_type: EventType, callback: Callable[[Any], None]) -> None:
         """Register a callback for a given event type."""
         key = event_type.value
         if key not in self._subscribers:
