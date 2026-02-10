@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Dict, Optional, Protocol
 
 from .models import ExecutionIntent, ExecutionResult, ExchangeOrder, OrderSide, UrgencyLevel
+from .realism import ExecutionRealismModel, RealismContext
 
 
 class ExchangeGateway(Protocol):
@@ -46,6 +47,7 @@ class ExecutionEngineV2:
         *,
         reconciliation: Optional[ReconciliationEngine] = None,
         urgency_slippage_bps: Optional[Dict[UrgencyLevel, float]] = None,
+        realism_model: Optional[ExecutionRealismModel] = None,
     ) -> None:
         self.exchange = exchange
         self.reconciliation = reconciliation or ReconciliationEngine()
@@ -55,6 +57,7 @@ class ExecutionEngineV2:
             UrgencyLevel.HIGH: 16.0,
             UrgencyLevel.CRITICAL: 28.0,
         }
+        self.realism_model = realism_model
 
     def execute(self, intent: ExecutionIntent, expected_post_qty: float) -> ExecutionResult:
         if intent.qty <= 0:
@@ -68,7 +71,51 @@ class ExecutionEngineV2:
             )
 
         normalized = self._normalize_intent(intent)
-        order = self.exchange.place_order(normalized)
+        placed_intent = normalized
+        realism_meta: Dict[str, object] = {}
+        status_hint = None
+        if self.realism_model is not None:
+            plan = self.realism_model.plan(self._build_realism_context(normalized))
+            realism_meta = {
+                "fill_ratio": float(plan.fill_ratio),
+                "slippage_bps": float(plan.slippage_bps),
+                "latency_ms": int(plan.latency_ms),
+                "depth_cap_notional": float(plan.depth_cap_notional),
+                "realism_reason": str(plan.reason),
+                "status_hint": str(plan.status_hint),
+            }
+            status_hint = plan.status_hint
+            if plan.adjusted_qty <= 0.0:
+                return ExecutionResult(
+                    accepted=False,
+                    order_id=None,
+                    status="REJECTED",
+                    reason="liquidity too thin",
+                    stop_loss_enforced=False,
+                    reconciliation_delta=0.0,
+                    requested_qty=float(intent.qty),
+                    filled_qty=0.0,
+                    avg_price=float(intent.limit_price or 0.0),
+                    metadata=realism_meta,
+                )
+            meta = dict(normalized.metadata)
+            meta["market_price"] = float(plan.adjusted_price)
+            meta["realism"] = dict(realism_meta)
+            placed_intent = ExecutionIntent(
+                symbol=normalized.symbol,
+                side=normalized.side,
+                qty=float(plan.adjusted_qty),
+                order_type=normalized.order_type,
+                limit_price=float(plan.adjusted_price),
+                stop_loss=normalized.stop_loss,
+                take_profit=normalized.take_profit,
+                urgency=normalized.urgency,
+                client_order_id=normalized.client_order_id,
+                reduce_only=normalized.reduce_only,
+                metadata=meta,
+            )
+
+        order = self.exchange.place_order(placed_intent)
         if order.status.upper() not in {"FILLED", "PARTIAL", "ACCEPTED"}:
             return ExecutionResult(
                 accepted=False,
@@ -77,19 +124,30 @@ class ExecutionEngineV2:
                 reason="exchange rejected order",
                 stop_loss_enforced=False,
                 reconciliation_delta=0.0,
+                requested_qty=float(intent.qty),
+                filled_qty=float(order.filled_qty),
+                avg_price=float(order.avg_price),
+                metadata=realism_meta,
             )
 
-        sl_enforced = self._enforce_stop_loss(normalized, order)
+        sl_enforced = self._enforce_stop_loss(placed_intent, order)
         exchange_qty = float(self.exchange.get_position_qty(intent.symbol))
         recon = self.reconciliation.compare(intent.symbol, float(expected_post_qty), exchange_qty)
+        status = str(order.status)
+        if status_hint == "PARTIAL" and status.upper() == "FILLED":
+            status = "PARTIAL"
 
         return ExecutionResult(
             accepted=True,
             order_id=order.order_id,
-            status=order.status,
+            status=status,
             reason="ok",
             stop_loss_enforced=sl_enforced,
             reconciliation_delta=recon.delta_qty,
+            requested_qty=float(intent.qty),
+            filled_qty=float(order.filled_qty),
+            avg_price=float(order.avg_price),
+            metadata=realism_meta,
         )
 
     def _normalize_intent(self, intent: ExecutionIntent) -> ExecutionIntent:
@@ -103,6 +161,12 @@ class ExecutionEngineV2:
             limit = intent.limit_price + slip
         else:
             limit = max(0.0, intent.limit_price - slip)
+        metadata = dict(intent.metadata)
+        if "market_price" in metadata:
+            try:
+                metadata["market_price"] = float(limit)
+            except Exception:
+                pass
 
         return ExecutionIntent(
             symbol=intent.symbol,
@@ -115,7 +179,24 @@ class ExecutionEngineV2:
             urgency=intent.urgency,
             client_order_id=intent.client_order_id,
             reduce_only=intent.reduce_only,
-            metadata=dict(intent.metadata),
+            metadata=metadata,
+        )
+
+    def _build_realism_context(self, intent: ExecutionIntent) -> RealismContext:
+        metadata = dict(intent.metadata or {})
+        regime = str(metadata.get("regime", "RANGE"))
+        asset_class = str(metadata.get("asset_class", "crypto"))
+        venue_id = str(metadata.get("venue_id", "auto"))
+        market_price = float(metadata.get("market_price") or intent.limit_price or 0.0)
+        return RealismContext(
+            symbol=intent.symbol,
+            asset_class=asset_class,
+            venue_id=venue_id,
+            side=intent.side,
+            urgency=intent.urgency,
+            regime=regime,
+            market_price=market_price,
+            requested_qty=float(intent.qty),
         )
 
     def _enforce_stop_loss(self, intent: ExecutionIntent, order: ExchangeOrder) -> bool:

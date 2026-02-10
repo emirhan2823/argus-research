@@ -14,7 +14,14 @@ import pandas as pd
 
 from argus_py.core.event_bus import EventBus, EventType
 from argus_py.data.market_state import Bar
-from argus_py.execution import ExecutionEngineV2, ExecutionIntent, ExchangeOrder, OrderSide, UrgencyLevel
+from argus_py.execution import (
+    ExecutionEngineV2,
+    ExecutionIntent,
+    ExchangeOrder,
+    ExecutionRealismModel,
+    OrderSide,
+    UrgencyLevel,
+)
 from argus_py.learning.chiron import ChironLearningEngine, LearningSample
 from argus_py.models.aether.aether_c import AetherCEngine, AetherCInputs
 from argus_py.models.atlas.atlas_c import AtlasCEngine, AtlasCInputs
@@ -119,6 +126,7 @@ class V2RuntimeBridge:
         self.last_lifecycle_action: str = "KEEP"
         self.last_lifecycle_reason: str = "N/A"
         self.lifecycle_state: StrategyState = StrategyState.PAPER
+        self.last_execution_profile: Dict[str, Any] = {}
 
         self.regime_classifier = MarketRegimeClassifier()
         self.atlas_engine = AtlasCEngine()
@@ -135,7 +143,10 @@ class V2RuntimeBridge:
         )
 
         self._exec_gateway = _PaperBrokerGateway(broker)
-        self.execution = ExecutionEngineV2(self._exec_gateway)
+        self.execution = ExecutionEngineV2(
+            self._exec_gateway,
+            realism_model=ExecutionRealismModel(),
+        )
         self.metric_tags_base = {
             "mode": "v2",
             "asset_class": str(self.cfg.get("asset_class", "crypto")),
@@ -277,6 +288,9 @@ class V2RuntimeBridge:
                 "market_price": float(market_price),
                 "timestamp": float(timestamp),
                 "risk_pct": float(risk_pct),
+                "asset_class": str(self.cfg.get("asset_class", "crypto")),
+                "venue_id": str(self.cfg.get("venue_id", "auto")),
+                "regime": self.last_market.regime_v2 if self.last_market is not None else "RANGE",
             },
         )
 
@@ -289,9 +303,24 @@ class V2RuntimeBridge:
             "reason": result.reason,
             "stop_loss_enforced": bool(result.stop_loss_enforced),
             "reconciliation_delta": float(result.reconciliation_delta),
+            "requested_qty": float(result.requested_qty),
+            "filled_qty": float(result.filled_qty),
+            "avg_price": float(result.avg_price),
+            "metadata": dict(result.metadata or {}),
         }
+        self.last_execution_profile = dict(result.metadata or {})
         self.emit(EventType.EXECUTION_ACK if result.accepted else EventType.EXECUTION_ERROR, payload, source="v2_runtime.exec")
         self._write_metric("execution_reconciliation_delta", float(result.reconciliation_delta), {})
+        if result.metadata:
+            fill_ratio = result.metadata.get("fill_ratio")
+            slippage_bps = result.metadata.get("slippage_bps")
+            latency_ms = result.metadata.get("latency_ms")
+            if fill_ratio is not None:
+                self._write_metric("execution_fill_ratio", float(fill_ratio), {})
+            if slippage_bps is not None:
+                self._write_metric("execution_slippage_bps", float(slippage_bps), {})
+            if latency_ms is not None:
+                self._write_metric("execution_latency_ms", float(latency_ms), {})
 
         return bool(result.accepted), str(result.reason), payload
 
@@ -367,6 +396,7 @@ class V2RuntimeBridge:
             "event_counts": dict(self.event_counts),
             "asset_class": str(self.cfg.get("asset_class", "crypto")),
             "venue_id": str(self.cfg.get("venue_id", "auto")),
+            "last_execution_profile": dict(self.last_execution_profile),
         }
 
     def emit(self, event_type: EventType, payload: Dict[str, Any], source: str) -> None:

@@ -40,6 +40,7 @@ from argus_py.ops.hermes_position_manager_v2 import HermesPositionManagerV2, urg
 from argus_py.ops.advisory_cards import write_advisory_card
 from argus_py.portfolio.allocator import PortfolioAllocatorV1
 from argus_py.portfolio.exposure_controller import ExposureController, ExposureLimits, PositionExposure
+from argus_py.portfolio.optimizer import AllocationCandidate, OptimizerConstraints, PortfolioOptimizerV2
 from argus_py.risk.correlation import CorrelationRiskMonitor
 from argus_py.risk.entry_quality import EntryQualityScorer
 from argus_py.risk.execution_quality_gate import ExecutionQualityGate, ExecutionQualityInput
@@ -102,6 +103,13 @@ DEFAULT_CONFIG = {
     "sentinel_degraded_threshold": 0.70,
     "sentinel_halt_threshold": 0.40,
     "regime_policy_pack": "legacy",
+    "optimizer_enabled": True,
+    "optimizer_gross_cap_pct": 100.0,
+    "optimizer_per_symbol_cap_pct": 20.0,
+    "optimizer_per_asset_cap_crypto_pct": 70.0,
+    "optimizer_per_asset_cap_stock_pct": 70.0,
+    "optimizer_per_asset_cap_defi_pct": 35.0,
+    "optimizer_cvar_limit_pct": 2.5,
     # Strategy selection
     "strategy": "council",
     "tophunter_adx_max": 20.0,
@@ -197,6 +205,7 @@ class PaperDaemon:
         self._last_execution_quality = None
         self._last_sentinel = None
         self._last_regime_policy = None
+        self._last_optimizer = None
         self._pnl_attribution = {
             "by_strategy": {},
             "by_asset_class": {},
@@ -210,6 +219,7 @@ class PaperDaemon:
             "execution_quality_blocks_total": 0,
             "sentinel_halts_total": 0,
             "exposure_blocks_total": 0,
+            "optimizer_blocks_total": 0,
         }
 
         # Ensure CSV Headers
@@ -298,6 +308,18 @@ class PaperDaemon:
             halt_threshold=float(self.cfg.get("sentinel_halt_threshold", 0.40)),
         )
         self.regime_policy_resolver = RegimePolicyResolver(str(self.cfg.get("regime_policy_pack", "legacy")))
+        self.portfolio_optimizer = PortfolioOptimizerV2(
+            constraints=OptimizerConstraints(
+                gross_cap_pct=float(self.cfg.get("optimizer_gross_cap_pct", 100.0)),
+                per_symbol_cap_pct=float(self.cfg.get("optimizer_per_symbol_cap_pct", 20.0)),
+                per_asset_cap_pct={
+                    "crypto": float(self.cfg.get("optimizer_per_asset_cap_crypto_pct", 70.0)),
+                    "stock": float(self.cfg.get("optimizer_per_asset_cap_stock_pct", 70.0)),
+                    "defi": float(self.cfg.get("optimizer_per_asset_cap_defi_pct", 35.0)),
+                },
+                cvar_limit_pct=float(self.cfg.get("optimizer_cvar_limit_pct", 2.5)),
+            )
+        )
         runtime = select_runtime(self.cfg, self.run_dir, self.broker)
         self.mode = runtime.final_mode
         self.runtime_boot_reason = runtime.reason
@@ -439,6 +461,19 @@ class PaperDaemon:
             out.append(PositionExposure(symbol=str(symbol), asset_class=asset_class, notional=notional))
         return out
 
+    def _estimate_volatility_bps(self) -> float:
+        closes = [float(b.close) for b in self.history_bars[-120:]]
+        if len(closes) < 8:
+            return 60.0
+        series = pd.Series(closes, dtype=float)
+        rets = series.pct_change().dropna()
+        if rets.empty:
+            return 60.0
+        std = float(rets.std(ddof=1))
+        if not np.isfinite(std):
+            return 60.0
+        return max(5.0, std * 10000.0)
+
     def _write_metrics(self, last_bar=None):
         last_bar_iso = None
         if last_bar is not None:
@@ -475,6 +510,7 @@ class PaperDaemon:
             "execution_quality": self._last_execution_quality,
             "sentinel": self._last_sentinel,
             "regime_policy": self._last_regime_policy,
+            "optimizer": self._last_optimizer,
             "pnl_attribution_live": self._pnl_attribution,
         }
         if self.v2_bridge is not None:
@@ -625,7 +661,14 @@ class PaperDaemon:
         equity = max(1e-9, float(self.broker.equity))
         return (notional / equity) * 100.0
 
-    def _apply_v2_risk_sizing(self, risk_pct: float, market_price: float) -> tuple[float, Optional[str]]:
+    def _apply_v2_risk_sizing(
+        self,
+        risk_pct: float,
+        market_price: float,
+        *,
+        expected_move_bps: float = 0.0,
+        edge_score: float = 0.0,
+    ) -> tuple[float, Optional[str]]:
         requested = max(0.0, float(risk_pct))
         if self.mode != "v2":
             self._risk_sizing = {
@@ -636,6 +679,8 @@ class PaperDaemon:
                 "correlation_reason": "legacy_mode",
                 "exposure_scale": 1.0,
                 "exposure_reason": "legacy_mode",
+                "optimizer_scale": 1.0,
+                "optimizer_reason": "legacy_mode",
             }
             return requested, None
 
@@ -653,6 +698,8 @@ class PaperDaemon:
                 "correlation_reason": "allocator_blocked",
                 "exposure_scale": 0.0,
                 "exposure_reason": "allocator_blocked",
+                "optimizer_scale": 0.0,
+                "optimizer_reason": "allocator_blocked",
             }
             return 0.0, alloc.reason
 
@@ -704,10 +751,65 @@ class PaperDaemon:
                 "correlation_reason": corr_reason,
                 "exposure_scale": 0.0,
                 "exposure_reason": exposure_decision.reason,
+                "optimizer_scale": 0.0,
+                "optimizer_reason": "exposure_blocked",
             }
             self.event_counters["exposure_blocks_total"] += 1
             return 0.0, f"EXPOSURE_BLOCK:{exposure_decision.reason}"
         final_risk = max(0.0, final_risk * float(exposure_decision.scale))
+
+        optimizer_scale = 1.0
+        optimizer_reason = "DISABLED"
+        optimizer_cvar = 0.0
+        if bool(self.cfg.get("optimizer_enabled", True)):
+            try:
+                candidate_weight_pct = (candidate_notional / max(1e-9, float(self.broker.equity))) * 100.0
+                score_for_opt = max(1.0, float(edge_score) if edge_score > 0 else 50.0)
+                expected_for_opt = max(0.5, float(expected_move_bps) if expected_move_bps > 0 else 5.0)
+                vol_bps = self._estimate_volatility_bps()
+                opt = self.portfolio_optimizer.optimize(
+                    [
+                        AllocationCandidate(
+                            symbol=str(self.cfg["symbol"]),
+                            asset_class=str(self._asset_tags.get("asset_class", self.cfg.get("asset_class", "crypto"))),
+                            signal_score=score_for_opt,
+                            expected_return_bps=expected_for_opt,
+                            volatility_bps=vol_bps,
+                        )
+                    ]
+                )
+                target_weight = float(opt.target_weights_pct.get(str(self.cfg["symbol"]), 0.0))
+                if candidate_weight_pct > 0:
+                    optimizer_scale = max(0.0, min(1.0, target_weight / candidate_weight_pct))
+                else:
+                    optimizer_scale = 1.0
+                optimizer_reason = str(opt.reason)
+                optimizer_cvar = float(opt.cvar_proxy_pct)
+                self._last_optimizer = {
+                    "target_weight_pct": target_weight,
+                    "candidate_weight_pct": candidate_weight_pct,
+                    "total_weight_pct": float(opt.total_weight_pct),
+                    "cvar_proxy_pct": optimizer_cvar,
+                    "scale": optimizer_scale,
+                    "reason": optimizer_reason,
+                }
+                if optimizer_scale <= 0.0:
+                    self.event_counters["optimizer_blocks_total"] += 1
+                    return 0.0, "OPTIMIZER_BLOCK"
+                final_risk = max(0.0, final_risk * optimizer_scale)
+            except Exception as exc:
+                optimizer_scale = 1.0
+                optimizer_reason = f"optimizer_error:{exc}"
+                self._last_optimizer = {
+                    "scale": optimizer_scale,
+                    "reason": optimizer_reason,
+                }
+        else:
+            self._last_optimizer = {
+                "scale": 1.0,
+                "reason": "optimizer_disabled",
+            }
+
         self._risk_sizing = {
             "allocator_reason": alloc.reason,
             "allocator_allowed_risk_pct": float(alloc.allowed_risk_pct),
@@ -716,6 +818,9 @@ class PaperDaemon:
             "correlation_reason": corr_reason,
             "exposure_scale": float(exposure_decision.scale),
             "exposure_reason": exposure_decision.reason,
+            "optimizer_scale": float(optimizer_scale),
+            "optimizer_reason": optimizer_reason,
+            "optimizer_cvar_proxy_pct": float(optimizer_cvar),
             "exposure_snapshot": {
                 "total_exposure_pct": exposure_decision.snapshot.total_exposure_pct,
                 "symbol_exposure_pct": exposure_decision.snapshot.symbol_exposure_pct,
@@ -1546,7 +1651,12 @@ class PaperDaemon:
                     custom_sl_price = tophunter_signal.stop_price
                     custom_tp_price = tophunter_signal.tp2_price
 
-            risk_pct, alloc_block_reason = self._apply_v2_risk_sizing(risk_pct=risk_pct, market_price=float(bar.close))
+            risk_pct, alloc_block_reason = self._apply_v2_risk_sizing(
+                risk_pct=risk_pct,
+                market_price=float(bar.close),
+                expected_move_bps=float(verdict.metadata.get("expected_move", em_check)),
+                edge_score=float(edge_score),
+            )
             if alloc_block_reason:
                 verdict.decision = "BLOCK"
                 self.reporter.log_reject(bar.timestamp, self.cfg["symbol"], "ALLOCATOR_BLOCK", alloc_block_reason)
@@ -1676,6 +1786,13 @@ if __name__ == "__main__":
     parser.add_argument("--exposure-asset-cap-crypto-pct", dest="exposure_asset_cap_crypto_pct", type=float, default=75.0)
     parser.add_argument("--exposure-asset-cap-stock-pct", dest="exposure_asset_cap_stock_pct", type=float, default=70.0)
     parser.add_argument("--exposure-asset-cap-defi-pct", dest="exposure_asset_cap_defi_pct", type=float, default=40.0)
+    parser.add_argument("--disable-optimizer", dest="optimizer_enabled", action="store_false", default=True)
+    parser.add_argument("--optimizer-gross-cap-pct", dest="optimizer_gross_cap_pct", type=float, default=100.0)
+    parser.add_argument("--optimizer-per-symbol-cap-pct", dest="optimizer_per_symbol_cap_pct", type=float, default=20.0)
+    parser.add_argument("--optimizer-per-asset-cap-crypto-pct", dest="optimizer_per_asset_cap_crypto_pct", type=float, default=70.0)
+    parser.add_argument("--optimizer-per-asset-cap-stock-pct", dest="optimizer_per_asset_cap_stock_pct", type=float, default=70.0)
+    parser.add_argument("--optimizer-per-asset-cap-defi-pct", dest="optimizer_per_asset_cap_defi_pct", type=float, default=35.0)
+    parser.add_argument("--optimizer-cvar-limit-pct", dest="optimizer_cvar_limit_pct", type=float, default=2.5)
     parser.add_argument("--tophunter_adx_max", type=float, default=20.0)
     parser.add_argument("--tophunter_pivot_left", type=int, default=2)
     parser.add_argument("--tophunter_pivot_right", type=int, default=2)
@@ -1730,6 +1847,13 @@ if __name__ == "__main__":
     cfg["exposure_asset_cap_crypto_pct"] = float(args.exposure_asset_cap_crypto_pct)
     cfg["exposure_asset_cap_stock_pct"] = float(args.exposure_asset_cap_stock_pct)
     cfg["exposure_asset_cap_defi_pct"] = float(args.exposure_asset_cap_defi_pct)
+    cfg["optimizer_enabled"] = bool(args.optimizer_enabled)
+    cfg["optimizer_gross_cap_pct"] = float(args.optimizer_gross_cap_pct)
+    cfg["optimizer_per_symbol_cap_pct"] = float(args.optimizer_per_symbol_cap_pct)
+    cfg["optimizer_per_asset_cap_crypto_pct"] = float(args.optimizer_per_asset_cap_crypto_pct)
+    cfg["optimizer_per_asset_cap_stock_pct"] = float(args.optimizer_per_asset_cap_stock_pct)
+    cfg["optimizer_per_asset_cap_defi_pct"] = float(args.optimizer_per_asset_cap_defi_pct)
+    cfg["optimizer_cvar_limit_pct"] = float(args.optimizer_cvar_limit_pct)
     cfg["tophunter_adx_max"] = args.tophunter_adx_max
     cfg["tophunter_pivot_left"] = args.tophunter_pivot_left
     cfg["tophunter_pivot_right"] = args.tophunter_pivot_right
@@ -1788,6 +1912,7 @@ if __name__ == "__main__":
         f" exec_gate={'on' if cfg['execution_quality_gate_enabled'] else 'off'}"
         f" sentinel={'on' if cfg['data_quality_sentinel_enabled'] else 'off'}"
         f" policy_pack={cfg['regime_policy_pack']}"
+        f" optimizer={'on' if cfg['optimizer_enabled'] else 'off'}"
     )
     print(f"  RunDir: {cfg['run_dir']}")
     

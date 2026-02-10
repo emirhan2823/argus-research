@@ -50,6 +50,10 @@ class ExecutionResult:
     reason: str
     stop_loss_enforced: bool
     reconciliation_delta: float
+    requested_qty: float = 0.0
+    filled_qty: float = 0.0
+    avg_price: float = 0.0
+    metadata: Dict[str, object] = field(default_factory=dict)
 
 
 __all__ = [

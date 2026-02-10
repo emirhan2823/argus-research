@@ -7,7 +7,14 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from argus_py.execution import ExecutionEngineV2, ExecutionIntent, ExchangeOrder, OrderSide, UrgencyLevel
+from argus_py.execution import (
+    ExecutionEngineV2,
+    ExecutionIntent,
+    ExecutionRealismModel,
+    ExchangeOrder,
+    OrderSide,
+    UrgencyLevel,
+)
 
 
 class DummyExchange:
@@ -66,3 +73,25 @@ def test_execution_v2_reports_reconciliation_delta() -> None:
 
     assert result.accepted is True
     assert result.reconciliation_delta == 0.5
+
+
+def test_execution_v2_with_realism_can_return_partial() -> None:
+    ex = DummyExchange()
+    realism = ExecutionRealismModel(depth_caps_usd={"crypto": 50.0})
+    engine = ExecutionEngineV2(ex, realism_model=realism)
+
+    intent = ExecutionIntent(
+        symbol="BTCUSDT",
+        side=OrderSide.BUY,
+        qty=2.0,  # with market_price=100 => 200 notional > 50 cap
+        limit_price=100.0,
+        urgency=UrgencyLevel.NORMAL,
+        metadata={"market_price": 100.0, "asset_class": "crypto", "regime": "RANGE", "venue_id": "sim"},
+    )
+    result = engine.execute(intent, expected_post_qty=0.0)
+
+    assert result.accepted is True
+    assert result.requested_qty == 2.0
+    assert 0.0 < result.filled_qty <= result.requested_qty
+    assert result.status in {"FILLED", "PARTIAL"}
+    assert "fill_ratio" in result.metadata
