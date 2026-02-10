@@ -57,6 +57,10 @@ class TelemetryEvent:
             base["strategy_timeframe"] = params.get("strategy_timeframe")
         if params.get("trigger_state") is not None:
             base["trigger_state"] = params.get("trigger_state")
+        if params.get("asset_class") is not None:
+            base["asset_class"] = params.get("asset_class")
+        if params.get("venue_id") is not None:
+            base["venue_id"] = params.get("venue_id")
         return base
 
     @staticmethod
@@ -68,11 +72,18 @@ class TelemetryEvent:
             "reason_detail": detail,
             "snapshot": snapshot
         })
+        if isinstance(snapshot, dict):
+            if snapshot.get("asset_class") is not None:
+                base["asset_class"] = snapshot.get("asset_class")
+            if snapshot.get("venue_id") is not None:
+                base["venue_id"] = snapshot.get("venue_id")
         return base
 
     @staticmethod
     def trade_open(daemon_id, run_id, symbol, interval, bar_ts, 
-                   entry_price, qty, side, fees_model: str):
+                   entry_price, qty, side, fees_model: str,
+                   asset_class: Optional[str] = None,
+                   venue_id: Optional[str] = None):
         base = TelemetryEvent._base(daemon_id, run_id, "TRADE_OPEN", symbol, interval, bar_ts)
         base.update({
             "entry_price": entry_price,
@@ -80,11 +91,17 @@ class TelemetryEvent:
             "side": side,
             "fees_model": fees_model
         })
+        if asset_class is not None:
+            base["asset_class"] = asset_class
+        if venue_id is not None:
+            base["venue_id"] = venue_id
         return base
 
     @staticmethod
     def trade_close(daemon_id, run_id, symbol, interval, bar_ts, 
-                    exit_price, pnl, pnl_pct, reason):
+                    exit_price, pnl, pnl_pct, reason,
+                    asset_class: Optional[str] = None,
+                    venue_id: Optional[str] = None):
         base = TelemetryEvent._base(daemon_id, run_id, "TRADE_CLOSE", symbol, interval, bar_ts)
         base.update({
             "exit_price": exit_price,
@@ -92,4 +109,8 @@ class TelemetryEvent:
             "pnl_pct": pnl_pct,
             "exit_reason": reason
         })
+        if asset_class is not None:
+            base["asset_class"] = asset_class
+        if venue_id is not None:
+            base["venue_id"] = venue_id
         return base

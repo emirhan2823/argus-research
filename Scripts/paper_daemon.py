@@ -27,6 +27,7 @@ from argus_py.strategy.tophunter_short import evaluate_tophunter_short_v1
 from argus_py.risk.regime import RegimeDetector
 from argus_py.runner.v2_runtime import V2RuntimeBridge
 from argus_py.strategy.lifecycle import StrategyState
+from argus_py.asset_router import AssetRouter
 from argus_py.broker.paper import PaperBroker, TradeFill
 from argus_py.data.reporting import Reporter
 from argus_py.data.market_state import Bar
@@ -67,6 +68,8 @@ DEFAULT_CONFIG = {
     "min_risk_pct": 0.1,
     "safe_paper": False,
     "mode": "legacy",
+    "asset_class": "crypto",
+    "venue_id": "auto",
     # Strategy selection
     "strategy": "council",
     "tophunter_adx_max": 20.0,
@@ -132,6 +135,14 @@ class PaperDaemon:
         self._touch_strategy_bucket(self._resolve_strategy_id(None))
         self.v2_bridge = None
         self.last_v2_snapshot = None
+        self.asset_router = None
+        self._asset_tags = {
+            "asset_class": str(self.cfg.get("asset_class", "crypto")).lower(),
+            "venue_id": str(self.cfg.get("venue_id", "auto")).lower(),
+            "asset_class_requested": str(self.cfg.get("asset_class", "crypto")).lower(),
+            "venue_id_requested": str(self.cfg.get("venue_id", "auto")).lower(),
+            "adapter_id": "legacy",
+        }
         self._last_engine_signals = {
             "orion": 0.0,
             "aegean": 0.0,
@@ -184,6 +195,12 @@ class PaperDaemon:
         self.router = ModeRouter()
         self.regime_detector = RegimeDetector()
         if self.mode == "v2":
+            self.asset_router = AssetRouter(
+                broker=self.broker,
+                asset_class=str(self.cfg.get("asset_class", "crypto")),
+                venue_id=str(self.cfg.get("venue_id", "auto")),
+            )
+            self._asset_tags = self.asset_router.telemetry_tags()
             self.v2_bridge = V2RuntimeBridge(self.cfg, self.run_dir, self.broker)
             print("V2_RUNTIME: enabled (MODE=v2)")
         else:
@@ -220,6 +237,8 @@ class PaperDaemon:
                     "min_adx": self.cfg["min_adx"],
                     "strategy": self.cfg.get("strategy", "council"),
                     "mode": self.mode,
+                    "asset_class": self.cfg.get("asset_class", "crypto"),
+                    "venue_id": self.cfg.get("venue_id", "auto"),
                 }
             }
             # Atomic Write
@@ -299,6 +318,11 @@ class PaperDaemon:
             "api_errors_1h": self.api_errors_1h,
             "risk_level": self.kill_switch.get_level().value,
             "strategy_id_breakdown": self.strategy_counters,
+            "asset_class": self._asset_tags.get("asset_class"),
+            "venue_id": self._asset_tags.get("venue_id"),
+            "asset_class_requested": self._asset_tags.get("asset_class_requested"),
+            "venue_id_requested": self._asset_tags.get("venue_id_requested"),
+            "asset_adapter_id": self._asset_tags.get("adapter_id"),
         }
         if self.v2_bridge is not None:
             payload["v2"] = self.v2_bridge.metrics_payload()
@@ -345,6 +369,9 @@ class PaperDaemon:
                     "id": self.cfg["daemon_id"],
                     "min_adx": self.cfg["min_adx"],
                     "mode": self.mode,
+                    "asset_class": self._asset_tags.get("asset_class"),
+                    "venue_id": self._asset_tags.get("venue_id"),
+                    "asset_adapter_id": self._asset_tags.get("adapter_id"),
                 },
                 "risk_level": self.kill_switch.get_level().value,
                 "health": {
@@ -444,7 +471,9 @@ class PaperDaemon:
         reasons_list = [reasons] if reasons else []
         params_payload = {
             "max_exp_move_bps": self.cfg["max_exp_move_bps"],
-            "min_adx": self.cfg["min_adx"]
+            "min_adx": self.cfg["min_adx"],
+            "asset_class": self._asset_tags.get("asset_class"),
+            "venue_id": self._asset_tags.get("venue_id"),
         }
         if strategy_tags:
             params_payload.update(strategy_tags)
@@ -504,7 +533,11 @@ class PaperDaemon:
             bar_ts=bar.timestamp,
             code=code,
             detail=detail,
-            snapshot={"strategy_tags": strategy_tags or {}} # Could enrich later
+            snapshot={
+                "strategy_tags": strategy_tags or {},
+                "asset_class": self._asset_tags.get("asset_class"),
+                "venue_id": self._asset_tags.get("venue_id"),
+            } # Could enrich later
         )
         with open(self.rejects_jsonl, "a") as f:
             f.write(json.dumps(event) + "\n")
@@ -536,7 +569,9 @@ class PaperDaemon:
                 entry_price=fill.price,
                 qty=fill.quantity,
                 side=fill.side,
-                fees_model="legacy"
+                fees_model="legacy",
+                asset_class=self._asset_tags.get("asset_class"),
+                venue_id=self._asset_tags.get("venue_id"),
             )
         else:
             event = TelemetryEvent.trade_close(
@@ -548,7 +583,9 @@ class PaperDaemon:
                 exit_price=fill.price,
                 pnl=fill.pnl,
                 pnl_pct=0.0, # calculate if pos known
-                reason=fill.event
+                reason=fill.event,
+                asset_class=self._asset_tags.get("asset_class"),
+                venue_id=self._asset_tags.get("venue_id"),
             )
         with open(self.trades_jsonl, "a") as f:
             f.write(json.dumps(event) + "\n")
@@ -573,6 +610,28 @@ class PaperDaemon:
                 )
 
     def fetch_klines(self, limit=100):
+        if self.mode == "v2" and self.asset_router is not None:
+            try:
+                bars = self.asset_router.fetch_klines(
+                    symbol=self.cfg["symbol"],
+                    interval=self.cfg["interval"],
+                    limit=int(limit),
+                    now_ts=time.time(),
+                )
+                self._asset_tags = self.asset_router.telemetry_tags()
+                if bars:
+                    return bars
+                # keep loop alive; fallback to legacy fetch only for crypto routes
+                if self._asset_tags.get("asset_class") != "crypto":
+                    return []
+            except Exception as exc:
+                # Backend failure must never crash daemon.
+                self._asset_tags = {
+                    **self._asset_tags,
+                    "router_error": str(exc),
+                }
+                return []
+
         url = "https://api.binance.com/api/v3/klines"
         params = {
             "symbol": self.cfg["symbol"],
@@ -1077,6 +1136,8 @@ if __name__ == "__main__":
     parser.add_argument("--safe_paper", action="store_true", help="Enable safe paper mode (min risk floor + defense override)")
     parser.add_argument("--strategy", type=str, default="council", choices=["council", "tophunter_short_v1"])
     parser.add_argument("--mode", type=str, default="legacy", choices=["legacy", "v2"])
+    parser.add_argument("--asset-class", dest="asset_class", type=str, default="crypto", choices=["crypto", "stock", "defi"])
+    parser.add_argument("--venue-id", dest="venue_id", type=str, default="auto")
     parser.add_argument("--tophunter_adx_max", type=float, default=20.0)
     parser.add_argument("--tophunter_pivot_left", type=int, default=2)
     parser.add_argument("--tophunter_pivot_right", type=int, default=2)
@@ -1108,6 +1169,8 @@ if __name__ == "__main__":
     cfg["soft_defense_override"] = args.soft_defense_override
     cfg["strategy"] = args.strategy
     cfg["mode"] = args.mode
+    cfg["asset_class"] = args.asset_class
+    cfg["venue_id"] = args.venue_id
     cfg["tophunter_adx_max"] = args.tophunter_adx_max
     cfg["tophunter_pivot_left"] = args.tophunter_pivot_left
     cfg["tophunter_pivot_right"] = args.tophunter_pivot_right
@@ -1160,6 +1223,7 @@ if __name__ == "__main__":
     print(f"  SafePaper: {cfg['safe_paper']}")
     print(f"  Strategy: {cfg['strategy']}")
     print(f"  Mode: {cfg['mode']}")
+    print(f"  AssetClass: {cfg['asset_class']} | Venue: {cfg['venue_id']}")
     print(f"  RunDir: {cfg['run_dir']}")
     
     d = PaperDaemon(cfg)

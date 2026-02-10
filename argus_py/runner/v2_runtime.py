@@ -136,6 +136,11 @@ class V2RuntimeBridge:
 
         self._exec_gateway = _PaperBrokerGateway(broker)
         self.execution = ExecutionEngineV2(self._exec_gateway)
+        self.metric_tags_base = {
+            "mode": "v2",
+            "asset_class": str(self.cfg.get("asset_class", "crypto")),
+            "venue_id": str(self.cfg.get("venue_id", "auto")),
+        }
 
         # Subscribe one wildcard writer so every event is persisted.
         asyncio.run(self.bus.subscribe(self._persist_event, None))
@@ -184,9 +189,9 @@ class V2RuntimeBridge:
             source="v2_runtime.market",
         )
 
-        self._write_metric("atlas_score", snapshot.atlas_score, {"mode": "v2"})
-        self._write_metric("aether_score", snapshot.aether_score, {"mode": "v2"})
-        self._write_metric("hermes_score", snapshot.hermes_score, {"mode": "v2"})
+        self._write_metric("atlas_score", snapshot.atlas_score, {})
+        self._write_metric("aether_score", snapshot.aether_score, {})
+        self._write_metric("hermes_score", snapshot.hermes_score, {})
 
         return snapshot
 
@@ -286,7 +291,7 @@ class V2RuntimeBridge:
             "reconciliation_delta": float(result.reconciliation_delta),
         }
         self.emit(EventType.EXECUTION_ACK if result.accepted else EventType.EXECUTION_ERROR, payload, source="v2_runtime.exec")
-        self._write_metric("execution_reconciliation_delta", float(result.reconciliation_delta), {"mode": "v2"})
+        self._write_metric("execution_reconciliation_delta", float(result.reconciliation_delta), {})
 
         return bool(result.accepted), str(result.reason), payload
 
@@ -311,13 +316,13 @@ class V2RuntimeBridge:
         trades_total: int,
         errors_total: int,
     ) -> None:
-        self._write_metric("equity", float(equity), {"mode": "v2"})
-        self._write_metric("drawdown_pct", float(drawdown_pct), {"mode": "v2"})
-        self._write_metric("bars_seen", float(bars_seen), {"mode": "v2"})
-        self._write_metric("decisions_total", float(decisions_total), {"mode": "v2"})
-        self._write_metric("rejects_total", float(rejects_total), {"mode": "v2"})
-        self._write_metric("trades_total", float(trades_total), {"mode": "v2"})
-        self._write_metric("errors_total", float(errors_total), {"mode": "v2"})
+        self._write_metric("equity", float(equity), {})
+        self._write_metric("drawdown_pct", float(drawdown_pct), {})
+        self._write_metric("bars_seen", float(bars_seen), {})
+        self._write_metric("decisions_total", float(decisions_total), {})
+        self._write_metric("rejects_total", float(rejects_total), {})
+        self._write_metric("trades_total", float(trades_total), {})
+        self._write_metric("errors_total", float(errors_total), {})
 
         self.emit(
             EventType.METRICS,
@@ -360,6 +365,8 @@ class V2RuntimeBridge:
             "lifecycle_action": self.last_lifecycle_action,
             "lifecycle_reason": self.last_lifecycle_reason,
             "event_counts": dict(self.event_counts),
+            "asset_class": str(self.cfg.get("asset_class", "crypto")),
+            "venue_id": str(self.cfg.get("venue_id", "auto")),
         }
 
     def emit(self, event_type: EventType, payload: Dict[str, Any], source: str) -> None:
@@ -387,7 +394,9 @@ class V2RuntimeBridge:
         self.runbook_path.write_text(json.dumps(payload, ensure_ascii=True, indent=2), encoding="utf-8")
 
     def _write_metric(self, key: str, value: float, tags: Dict[str, Any]) -> None:
-        point = make_metric_point(key=key, value=float(value), source="v2_runtime", tags=tags)
+        merged_tags = dict(self.metric_tags_base)
+        merged_tags.update(tags)
+        point = make_metric_point(key=key, value=float(value), source="v2_runtime", tags=merged_tags)
         self.warehouse.write(point)
 
     def _map_regime(self, regime: MarketRegime) -> str:
