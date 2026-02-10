@@ -1,0 +1,35 @@
+regime:
+  states: ["TRENDING", "RANGING", "VOLATILE", "CRISIS"]
+  default: "RANGING"
+
+  thresholds:
+    trending:
+      adx_min: 25
+      alignment_candles: 20
+    ranging:
+      adx_max: 20
+      hurst_max: 0.45
+      bb_period: 20
+    volatile:
+      atr_ratio_min: 1.8
+      vol_multiple: 2.0
+    crisis:
+      price_drop_24h: -0.08
+      vol_multiple: 3.0
+      depth_collapse: 0.30
+
+  confirmation:
+    trending_to_ranging: 3
+    ranging_to_trending: 3
+    to_volatile: 2
+    to_crisis: 0
+    crisis_to_volatile: 12
+
+  hysteresis:
+    min_candles_before_transition: 6
+    crisis_exempt: true
+    volatile_to_normal_min: 4
+
+  hermes_overrides:
+    critical_news_forces_crisis: true
+    negative_news_blocks_entry_threshold: -50

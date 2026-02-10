@@ -1,0 +1,71 @@
+engines:
+  titan:
+    active_regimes: ["TRENDING"]
+    min_adx: 25
+    min_confidence: 0.55
+    max_concurrent: 2
+    trend_follow:
+      ema_fast: 21
+      ema_slow: 55
+      atr_trail_mult: 2.5
+      min_volume_ratio: 1.0
+    breakout:
+      donchian_period: 20
+      volume_spike: 1.5
+      atr_filter: 0.005
+      confirmation_candles: 2
+
+  nautilus:
+    active_regimes: ["RANGING"]
+    max_adx: 22
+    min_confidence: 0.55
+    bb_reversion:
+      period: 20
+      std: 2.0
+      entry_threshold: 0.05
+      rsi_oversold: 30
+      rsi_overbought: 70
+      stop_mult: 1.0
+      target: "mid"
+    funding_reversion:
+      extreme_pctile: 90
+      extreme_neg_pctile: 10
+      hold_periods: 8
+      stop_pct: 0.03
+
+  phoenix:
+    active_regimes: ["TRENDING", "RANGING", "VOLATILE"]
+    min_confidence: 0.60
+    funding_harvest:
+      entry_pctile: 95
+      confirmation_periods: 2
+      exit_pctile: 60
+      stop_pct: 0.025
+    basis_trade:
+      entry_basis_pct: 0.003
+      exit_basis_pct: 0.001
+      stop_pct: 0.005
+      max_duration_hours: 72
+
+  hermes:
+    active_regimes: ["TRENDING", "RANGING", "VOLATILE", "CRISIS"]
+    min_confidence: 0.65
+    news_fetch_interval_s: 60
+    llm_backend: "ollama"
+    ollama_url: "http://127.0.0.1:11434/api/generate"
+    ollama_model: "llama3.1:8b"
+    groq_model: "llama-3.3-70b-versatile"
+    position_management:
+      critical_news_close_immediately: true
+      high_news_tighten_sl: true
+      positive_news_trail_tp: true
+    feeds:
+      crypto: ["coindesk", "cointelegraph", "theblock", "decrypt"]
+      finance: ["yahoo_finance", "reuters"]
+      regulatory: ["sec_edgar"]
+
+  atlas:
+    risk_on_mult: [1.0, 1.5]
+    risk_neutral_mult: [0.7, 1.0]
+    risk_off_mult: [0.2, 0.5]
+    crisis_mult: 0.0

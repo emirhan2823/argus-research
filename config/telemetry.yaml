@@ -1,0 +1,22 @@
+telemetry:
+  sqlite_path: "data/trade_logs/argus.db"
+  heartbeat_interval_s: 60
+
+  alerts:
+    telegram:
+      enabled: true
+      levels: ["URGENT", "CRITICAL", "EMERGENCY"]
+    log:
+      enabled: true
+      levels: ["INFO", "URGENT", "CRITICAL", "EMERGENCY"]
+
+  retention:
+    heartbeat_days: 90
+    features_days: 180
+    decisions: "indefinite"
+    trades: "indefinite"
+
+  advisory:
+    telegram_chat_id: null
+    alert_format: "detailed"
+    include_charts: false

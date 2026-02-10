@@ -1,0 +1,56 @@
+risk:
+  sizing:
+    base_risk_pct: 0.02
+    min_risk_pct: 0.005
+    max_risk_pct: 0.03
+    max_position_size: 0.15
+    max_leverage: 2.0
+
+  stop_loss:
+    min_stop: 0.01
+    max_stop: 0.05
+    stock_max_stop: 0.08
+    multipliers:
+      titan_trend_follow: 2.5
+      titan_breakout: 2.0
+      nautilus_bb_reversion: 1.0
+      nautilus_funding: 3.0
+      phoenix_funding: 2.5
+      phoenix_basis: 3.0
+
+  drawdown:
+    dd_caution: 0.02
+    dd_defensive: 0.04
+    dd_halt: 0.06
+    dd_lockdown: 0.10
+    dd_multipliers:
+      below_2pct: 1.0
+      below_4pct: 0.5
+      below_6pct: 0.25
+      above_6pct: 0.0
+
+  daily_limits:
+    soft_cap: -0.015
+    hard_cap: -0.025
+    max_trades: 15
+
+  kill_switch:
+    levels: [0, 1, 2, 3, 4]
+    size_multipliers: [1.0, 0.75, 0.40, 0.0, 0.0]
+    de_escalation_hours:
+      caution_to_normal: 24
+      defensive_to_caution: 48
+
+  guards:
+    correlation_max: 0.6
+    funding_settlement_blackout_min: 15
+    weekend_size_mult: 0.5
+    consecutive_loss_cooldown: 3
+    equity_curve_ma_period: 20
+    single_trade_max_loss: 0.03
+
+  portfolio_allocation:
+    max_crypto_pct: 0.50
+    max_equity_pct: 0.40
+    max_commodity_pct: 0.20
+    min_cash_pct: 0.10
