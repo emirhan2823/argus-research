@@ -8,6 +8,7 @@ from .feature_eng import (
     feature_matrix,
     features_to_array,
 )
+from .factor_pipeline import FactorPipeline, FactorPipelineResult
 from .signal_model import MLFeatures, MLPrediction, SignalModel
 
 __all__ = [
@@ -22,4 +23,6 @@ __all__ = [
     "extract_features",
     "features_to_array",
     "feature_matrix",
+    "FactorPipeline",
+    "FactorPipelineResult",
 ]
