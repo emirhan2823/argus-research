@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import sqlite3
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -158,11 +159,65 @@ def pct(v: float) -> str:
     return f"{v * 100.0:.2f}%"
 
 
+def detect_mode(run_dir: Path, selected: str) -> str:
+    if selected in {"legacy", "v2"}:
+        return selected
+    metrics = run_dir / "metrics.json"
+    if metrics.exists():
+        try:
+            payload = json.loads(metrics.read_text(encoding="utf-8"))
+            mode = str(payload.get("mode", "")).strip().lower()
+            if mode in {"legacy", "v2"}:
+                return mode
+        except Exception:
+            pass
+    if (run_dir / "events_v2.jsonl").exists():
+        return "v2"
+    return "legacy"
+
+
+def load_v2_event_counts(path: Path) -> Dict[str, int]:
+    if not path.exists():
+        return {}
+    counts: Counter[str] = Counter()
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                payload = json.loads(line)
+            except Exception:
+                continue
+            et = str(payload.get("event_type", "UNKNOWN")).strip() or "UNKNOWN"
+            counts[et] += 1
+    return dict(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))
+
+
+def load_v2_warehouse_summary(cold_db: Path) -> Dict[str, Any]:
+    if not cold_db.exists():
+        return {"rows": 0, "latest_ts": None, "keys": {}}
+    with sqlite3.connect(cold_db) as conn:
+        total = int(conn.execute("SELECT COUNT(*) FROM metrics").fetchone()[0])
+        latest = conn.execute("SELECT MAX(ts_utc) FROM metrics").fetchone()[0]
+        rows = conn.execute(
+            "SELECT key, COUNT(*) FROM metrics GROUP BY key ORDER BY COUNT(*) DESC, key ASC LIMIT 20"
+        ).fetchall()
+    return {
+        "rows": total,
+        "latest_ts": latest,
+        "keys": {str(k): int(v) for k, v in rows},
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Nightly evaluation report for paper run")
     parser.add_argument("--run-dir", type=Path, default=Path("runs/year2/paper_main"))
     parser.add_argument("--reports-dir", type=Path, default=Path("reports/year2"))
+    parser.add_argument("--mode", type=str, default="auto", choices=["auto", "legacy", "v2"])
     args = parser.parse_args()
+
+    mode = detect_mode(args.run_dir, args.mode)
 
     decisions = load_rows(args.run_dir / "decisions.csv")
     rejects = load_rows(args.run_dir / "rejects.csv")
@@ -191,10 +246,17 @@ def main() -> int:
     metrics_payload = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "run_dir": str(args.run_dir),
+        "mode": mode,
         "window_24h": report_24h,
         "window_7d": report_7d,
         "compare": compare,
     }
+
+    if mode == "v2":
+        metrics_payload["v2"] = {
+            "event_counts": load_v2_event_counts(args.run_dir / "events_v2.jsonl"),
+            "warehouse": load_v2_warehouse_summary(args.run_dir / "warehouse" / "cold" / "metrics.sqlite3"),
+        }
 
     metrics_out = args.reports_dir / "metrics.json"
     metrics_out.parent.mkdir(parents=True, exist_ok=True)
@@ -205,6 +267,7 @@ def main() -> int:
         "",
         f"Generated: {metrics_payload['generated_at_utc']}",
         f"Run Dir: `{args.run_dir}`",
+        f"Mode: `{mode}`",
         "",
         "## 24h vs 7d",
         "",
@@ -237,6 +300,32 @@ def main() -> int:
             )
     else:
         lines.append("| UNKNOWN | 0 | 0 | 0 | 0 |")
+
+    if mode == "v2":
+        v2 = metrics_payload.get("v2", {})
+        warehouse = dict(v2.get("warehouse", {}))
+        lines.extend(
+            [
+                "",
+                "## V2 Integration Snapshot",
+                "",
+                f"- Events file: `{args.run_dir / 'events_v2.jsonl'}`",
+                f"- Event types seen: {len(dict(v2.get('event_counts', {})))}",
+                f"- Warehouse rows: {int(warehouse.get('rows', 0))}",
+                f"- Warehouse latest ts: {warehouse.get('latest_ts')}",
+                "",
+                "### V2 Event Counts",
+                "",
+                "| Event | Count |",
+                "|---|---:|",
+            ]
+        )
+        event_counts = dict(v2.get("event_counts", {}))
+        if event_counts:
+            for key, count in event_counts.items():
+                lines.append(f"| `{key}` | {int(count)} |")
+        else:
+            lines.append("| `N/A` | 0 |")
 
     nightly_eval_out = args.reports_dir / "nightly_eval.md"
     write_markdown(nightly_eval_out, lines)

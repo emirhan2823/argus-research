@@ -21,9 +21,12 @@ from argus_py.models.aegean.aegean import AegeanEngine
 from argus_py.models.orion.orion import OrionEngine
 from argus_py.council.aggregator import Council
 from argus_py.council.defs import ConsensusVerdict
+from argus_py.execution import UrgencyLevel
 from argus_py.strategy.router import ModeRouter
 from argus_py.strategy.tophunter_short import evaluate_tophunter_short_v1
 from argus_py.risk.regime import RegimeDetector
+from argus_py.runner.v2_runtime import V2RuntimeBridge
+from argus_py.strategy.lifecycle import StrategyState
 from argus_py.broker.paper import PaperBroker, TradeFill
 from argus_py.data.reporting import Reporter
 from argus_py.data.market_state import Bar
@@ -63,6 +66,7 @@ DEFAULT_CONFIG = {
     "soft_defense_override": False,
     "min_risk_pct": 0.1,
     "safe_paper": False,
+    "mode": "legacy",
     # Strategy selection
     "strategy": "council",
     "tophunter_adx_max": 20.0,
@@ -81,6 +85,7 @@ DEFAULT_CONFIG = {
 class PaperDaemon:
     def __init__(self, config):
         self.cfg = config
+        self.mode = str(self.cfg.get("mode", "legacy")).lower()
         self.run_dir = Path(self.cfg["run_dir"])
         self.run_dir.mkdir(parents=True, exist_ok=True)
         
@@ -125,6 +130,15 @@ class PaperDaemon:
         self.api_errors_1h = 0
         self.strategy_counters = {}
         self._touch_strategy_bucket(self._resolve_strategy_id(None))
+        self.v2_bridge = None
+        self.last_v2_snapshot = None
+        self._last_engine_signals = {
+            "orion": 0.0,
+            "aegean": 0.0,
+            "atlas": 0.0,
+            "aether": 0.0,
+            "hermes": 0.0,
+        }
         
         # Ensure CSV Headers
         self._init_csvs()
@@ -169,6 +183,11 @@ class PaperDaemon:
         self.council = Council()
         self.router = ModeRouter()
         self.regime_detector = RegimeDetector()
+        if self.mode == "v2":
+            self.v2_bridge = V2RuntimeBridge(self.cfg, self.run_dir, self.broker)
+            print("V2_RUNTIME: enabled (MODE=v2)")
+        else:
+            print("V2_RUNTIME: disabled (MODE=legacy)")
         
         # Runtime
         self.history_bars = [] 
@@ -200,6 +219,7 @@ class PaperDaemon:
                     "symbol": self.cfg["args"].symbol,
                     "min_adx": self.cfg["min_adx"],
                     "strategy": self.cfg.get("strategy", "council"),
+                    "mode": self.mode,
                 }
             }
             # Atomic Write
@@ -217,6 +237,17 @@ class PaperDaemon:
         self.health["last_error"] = f"{context} @ {datetime.now().isoformat()}"
         self.health["consecutive_errors"] += 1
         self.health["errors_total"] += 1
+        if self.v2_bridge is not None:
+            try:
+                self.v2_bridge.open_incident(
+                    title=f"PaperDaemon error: {context}",
+                    context={
+                        "errors_total": self.health["errors_total"],
+                        "consecutive_errors": self.health["consecutive_errors"],
+                    },
+                )
+            except Exception:
+                pass
         with open(self.error_log, "a") as f:
             f.write(f"--- ERROR in {context} @ {datetime.now()} ---\n")
             traceback.print_exc(file=f)
@@ -256,6 +287,7 @@ class PaperDaemon:
             "ts_iso": datetime.now().isoformat(),
             "run_id": self.cfg.get("run_id", "unknown"),
             "daemon_id": self.cfg.get("daemon_id", "UNKNOWN"),
+            "mode": self.mode,
             "strategy_mode": self.cfg.get("strategy", "council"),
             "last_closed_bar_iso": last_bar_iso,
             "bars_seen": self.counters.get("bars_seen", 0),
@@ -268,6 +300,8 @@ class PaperDaemon:
             "risk_level": self.kill_switch.get_level().value,
             "strategy_id_breakdown": self.strategy_counters,
         }
+        if self.v2_bridge is not None:
+            payload["v2"] = self.v2_bridge.metrics_payload()
         with open(self.metrics_tmp, "w") as f:
             json.dump(payload, f, indent=2)
         os.replace(self.metrics_tmp, self.metrics_file)
@@ -309,7 +343,8 @@ class PaperDaemon:
                 "counters": self.counters,
                 "daemon": {
                     "id": self.cfg["daemon_id"],
-                    "min_adx": self.cfg["min_adx"]
+                    "min_adx": self.cfg["min_adx"],
+                    "mode": self.mode,
                 },
                 "risk_level": self.kill_switch.get_level().value,
                 "health": {
@@ -320,6 +355,8 @@ class PaperDaemon:
                     "uptime_start": self.health["start_time_iso"]
                 }
             }
+            if self.v2_bridge is not None:
+                hb["v2"] = self.v2_bridge.metrics_payload()
             
             # Position Detail if exists
             open_positions = list(self.broker.details.values())
@@ -434,6 +471,8 @@ class PaperDaemon:
         )
         with open(self.decisions_jsonl, "a") as f:
             f.write(json.dumps(event) + "\n")
+        if self.v2_bridge is not None:
+            self.v2_bridge.on_decision(event)
 
     def append_reject(self, bar, code, detail, strategy_tags=None):
         code, detail = normalize_reject(code, detail)
@@ -469,6 +508,8 @@ class PaperDaemon:
         )
         with open(self.rejects_jsonl, "a") as f:
             f.write(json.dumps(event) + "\n")
+        if self.v2_bridge is not None:
+            self.v2_bridge.on_reject(event)
             
     def append_trade(self, fill):
         self.counters["trades_total"] += 1
@@ -511,6 +552,25 @@ class PaperDaemon:
             )
         with open(self.trades_jsonl, "a") as f:
             f.write(json.dumps(event) + "\n")
+        if self.v2_bridge is not None:
+            payload = {
+                "symbol": fill.symbol,
+                "side": fill.side,
+                "price": fill.price,
+                "qty": fill.quantity,
+                "pnl": fill.pnl,
+                "event": fill.event,
+                "timestamp": fill.timestamp,
+            }
+            self.v2_bridge.on_trade(payload)
+            if abs(float(fill.pnl)) > 1e-12:
+                regime = self.last_v2_snapshot.regime_v2 if self.last_v2_snapshot is not None else "LOW_VOL_CALM"
+                self.v2_bridge.observe_trade(
+                    regime=regime,
+                    engine_signals=self._last_engine_signals,
+                    pnl=float(fill.pnl),
+                    timestamp=float(fill.timestamp),
+                )
 
     def fetch_klines(self, limit=100):
         url = "https://api.binance.com/api/v3/klines"
@@ -658,10 +718,21 @@ class PaperDaemon:
         if daily_dd_pct >= self.cfg["daily_loss_limit_pct"]:
             self.daily_stop_active = True
         
-        # 1. Indicators
+        # 1. Indicators / Regime
         regime = self.regime_detector.detect(history)
+        if self.v2_bridge is not None:
+            snap = self.v2_bridge.compute_market_snapshot(history)
+            if snap is not None:
+                self.last_v2_snapshot = snap
+                regime = snap.regime_legacy
         ae_vote = self.aegean.calculate(history)
         or_vote = self.orion.calculate(history)
+        self._last_engine_signals["orion"] = float(or_vote.score if or_vote else 0.0)
+        self._last_engine_signals["aegean"] = float(ae_vote.score if ae_vote else 0.0)
+        if self.last_v2_snapshot is not None:
+            self._last_engine_signals["atlas"] = float(self.last_v2_snapshot.atlas_score)
+            self._last_engine_signals["aether"] = float(self.last_v2_snapshot.aether_score)
+            self._last_engine_signals["hermes"] = float(self.last_v2_snapshot.hermes_score)
         
         # 2. MRIE & Router
         slope_raw = ae_vote.metadata.get('slope', 0.0)
@@ -845,6 +916,33 @@ class PaperDaemon:
             self.reporter.log_reject(bar.timestamp, self.cfg["symbol"], "KILL_SWITCH_DD", detail)
             self.append_reject(bar, "KILL_SWITCH_DD", detail, strategy_tags=strategy_tags)
             self.kill_switch_active = True
+        if self.v2_bridge is not None:
+            try:
+                closed_trades = [x for x in self.broker.trades if abs(float(getattr(x, "pnl", 0.0))) > 1e-12]
+                expect = float(np.mean([float(t.pnl) for t in closed_trades[-50:]])) if closed_trades else 0.0
+                sharpe = 0.0
+                if len(closed_trades) >= 5:
+                    pnl_vals = np.array([float(t.pnl) for t in closed_trades[-100:]], dtype=float)
+                    std = float(np.std(pnl_vals, ddof=1))
+                    sharpe = float(np.mean(pnl_vals) / std) if std > 1e-12 else 0.0
+                self.v2_bridge.evaluate_lifecycle(
+                    strategy_id=self._resolve_strategy_id(strategy_tags),
+                    trades=len(closed_trades),
+                    expectancy=expect,
+                    sharpe=sharpe,
+                    max_dd_pct=total_dd_pct,
+                    error_rate_pct=(self.health["errors_total"] / max(1, self.counters["bars_seen"])) * 100.0,
+                    telemetry_stale_sec=0.0,
+                    hard_risk_violations=1 if self.kill_switch_active else 0,
+                    consecutive_loss_days=self.consecutive_losses,
+                )
+                if self.v2_bridge.lifecycle_state in {StrategyState.FROZEN, StrategyState.RETIRED} and verdict.decision == "GO":
+                    verdict.decision = "BLOCK"
+                    detail = f"LIFECYCLE_{self.v2_bridge.lifecycle_state.value}"
+                    self.reporter.log_reject(bar.timestamp, self.cfg["symbol"], detail, self.v2_bridge.last_lifecycle_reason)
+                    self.append_reject(bar, detail, self.v2_bridge.last_lifecycle_reason, strategy_tags=strategy_tags)
+            except Exception:
+                self.log_error("V2_LIFECYCLE_EVAL_FAILED")
             
         # Log Decision
         em_check = verdict.metadata.get('expected_move', expected_move)
@@ -898,17 +996,33 @@ class PaperDaemon:
             # Execute Strategy (Entry)
             print(f"EXEC_ATTEMPT: ts={bar.timestamp} daemon={self.cfg['daemon_id']} decision={verdict.decision} dir={verdict.direction} risk={risk_pct:.4f} price={bar.close} bal={self.broker.balance:.2f} score={edge_score:.2f}")
 
-            success, reason = self.broker.execute_strategy(
-                symbol=self.cfg["symbol"],
-                decision=verdict.decision,
-                direction=verdict.direction,
-                price=bar.close,
-                timestamp=bar.timestamp,
-                risk_pct=risk_pct,
-                leverage=1.0,
-                custom_sl_price=custom_sl_price,
-                custom_tp_price=custom_tp_price,
-            )
+            if self.v2_bridge is not None:
+                urgency = UrgencyLevel.NORMAL
+                if self.last_v2_snapshot is not None and self.last_v2_snapshot.regime_v2 == "HIGH_VOL_CHOP":
+                    urgency = UrgencyLevel.HIGH
+                success, reason, _payload = self.v2_bridge.execute_with_v2(
+                    symbol=self.cfg["symbol"],
+                    direction=verdict.direction,
+                    market_price=bar.close,
+                    timestamp=bar.timestamp,
+                    risk_pct=risk_pct,
+                    stop_loss=custom_sl_price,
+                    take_profit=custom_tp_price,
+                    urgency=urgency,
+                    expected_post_qty=0.0,
+                )
+            else:
+                success, reason = self.broker.execute_strategy(
+                    symbol=self.cfg["symbol"],
+                    decision=verdict.decision,
+                    direction=verdict.direction,
+                    price=bar.close,
+                    timestamp=bar.timestamp,
+                    risk_pct=risk_pct,
+                    leverage=1.0,
+                    custom_sl_price=custom_sl_price,
+                    custom_tp_price=custom_tp_price,
+                )
             
             if success:
                 print(f"OPEN {verdict.direction} @ {bar.close} [Score:{edge_score:.2f}]")
@@ -937,6 +1051,16 @@ class PaperDaemon:
                 
         # Update ATR
         if atr_m > 0: self.atr_history.append(atr_m)
+        if self.v2_bridge is not None:
+            self.v2_bridge.on_bar_close(
+                equity=float(self.broker.equity),
+                drawdown_pct=float(total_dd_pct),
+                bars_seen=int(self.counters["bars_seen"]),
+                decisions_total=int(self.counters["decisions_total"]),
+                rejects_total=int(self.counters["rejects_total"]),
+                trades_total=int(self.counters["trades_total"]),
+                errors_total=int(self.health["errors_total"]),
+            )
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -952,6 +1076,7 @@ if __name__ == "__main__":
     parser.add_argument("--min_risk_pct", type=float, default=0.1, help="Minimum risk %% floor per trade")
     parser.add_argument("--safe_paper", action="store_true", help="Enable safe paper mode (min risk floor + defense override)")
     parser.add_argument("--strategy", type=str, default="council", choices=["council", "tophunter_short_v1"])
+    parser.add_argument("--mode", type=str, default="legacy", choices=["legacy", "v2"])
     parser.add_argument("--tophunter_adx_max", type=float, default=20.0)
     parser.add_argument("--tophunter_pivot_left", type=int, default=2)
     parser.add_argument("--tophunter_pivot_right", type=int, default=2)
@@ -982,6 +1107,7 @@ if __name__ == "__main__":
     cfg["kill_switch_dd_pct"] = args.kill_switch_dd_pct
     cfg["soft_defense_override"] = args.soft_defense_override
     cfg["strategy"] = args.strategy
+    cfg["mode"] = args.mode
     cfg["tophunter_adx_max"] = args.tophunter_adx_max
     cfg["tophunter_pivot_left"] = args.tophunter_pivot_left
     cfg["tophunter_pivot_right"] = args.tophunter_pivot_right
@@ -1033,6 +1159,7 @@ if __name__ == "__main__":
     print(f"  DailyStop: {cfg['daily_loss_limit_pct']:.2f}% | KillSwitchDD: {cfg['kill_switch_dd_pct']:.2f}%")
     print(f"  SafePaper: {cfg['safe_paper']}")
     print(f"  Strategy: {cfg['strategy']}")
+    print(f"  Mode: {cfg['mode']}")
     print(f"  RunDir: {cfg['run_dir']}")
     
     d = PaperDaemon(cfg)
