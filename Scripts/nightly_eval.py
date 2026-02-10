@@ -212,8 +212,8 @@ def load_v2_warehouse_summary(cold_db: Path) -> Dict[str, Any]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Nightly evaluation report for paper run")
-    parser.add_argument("--run-dir", type=Path, default=Path("runs/year2/paper_main"))
-    parser.add_argument("--reports-dir", type=Path, default=Path("reports/year2"))
+    parser.add_argument("--run-dir", "--run_dir", dest="run_dir", type=Path, default=Path("runs/year2/paper_main"))
+    parser.add_argument("--reports-dir", "--reports_dir", dest="reports_dir", type=Path, default=Path("reports/year2"))
     parser.add_argument("--mode", type=str, default="auto", choices=["auto", "legacy", "v2"])
     args = parser.parse_args()
 

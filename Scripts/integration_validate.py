@@ -39,9 +39,9 @@ def sqlite_count(path: Path, table: str) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Validate MODE=v2 integration artifacts")
-    parser.add_argument("--run-dir", type=Path, default=Path("runs/year2/paper_main"))
+    parser.add_argument("--run-dir", "--run_dir", dest="run_dir", type=Path, default=Path("runs/year2/paper_main"))
     parser.add_argument("--report", type=Path, default=Path("reports/year2/integration_validation.md"))
-    parser.add_argument("--nightly-metrics", type=Path, default=None)
+    parser.add_argument("--nightly-metrics", "--nightly_metrics", dest="nightly_metrics", type=Path, default=None)
     args = parser.parse_args()
 
     run_dir = args.run_dir
