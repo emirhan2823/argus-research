@@ -1,14 +1,27 @@
 # Argus: All-Weather Kisisel Fon Yonetim Sistemi
 
+> **ARCHIVED: 2026-02-10**
+> 
+> This document is **historical reference only**. It has been superseded by:
+> - **[CONSTITUTION_V2.md](./CONSTITUTION_V2.md)** — The single source of truth for ARGUS v2.0 architecture.
+> - **[FUTURE_VISION_REVIEW.md](./FUTURE_VISION_REVIEW.md)** — Section-by-section review with DEPRECATED/AUTHORITATIVE verdicts.
+> 
+> **Sections 0-26:** ARCHIVED — superseded by the Hostile Audit (Section 27) and Constitution.
+> **Sections 27-32:** REFERENCE — these sections informed the Constitution but the Constitution is authoritative where conflicts exist.
+> 
+> **Do NOT implement from this document.** Use CONSTITUTION_V2.md.
+
 **Created:** 2026-02-07  
 **Major Revision:** 2026-02-09 - Founder Vision + All-Weather Architecture  
-**Status:** COMPLETE - Full Strategic Blueprint v3.0  
+**Status:** ~~COMPLETE~~ ARCHIVED — Superseded by CONSTITUTION_V2.md  
 **Timeline:** Year 1-5 (2026-2030)  
-**Sections:** 21 (Founder Vision + All-Weather + Multi-Asset + Fund Metrics + Year-1 Summary + Year-2 Vision + Reference Repos + Growth Strategy + 24/7 Ops + Gate System + Risk + Strategies)
+**Sections:** 33 (Section 0-32, see FUTURE_VISION_REVIEW.md for status of each)
 
 ---
 
 ## 0. Kurucunun Vizyonu (Founder's Vision)
+
+> **[ARCHIVED]** This section is historical context. See CONSTITUTION_V2.md Section 1.
 
 ### Argus Nedir?
 
@@ -53,6 +66,8 @@ Tum bunlari yoneten tek bir sistem: **Argus - Kisisel Finansal Asistan**.
 ---
 
 ## 1. All-Weather Trading System Mimarisi
+
+> **[ARCHIVED — DEPRECATED]** 7-regime system superseded by 4-state regime in Constitution Section 7.
 
 ### Neden "All-Weather"?
 
@@ -2330,6 +2345,8 @@ DUSUK ETKI + YUKSEK EFOR (SONRA YAP):
 
 ## 26. ARGUS: Institutional-Grade Multi-Regime Trading System Architecture
 
+> **[ARCHIVED — DEPRECATED]** v1.0 architecture dismantled by Section 27 Hostile Audit. Superseded by Constitution.
+
 > **Classification:** Core System Blueprint  
 > **Author Role:** Senior Quant Architect + Hedge Fund CTO  
 > **Design Philosophy:** Survival → Consistency → Scalability  
@@ -3653,6 +3670,8 @@ argus-terminal/
 
 ## 27. HOSTILE AUDIT: ARGUS v1.0 Critical Review & v2.0 Redesign
 
+> **[REFERENCE]** This section informed the Constitution. Where conflicts exist, CONSTITUTION_V2.md is authoritative.
+
 > **Review Authority:** CIO + Quant Research Director + System Auditor  
 > **Review Date:** 2026-02-09  
 > **Review Stance:** Adversarial. Assume external investor capital at risk.  
@@ -4598,6 +4617,8 @@ LESS COMPLEXITY. MORE ROBUSTNESS. DEEPER EXECUTION.
 
 ## 28. ARGUS v2.0 — Consolidated Technical Specification
 
+> **[REFERENCE]** Consolidated into Constitution Sections 3-6. Constitution is authoritative.
+
 > **Purpose:** This is the FINAL, AUTHORITATIVE specification for ARGUS v2.0.  
 > **Rule:** If any previous section contradicts this section, THIS SECTION WINS.  
 > **Audience:** The developer building this system. Every line is implementation-ready.
@@ -5459,6 +5480,8 @@ class ExecutionEngine:
 
 ## 29. Phase 1 Sprint Board — Month 1-2 (120 Hours)
 
+> **[REFERENCE]** Superseded by Constitution Section 12 (Implementation Phases).
+
 ### 29.1 Sprint 1 (Week 1-2): Data Pipeline
 
 | # | Task | Acceptance Criteria | Hours | Status |
@@ -5534,6 +5557,8 @@ class ExecutionEngine:
 ---
 
 ## 30. Data Contracts & Interface Definitions
+
+> **[REFERENCE]** Migrated to pydantic v2 in Constitution Section 5. Constitution is authoritative.
 
 ### 30.1 Inter-Module Communication
 
@@ -5695,6 +5720,8 @@ class EventBus:
 
 ## 31. Mathematical Foundations — Formulas, Thresholds, Justifications
 
+> **[REFERENCE]** Carried forward into Constitution Section 13. Constitution is authoritative.
+
 ### 31.1 Position Sizing (Fixed Fractional — NOT Kelly)
 
 **Formula:**
@@ -5823,6 +5850,8 @@ At $100 AUM, even 50% annual = $50. We need both % return AND capital growth.
 ---
 
 ## SECTION 32: ARGUS CHIEF ARCHITECT DESIGN PACKAGE (v1.0)
+
+> **[REFERENCE]** 32A-32D carried into Constitution. 32E-32I (missing here) were created fresh in Constitution Sections 8-12.
 
 ```
 ============================================================================
