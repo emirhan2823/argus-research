@@ -9,6 +9,7 @@ from .feature_eng import (
     features_to_array,
 )
 from .factor_pipeline import FactorPipeline, FactorPipelineResult
+from .model_registry import ModelMetrics, ModelRegistry, PromotionDecision, metrics_now
 from .signal_model import MLFeatures, MLPrediction, SignalModel
 
 __all__ = [
@@ -25,4 +26,8 @@ __all__ = [
     "feature_matrix",
     "FactorPipeline",
     "FactorPipelineResult",
+    "ModelMetrics",
+    "ModelRegistry",
+    "PromotionDecision",
+    "metrics_now",
 ]

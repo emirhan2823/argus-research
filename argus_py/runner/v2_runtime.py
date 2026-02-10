@@ -23,10 +23,12 @@ from argus_py.execution import (
     UrgencyLevel,
 )
 from argus_py.learning.chiron import ChironLearningEngine, LearningSample
+from argus_py.ml.model_registry import ModelRegistry, metrics_now
 from argus_py.models.aether.aether_c import AetherCEngine, AetherCInputs
 from argus_py.models.atlas.atlas_c import AtlasCEngine, AtlasCInputs
 from argus_py.models.hermes.hermes_c import HermesCEngine
 from argus_py.ops.incident_manager import IncidentManager, IncidentSeverity
+from argus_py.ops.hermes_source_reliability import HermesSourceReliability
 from argus_py.regime.classifier import MarketRegime, MarketRegimeClassifier
 from argus_py.risk.correlation import CorrelationRiskMonitor
 from argus_py.strategy.lifecycle import StrategyLifecycleManager, StrategyPerformanceSnapshot, StrategyState
@@ -127,14 +129,26 @@ class V2RuntimeBridge:
         self.last_lifecycle_reason: str = "N/A"
         self.lifecycle_state: StrategyState = StrategyState.PAPER
         self.last_execution_profile: Dict[str, Any] = {}
+        self.last_model_promotion: Dict[str, Any] = {"action": "KEEP", "reason": "not_evaluated"}
+        self._last_hermes_source: str = "synthetic_keyword"
+        self._last_hermes_raw_score: float = 0.0
+        self._last_hermes_reliability: float = 0.5
 
         self.regime_classifier = MarketRegimeClassifier()
         self.atlas_engine = AtlasCEngine()
         self.aether_engine = AetherCEngine()
         self.hermes_engine = HermesCEngine()
+        self.hermes_reliability = HermesSourceReliability(self.run_dir / "hermes_source_reliability.json")
         self.chiron = ChironLearningEngine()
         self.lifecycle = StrategyLifecycleManager()
         self.correlation = CorrelationRiskMonitor()
+        self.model_registry = ModelRegistry(self.run_dir / "model_registry.json")
+        self.model_strategy_id = str(self.cfg.get("model_strategy_id", "COUNCIL_BASELINE"))
+        self.model_challenger_id = str(self.cfg.get("model_challenger_id", "")).strip()
+        champion_default = str(self.cfg.get("model_champion_id", "MODEL_BASELINE"))
+        self.model_registry.ensure_champion(self.model_strategy_id, champion_default)
+        if self.model_challenger_id:
+            self.model_registry.register_challenger(self.model_strategy_id, self.model_challenger_id)
         self.incidents = IncidentManager(self.run_dir / "incidents")
         self.warehouse = MetricsWarehouse(
             redis_url=self.cfg.get("redis_url"),
@@ -174,7 +188,12 @@ class V2RuntimeBridge:
         aether_inputs = self._aether_inputs(closes)
         aether = self.aether_engine.evaluate(aether_inputs)
 
-        hermes_score, _conf = self.hermes_engine._score_headline_keyword(self._synthetic_headline(closes))
+        hermes_raw_score, _conf = self.hermes_engine._score_headline_keyword(self._synthetic_headline(closes))
+        hermes_adj = self.hermes_reliability.adjust_score(source="synthetic_keyword", raw_score=float(hermes_raw_score))
+        hermes_score = float(hermes_adj.adjusted_score)
+        self._last_hermes_source = str(hermes_adj.source)
+        self._last_hermes_raw_score = float(hermes_adj.raw_score)
+        self._last_hermes_reliability = float(hermes_adj.reliability)
 
         snapshot = V2MarketSnapshot(
             regime_v2=regime.regime.value,
@@ -196,6 +215,9 @@ class V2RuntimeBridge:
                 "atlas_score": snapshot.atlas_score,
                 "aether_score": snapshot.aether_score,
                 "hermes_score": snapshot.hermes_score,
+                "hermes_raw_score": self._last_hermes_raw_score,
+                "hermes_source": self._last_hermes_source,
+                "hermes_source_reliability": self._last_hermes_reliability,
             },
             source="v2_runtime.market",
         )
@@ -203,6 +225,11 @@ class V2RuntimeBridge:
         self._write_metric("atlas_score", snapshot.atlas_score, {})
         self._write_metric("aether_score", snapshot.aether_score, {})
         self._write_metric("hermes_score", snapshot.hermes_score, {})
+        self._write_metric(
+            "hermes_source_reliability",
+            self._last_hermes_reliability,
+            {"source": self._last_hermes_source},
+        )
 
         return snapshot
 
@@ -250,6 +277,58 @@ class V2RuntimeBridge:
                 source="v2_runtime.lifecycle",
             )
 
+        # Champion/Challenger evaluation (shadow metrics for challenger optional).
+        champion_id = self.model_registry.active_model(self.model_strategy_id) or str(
+            self.cfg.get("model_champion_id", "MODEL_BASELINE")
+        )
+        self.model_registry.record_metrics(
+            metrics_now(
+                strategy_id=self.model_strategy_id,
+                model_id=champion_id,
+                trades=int(trades),
+                expectancy=float(expectancy),
+                sharpe=float(sharpe),
+                max_dd_pct=float(max_dd_pct),
+                win_rate=0.0,
+            )
+        )
+        if self.model_challenger_id:
+            ch_expectancy = float(expectancy) + float(self.cfg.get("model_challenger_expectancy_delta", 0.0))
+            ch_sharpe = float(sharpe) + float(self.cfg.get("model_challenger_sharpe_delta", 0.0))
+            ch_dd = max(0.0, float(max_dd_pct) + float(self.cfg.get("model_challenger_max_dd_delta", 0.0)))
+            self.model_registry.record_metrics(
+                metrics_now(
+                    strategy_id=self.model_strategy_id,
+                    model_id=self.model_challenger_id,
+                    trades=int(trades),
+                    expectancy=ch_expectancy,
+                    sharpe=ch_sharpe,
+                    max_dd_pct=ch_dd,
+                    win_rate=0.0,
+                )
+            )
+
+        promotion = self.model_registry.evaluate(self.model_strategy_id)
+        self.last_model_promotion = {
+            "action": promotion.action,
+            "champion_before": promotion.champion_before,
+            "champion_after": promotion.champion_after,
+            "reason": promotion.reason,
+        }
+        if promotion.action == "PROMOTE_CHALLENGER":
+            self.emit(
+                EventType.ALERT,
+                {
+                    "type": "MODEL_PROMOTION",
+                    "strategy_id": promotion.strategy_id,
+                    "champion_before": promotion.champion_before,
+                    "champion_after": promotion.champion_after,
+                    "reason": promotion.reason,
+                },
+                source="v2_runtime.model_registry",
+            )
+            self._write_metric("model_promotions_total", 1.0, {"strategy_id": promotion.strategy_id})
+
     def observe_trade(self, *, regime: str, engine_signals: Dict[str, float], pnl: float, timestamp: float) -> None:
         sample = LearningSample(
             regime=str(regime),
@@ -260,6 +339,22 @@ class V2RuntimeBridge:
         self.chiron.add_sample(sample)
         # keep incremental and cheap
         self.chiron.optimize_regime(str(regime), min_samples=40)
+        try:
+            self.hermes_reliability.record_outcome(
+                self._last_hermes_source,
+                predicted_score=self._last_hermes_raw_score,
+                realized_return_bps=float(pnl),
+                prediction_threshold=8.0,
+                realized_threshold=0.0,
+            )
+            self._last_hermes_reliability = self.hermes_reliability.reliability(self._last_hermes_source)
+            self._write_metric(
+                "hermes_source_reliability",
+                self._last_hermes_reliability,
+                {"source": self._last_hermes_source},
+            )
+        except Exception:
+            pass
 
     def execute_with_v2(
         self,
@@ -397,6 +492,13 @@ class V2RuntimeBridge:
             "asset_class": str(self.cfg.get("asset_class", "crypto")),
             "venue_id": str(self.cfg.get("venue_id", "auto")),
             "last_execution_profile": dict(self.last_execution_profile),
+            "hermes_source": self._last_hermes_source,
+            "hermes_source_reliability": self._last_hermes_reliability,
+            "model_registry": {
+                "strategy_id": self.model_strategy_id,
+                "active_model": self.model_registry.active_model(self.model_strategy_id),
+                "promotion": dict(self.last_model_promotion),
+            },
         }
 
     def emit(self, event_type: EventType, payload: Dict[str, Any], source: str) -> None:

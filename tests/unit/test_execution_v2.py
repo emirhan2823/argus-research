@@ -62,6 +62,7 @@ def test_execution_v2_enforces_stop_loss_and_reconciles() -> None:
     assert result.stop_loss_enforced is True
     assert result.reconciliation_delta == 0.0
     assert len(ex.stop_orders) == 1
+    assert "lifecycle_state" in result.metadata
 
 
 def test_execution_v2_reports_reconciliation_delta() -> None:
@@ -73,6 +74,7 @@ def test_execution_v2_reports_reconciliation_delta() -> None:
 
     assert result.accepted is True
     assert result.reconciliation_delta == 0.5
+    assert result.metadata.get("lifecycle_terminal") is True
 
 
 def test_execution_v2_with_realism_can_return_partial() -> None:

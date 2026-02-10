@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import uuid
 from typing import Dict, Optional, Protocol
 
 from .models import ExecutionIntent, ExecutionResult, ExchangeOrder, OrderSide, UrgencyLevel
+from .order_lifecycle import OrderLifecycleStateMachine
 from .realism import ExecutionRealismModel, RealismContext
 
 
@@ -48,6 +50,7 @@ class ExecutionEngineV2:
         reconciliation: Optional[ReconciliationEngine] = None,
         urgency_slippage_bps: Optional[Dict[UrgencyLevel, float]] = None,
         realism_model: Optional[ExecutionRealismModel] = None,
+        lifecycle_machine: Optional[OrderLifecycleStateMachine] = None,
     ) -> None:
         self.exchange = exchange
         self.reconciliation = reconciliation or ReconciliationEngine()
@@ -58,9 +61,19 @@ class ExecutionEngineV2:
             UrgencyLevel.CRITICAL: 28.0,
         }
         self.realism_model = realism_model
+        self.lifecycle_machine = lifecycle_machine or OrderLifecycleStateMachine()
 
     def execute(self, intent: ExecutionIntent, expected_post_qty: float) -> ExecutionResult:
+        local_order_id = str(intent.client_order_id or f"local_{uuid.uuid4().hex[:10]}")
+        lifecycle = self.lifecycle_machine.ensure(local_order_id, intent.symbol, float(intent.qty))
         if intent.qty <= 0:
+            lifecycle = self.lifecycle_machine.transition(
+                local_order_id,
+                exchange_status="REJECTED",
+                filled_qty=0.0,
+                avg_price=0.0,
+                reason="qty must be > 0",
+            )
             return ExecutionResult(
                 accepted=False,
                 order_id=None,
@@ -68,6 +81,14 @@ class ExecutionEngineV2:
                 reason="qty must be > 0",
                 stop_loss_enforced=False,
                 reconciliation_delta=0.0,
+                requested_qty=float(intent.qty),
+                filled_qty=0.0,
+                avg_price=0.0,
+                metadata={
+                    "lifecycle_state": lifecycle.state.value,
+                    "lifecycle_terminal": self.lifecycle_machine.is_terminal(lifecycle.state),
+                    "lifecycle_events": len(lifecycle.events),
+                },
             )
 
         normalized = self._normalize_intent(intent)
@@ -86,6 +107,16 @@ class ExecutionEngineV2:
             }
             status_hint = plan.status_hint
             if plan.adjusted_qty <= 0.0:
+                lifecycle = self.lifecycle_machine.transition(
+                    local_order_id,
+                    exchange_status="REJECTED",
+                    filled_qty=0.0,
+                    avg_price=float(intent.limit_price or 0.0),
+                    reason="liquidity too thin",
+                )
+                realism_meta["lifecycle_state"] = lifecycle.state.value
+                realism_meta["lifecycle_terminal"] = self.lifecycle_machine.is_terminal(lifecycle.state)
+                realism_meta["lifecycle_events"] = len(lifecycle.events)
                 return ExecutionResult(
                     accepted=False,
                     order_id=None,
@@ -116,6 +147,19 @@ class ExecutionEngineV2:
             )
 
         order = self.exchange.place_order(placed_intent)
+        lifecycle_id = str(order.order_id or local_order_id)
+        if lifecycle_id != local_order_id:
+            self.lifecycle_machine.ensure(lifecycle_id, intent.symbol, float(intent.qty))
+        lifecycle = self.lifecycle_machine.transition(
+            lifecycle_id,
+            exchange_status=str(order.status),
+            filled_qty=float(order.filled_qty),
+            avg_price=float(order.avg_price),
+            reason="exchange_ack",
+        )
+        realism_meta["lifecycle_state"] = lifecycle.state.value
+        realism_meta["lifecycle_terminal"] = self.lifecycle_machine.is_terminal(lifecycle.state)
+        realism_meta["lifecycle_events"] = len(lifecycle.events)
         if order.status.upper() not in {"FILLED", "PARTIAL", "ACCEPTED"}:
             return ExecutionResult(
                 accepted=False,
