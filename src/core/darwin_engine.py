@@ -104,6 +104,7 @@ class DarwinEngine:
         with concurrent.futures.ProcessPoolExecutor() as executor:
             # Map (genome, symbol) to futures
             # Note: backtest_func needs to handle the tuple or we wrap it
+            # Ensure backtest_func is picklable (top-level function)
             future_to_genome = {
                 executor.submit(backtest_func, genome, symbol): (genome, symbol)
                 for genome, symbol in tasks
