@@ -1,10 +1,11 @@
+from __future__ import annotations
+
 from pathlib import Path
 from typing import List
 
+from argus_py.adapters.base import MarketAdapter, MarketLoadRequest
 from argus_py.data.loader import DataLoader
 from argus_py.data.market_state import MarketState
-
-from .base import MarketAdapter, MarketLoadRequest
 
 
 class BistStubAdapter(MarketAdapter):

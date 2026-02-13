@@ -36,6 +36,13 @@ class EventType(str, Enum):
     # Advisory events
     ADVISORY_SIGNAL = "advisory_signal"
     ADVISORY_UPDATE = "advisory_update"
+    # Learning / Evolution events (v2.5)
+    REFLECTION_COMPLETE = "reflection_complete"
+    CORRECTION_EMITTED = "correction_emitted"
+    DARWIN_FULL_EVOLUTION = "darwin_full_evolution"
+    DARWIN_MICRO_EVOLUTION = "darwin_micro_evolution"
+    GENOME_PROMOTED = "genome_promoted"
+    MICRO_EVOLUTION_TRIGGERED = "micro_evolution_triggered"
 
 
 class EventBus:

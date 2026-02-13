@@ -54,3 +54,62 @@ risk:
     max_equity_pct: 0.40
     max_commodity_pct: 0.20
     min_cash_pct: 0.10
+
+  # v2.5 Adaptive Growth Sizer
+  growth_sizer:
+    enabled: true
+    initial_capital: 500.0
+    hard_floor_pct: 0.60
+    conviction_min_alignment: 0.70
+    cold_streak_decay_rate: 0.15
+    hard_floor_decay_steepness: 8.0
+    phases:
+      survival:
+        equity_range: [0, 2000]
+        kelly_fraction: 0.30
+        max_leverage: 1.0
+        max_risk_pct: 0.015
+        conviction_cap: 1.0
+      foundation:
+        equity_range: [2000, 10000]
+        kelly_fraction: 0.50
+        max_leverage: 1.5
+        max_risk_pct: 0.025
+        conviction_cap: 1.15
+      growth:
+        equity_range: [10000, 50000]
+        kelly_fraction: 0.75
+        max_leverage: 2.0
+        max_risk_pct: 0.035
+        conviction_cap: 1.30
+      acceleration:
+        equity_range: [50000, 200000]
+        kelly_fraction: 1.00
+        max_leverage: 2.5
+        max_risk_pct: 0.045
+        conviction_cap: 1.50
+      compounding:
+        equity_range: [200000, 999999999]
+        kelly_fraction: 0.85
+        max_leverage: 2.0
+        max_risk_pct: 0.035
+        conviction_cap: 1.20
+
+  # v2.5 Darwin Evolution Engine
+  darwin:
+    population_size: 30
+    elite_count: 3
+    tournament_size: 3
+    crossover_rate: 0.70
+    base_mutation_rate: 0.15
+    mutation_strength: 0.20
+    full_evolution_interval_hours: 168  # weekly
+    micro_evolution_failure_threshold: 5
+    micro_evolution_lookback: 20
+
+  # v2.5 Reflector
+  reflector:
+    loss_threshold: -0.002
+    underperformance_ratio: 0.30
+    failure_lookback: 20
+    micro_evolution_threshold: 5

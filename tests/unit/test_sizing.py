@@ -49,3 +49,21 @@ def test_sizing_max_risk_cap_applied() -> None:
     )
     assert out.risk_per_trade == 0.03
     assert out.position_size == 0.15
+
+
+def test_sizing_applies_leverage_multiplier_slot() -> None:
+    out = compute_size(
+        SizingInput(
+            stop_distance=0.10,
+            atlas_mult=1.0,
+            sentinel_mult=1.0,
+            regime_conf=1.0,
+            dd_mult=1.0,
+            rsl_mult=1.0,
+            hermes_mult=1.0,
+            leverage_mult=1.5,
+            base_risk_pct=0.01,
+            max_risk_pct=0.03,
+        )
+    )
+    assert out.risk_per_trade == 0.015

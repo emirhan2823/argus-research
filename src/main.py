@@ -7,7 +7,7 @@ import os
 import random
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
@@ -16,7 +16,7 @@ from src.core.clock import Clock
 from src.core.config import load_config
 from src.core.events import EventBus, EventType
 from src.core.types import Decision, TelemetryEvent
-from src.data.features.builder import FeatureBuilder
+from src.data.data_factory import DataFactory
 from src.data.sentinel.validator import SentinelInput, SentinelValidator
 from src.engines.atlas.risk_overlay import AtlasRiskOverlay
 from src.engines.hermes.engine import HermesEngine
@@ -33,6 +33,9 @@ from src.regime.state_machine import RegimeStateMachine
 from src.risk.kill_switch import KillSwitch
 from src.risk.pre_trade import PreTradeChecker, PreTradeInput
 from src.telemetry.event_logger import EventLogger
+
+if TYPE_CHECKING:
+    from src.data.features.builder import FeatureBuilder
 
 
 class DemoBroker:
@@ -57,14 +60,27 @@ class PipelineContext:
 
 
 class ArgusPipeline:
-    def __init__(self, *, mode: str, assets: list[str]) -> None:
+    def __init__(
+        self,
+        *,
+        mode: str,
+        assets: list[str],
+        evolve: bool = False,
+        time_machine_dir: str = "data/time_machine",
+    ) -> None:
         self.clock = Clock(mode="live")
         self.config = load_config()
         self.event_bus = EventBus()
         self.ctx = PipelineContext(mode=mode, assets=assets, run_id=f"run-{int(datetime.now(timezone.utc).timestamp())}")
+        self.evolve = evolve
+        self.data_factory = DataFactory(
+            data_root=time_machine_dir,
+            evolve=evolve,
+            exchange_client=None,
+        )
 
         self.sentinel = SentinelValidator()
-        self.feature_builder = FeatureBuilder()
+        self.feature_builder = self._init_feature_builder()
         self.rule_classifier = RuleBasedRegimeClassifier()
         self.consensus = RegimeConsensus()
         self.state_machines: dict[str, RegimeStateMachine] = {}
@@ -86,12 +102,18 @@ class ArgusPipeline:
         self.telemetry = EventLogger(sqlite_path=runtime_db)
 
     def run_once(self) -> list[dict[str, Any]]:
+        if self.feature_builder is None:
+            raise ModuleNotFoundError(
+                "pandas_ta is required for run_once() feature computation. "
+                "Install pandas_ta or skip integration tests with importorskip."
+            )
+
         outputs: list[dict[str, Any]] = []
         now = datetime.now(timezone.utc)
 
         for asset_class in self.ctx.assets:
             for symbol in self._symbols_for_asset(asset_class):
-                candles = self._mock_ohlcv(now)
+                candles = self._load_ohlcv(symbol=symbol, now=now)
                 last_close = float(candles["close"].iloc[-1])
 
                 # Step 1-2: data acquisition + sentinel
@@ -174,8 +196,7 @@ class ArgusPipeline:
                     )
                 )
                 if not gate_result.approved or signal is None:
-                    self._log_event("signal_rejected", asset_class, reason=gate_result.reason)
-                    outputs.append({"symbol": symbol, "status": "rejected", "reason": gate_result.reason})
+                    self._reject(outputs=outputs, asset_class=asset_class, symbol=symbol, reason=gate_result.reason)
                     continue
 
                 # Step 8: risk + sizing
@@ -211,8 +232,7 @@ class ArgusPipeline:
                     )
                 )
                 if not pre.approved:
-                    self._log_event("signal_rejected", asset_class, reason=pre.reason)
-                    outputs.append({"symbol": symbol, "status": "rejected", "reason": pre.reason})
+                    self._reject(outputs=outputs, asset_class=asset_class, symbol=symbol, reason=pre.reason)
                     continue
 
                 # Step 9: execution
@@ -329,6 +349,36 @@ class ArgusPipeline:
         )
         self.telemetry.log(evt, asset_class=asset_class, reason=reason, payload={"reason": reason})
 
+    def _reject(self, *, outputs: list[dict[str, Any]], asset_class: str, symbol: str, reason: str) -> None:
+        self._log_event("signal_rejected", asset_class, reason=reason)
+        outputs.append({"symbol": symbol, "status": "rejected", "reason": reason})
+
+    @staticmethod
+    def _init_feature_builder() -> Any | None:
+        try:
+            from src.data.features.builder import FeatureBuilder
+        except ModuleNotFoundError as exc:
+            if exc.name == "pandas_ta":
+                return None
+            raise
+        return FeatureBuilder()
+
+    def _load_ohlcv(self, *, symbol: str, now: datetime) -> pd.DataFrame:
+        if not self.evolve:
+            return self._mock_ohlcv(now)
+
+        rows = self.data_factory.fetch_ohlcv(
+            symbol=symbol,
+            timeframe="1m",
+            limit=260,
+            now=now,
+        )
+        if not rows:
+            raise ValueError(f"Evolve mode requires local OHLCV data for symbol={symbol}")
+        frame = pd.DataFrame(rows, columns=["timestamp", "open", "high", "low", "close", "volume"])
+        frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True, errors="coerce")
+        return frame.dropna(subset=["timestamp"]).reset_index(drop=True)
+
     @staticmethod
     def _mock_ohlcv(now: datetime) -> pd.DataFrame:
         rng = np.random.default_rng(123)
@@ -355,10 +405,25 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="ARGUS v2.0 pipeline")
     parser.add_argument("--mode", choices=["paper", "live", "backtest"], default="paper")
     parser.add_argument("--assets", default="crypto", help="Comma-separated asset classes")
+    parser.add_argument(
+        "--evolve",
+        action="store_true",
+        help="Use local time_machine parquet data (exchange bypass) for deterministic evolution runs.",
+    )
+    parser.add_argument(
+        "--time-machine-dir",
+        default="data/time_machine",
+        help="Parquet directory for local evolve runs.",
+    )
     args = parser.parse_args()
 
     assets = [a.strip() for a in args.assets.split(",") if a.strip()]
-    pipeline = ArgusPipeline(mode=args.mode, assets=assets)
+    pipeline = ArgusPipeline(
+        mode=args.mode,
+        assets=assets,
+        evolve=bool(args.evolve),
+        time_machine_dir=str(args.time_machine_dir),
+    )
     outputs = pipeline.run_once()
     for item in outputs:
         print(item)
