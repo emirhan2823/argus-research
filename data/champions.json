@@ -1,4 +1,23 @@
 {
+    "XAU/USDT": {
+        "id": "gen_82211",
+        "genes": {
+            "ema_short": 70,
+            "ema_long": 113,
+            "rsi_period": 7,
+            "rsi_upper": 63,
+            "rsi_lower": 16,
+            "sl_atr_mult": 4.849328872848937,
+            "tp_atr_mult": 8.743209763386554,
+            "use_rsi": 1,
+            "use_macd": 1,
+            "use_bollinger": 0,
+            "bb_period": 18,
+            "bb_std": 1.8595222591312421
+        },
+        "fitness": 0.0,
+        "metrics": {}
+    },
     "BTC/USDT": {
         "id": "gen_428268",
         "genes": {

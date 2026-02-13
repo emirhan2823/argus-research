@@ -23,11 +23,11 @@ class DataFactory:
         safe_symbol = symbol.split(":")[0].replace("/", "_")
         return os.path.join(self.data_dir, f"{safe_symbol}.parquet")
 
-    def load_or_sync(self, symbol: str, fetch_func: Callable, feature_func: Callable) -> pl.LazyFrame:
+    def load_or_sync(self, symbol: str, fetch_func: Callable, feature_func: Callable, enforce_local: bool = False) -> pl.LazyFrame:
         """
         Main entry point.
         1. Checks for file existence.
-        2. Detects Gaps & Heals via REST.
+        2. Detects Gaps & Heals via REST (Skipped if enforce_local=True).
         3. Validates Feature Schema & Regenerates if needed.
         4. Returns LazyFrame.
         """
@@ -48,22 +48,29 @@ class DataFactory:
         current_time_ms = int(time.time() * 1000)
 
         if df.is_empty():
+            if enforce_local:
+                print(f"[{symbol}] Enforce Local: No data found at {path}. Returning empty.")
+                return pl.DataFrame().lazy()
+
             print(f"[{symbol}] No local data. Fetching initial history...")
             # Fetch e.g. last 30 days
             start_time = current_time_ms - (30 * 24 * 60 * 60 * 1000)
             new_data = self._fetch_data(fetch_func, start_time)
             df = new_data
         else:
-            last_ts = df["timestamp"].max()
-            # If gap > 5 minutes (assuming 1m candles)
-            if (current_time_ms - last_ts) > (5 * 60 * 1000):
-                print(f"[{symbol}] Gap Detected! Last: {last_ts}, Now: {current_time_ms}")
-                new_data = self._fetch_data(fetch_func, last_ts + 1)
+            if not enforce_local:
+                last_ts = df["timestamp"].max()
+                # If gap > 5 minutes (assuming 1m candles)
+                if (current_time_ms - last_ts) > (5 * 60 * 1000):
+                    print(f"[{symbol}] Gap Detected! Last: {last_ts}, Now: {current_time_ms}")
+                    new_data = self._fetch_data(fetch_func, last_ts + 1)
 
-                if not new_data.is_empty():
-                    # Merge and Deduplicate
-                    df = pl.concat([df, new_data]).unique(subset=["timestamp"]).sort("timestamp")
-                    print(f"[{symbol}] Gap Healed. New rows: {len(new_data)}")
+                    if not new_data.is_empty():
+                        # Merge and Deduplicate
+                        df = pl.concat([df, new_data]).unique(subset=["timestamp"]).sort("timestamp")
+                        print(f"[{symbol}] Gap Healed. New rows: {len(new_data)}")
+            else:
+                print(f"[{symbol}] Enforce Local: Skipping Gap Detection. Using local data as absolute timeline.")
 
         # 3. Feature Schema Validation
         # Generate hash of current features based on feature_func output on sample

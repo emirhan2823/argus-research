@@ -55,11 +55,13 @@ async def run_bot(evolve_mode=False):
         print(f"Starting Generation 1 Evolution for {SYMBOL}...")
         # Note: DataFactory should ensure local data is ready.
         # Ensure dummy data exists for "XAU/USDT" (mapped to XAU_USDT.parquet)
-        fetch_wrapper = lambda start_time: exchange.fetch_ohlcv(limit=1000, start_time=start_time)
+        # In Evolution Mode, we enforce strict local usage (no online fetching)
+        fetch_wrapper = lambda start_time: pd.DataFrame() # No-op for safety
         feature_wrapper = lambda df: strategy.calculate_indicators(df)
-        data_factory.load_or_sync(SYMBOL, fetch_wrapper, feature_wrapper)
 
-        # Pass adjustment vector to evolve (needs update in DarwinEngine)
+        data_factory.load_or_sync(SYMBOL, fetch_wrapper, feature_wrapper, enforce_local=True)
+
+        # Pass adjustment vector to evolve
         darwin.evolve(specific_symbol=SYMBOL, adjustment_vector=adjustment_vector)
 
         print("Evolution Complete.")
