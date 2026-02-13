@@ -19,7 +19,8 @@ class DataFactory:
         self.integrity_manager = IntegrityManager()
 
     def get_parquet_path(self, symbol: str) -> str:
-        safe_symbol = symbol.replace("/", "_").replace(":", "_")
+        # Standardize: "XAU/USDT:USDT" -> "XAU_USDT"
+        safe_symbol = symbol.split(":")[0].replace("/", "_")
         return os.path.join(self.data_dir, f"{safe_symbol}.parquet")
 
     def load_or_sync(self, symbol: str, fetch_func: Callable, feature_func: Callable) -> pl.LazyFrame:

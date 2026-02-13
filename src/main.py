@@ -14,34 +14,62 @@ from src.strategies.trend_following import TrendFollowingStrategy
 from src.connectors.bingx_websocket import BingXWebSocket
 from src.data.data_factory import DataFactory
 from src.core.darwin_engine import DarwinEngine
+from src.core.reflector import Reflector
 from config.settings import SYMBOL, TIMEFRAME
+import argparse
 
-async def run_bot():
+async def run_bot(evolve_mode=False):
     print(f"--- Starting Hedge Fund Bot (Async) ---")
     print(f"Symbol: {SYMBOL}, Timeframe: {TIMEFRAME}")
 
     # Initialize Components
-    # Set mock=True for safety during initial run. User can change this later.
     exchange = ExchangeClient(mock=True)
     risk_manager = RiskManager()
     microstructure_engine = MicrostructureEngine()
     strategy = TrendFollowingStrategy(risk_manager)
     data_factory = DataFactory()
 
-    # Initialize Darwin Engine (Evolution)
+    # Initialize Darwin Engine
     darwin = DarwinEngine()
     darwin.register_asset(SYMBOL)
-    darwin.load_champions() # Load learnt parameters
+    darwin.load_champions()
+
+    # Evolution Mode
+    if evolve_mode:
+        print(">>> EVOLUTION MODE ACTIVATED <<<")
+
+        # 1. Reflector Analysis (Pre-Evolution)
+        # Check BTC Champion for failures
+        reflector = Reflector()
+        adjustment_vector = None
+
+        # Mocking a past trade for BTC Champion to trigger Reflector
+        # Ideally fetch from Trade History DB
+        print("Running Reflector on Champion (gen_632918)...")
+        # adjustment_vector = reflector.run_post_mortem(...)
+        # Simulating adjustment for now as requested
+        adjustment_vector = {'sl_atr_mult': 0.2}
+        print(f"Adjustment Vector Generated: {adjustment_vector}")
+
+        # 2. Trigger Evolution
+        print(f"Starting Generation 1 Evolution for {SYMBOL}...")
+        # Note: DataFactory should ensure local data is ready.
+        # Ensure dummy data exists for "XAU/USDT" (mapped to XAU_USDT.parquet)
+        fetch_wrapper = lambda start_time: exchange.fetch_ohlcv(limit=1000, start_time=start_time)
+        feature_wrapper = lambda df: strategy.calculate_indicators(df)
+        data_factory.load_or_sync(SYMBOL, fetch_wrapper, feature_wrapper)
+
+        # Pass adjustment vector to evolve (needs update in DarwinEngine)
+        darwin.evolve(specific_symbol=SYMBOL, adjustment_vector=adjustment_vector)
+
+        print("Evolution Complete.")
+        return
 
     # 0. Data Factory Initialization (Sync/Heal Data)
     print("Initializing Data Factory...")
-    # Wrap exchange fetch in lambda to match signature
     fetch_wrapper = lambda start_time: exchange.fetch_ohlcv(limit=1000, start_time=start_time)
-    # Use strategy's indicator calculation as feature function
     feature_wrapper = lambda df: strategy.calculate_indicators(df)
 
-    # This might take time, ideally run in thread executor if heavy IO
-    # Returns LazyFrame
     historical_data_lazy = data_factory.load_or_sync(SYMBOL, fetch_wrapper, feature_wrapper)
     print("Data Factory synced.")
 
@@ -160,7 +188,13 @@ async def run_bot():
         await ws_client.stop()
 
 if __name__ == "__main__":
+    sys.path.append(os.getcwd()) # Path Persistence Fix
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--evolve", action="store_true", help="Run Evolution Mode instead of Live Trading")
+    args = parser.parse_args()
+
     try:
-        asyncio.run(run_bot())
+        asyncio.run(run_bot(evolve_mode=args.evolve))
     except KeyboardInterrupt:
         pass

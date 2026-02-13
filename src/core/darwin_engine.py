@@ -138,9 +138,10 @@ class DarwinEngine:
 
         return max(0.0, score) # No negative fitness
 
-    def evolve(self, specific_symbol: str = None):
+    def evolve(self, specific_symbol: str = None, adjustment_vector: Dict[str, float] = None):
         """
         Creates the next generation for each asset's population.
+        adjustment_vector: Optional dict to bias mutations (e.g., from Reflector).
         """
         target_symbols = [specific_symbol] if specific_symbol else list(self.populations.keys())
 
@@ -158,7 +159,7 @@ class DarwinEngine:
                 parent_b = self._tournament_selection(pop)
 
                 child = self._crossover(parent_a, parent_b)
-                self._mutate(child)
+                self._mutate(child, adjustment_vector)
 
                 next_gen.append(child)
 
@@ -189,11 +190,25 @@ class DarwinEngine:
 
         return Genome(id=f"gen_{self.generation}_child_{random.randint(0, 100000)}", genes=child_genes)
 
-    def _mutate(self, genome: Genome):
+    def _mutate(self, genome: Genome, adjustment_vector: Dict[str, float] = None):
         """
         Gaussian Jitter Mutation.
+        adjustment_vector: Bias to apply to specific genes.
         """
         for gene, (min_val, max_val) in self.gene_ranges.items():
+
+            # 1. Apply Adjustment Vector (Directed Mutation)
+            if adjustment_vector and gene in adjustment_vector:
+                current_val = genome.genes[gene]
+                bias = adjustment_vector[gene]
+                new_val = current_val + bias
+                # Clamp
+                new_val = max(min_val, min(new_val, max_val))
+                genome.genes[gene] = new_val
+                # Skip random mutation if adjusted explicitly? Or allow both?
+                # Let's allow random mutation on top to explore around the bias.
+
+            # 2. Random Mutation
             if random.random() < self.mutation_rate:
                 current_val = genome.genes[gene]
 

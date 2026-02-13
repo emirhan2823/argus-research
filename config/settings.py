@@ -7,7 +7,8 @@ load_dotenv()
 BINGX_API_KEY = os.getenv("BINGX_API_KEY")
 BINGX_SECRET_KEY = os.getenv("BINGX_SECRET_KEY")
 EXCHANGE_ID = "bingx"
-SYMBOL = "XAU/USDT:USDT"  # Default Symbol (Gold Futures)
+SYMBOL = "XAU/USDT"  # Standardized Internal Symbol
+EXCHANGE_SYMBOL = "XAU/USDT:USDT" # Exchange Specific
 TIMEFRAME = "4h"
 
 # --- Risk Management Settings ("Survival First") ---

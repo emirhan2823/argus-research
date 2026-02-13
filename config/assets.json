@@ -1,0 +1,14 @@
+{
+    "assets": [
+        {
+            "symbol": "BTC/USDT",
+            "parquet_name": "BTC_USDT",
+            "exchange_symbol": "BTC/USDT:USDT"
+        },
+        {
+            "symbol": "XAU/USDT",
+            "parquet_name": "XAU_USDT",
+            "exchange_symbol": "XAU/USDT:USDT"
+        }
+    ]
+}
