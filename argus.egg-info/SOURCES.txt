@@ -1,0 +1,10 @@
+README.md
+setup.py
+argus.egg-info/PKG-INFO
+argus.egg-info/SOURCES.txt
+argus.egg-info/dependency_links.txt
+argus.egg-info/requires.txt
+argus.egg-info/top_level.txt
+tests/test_pnl_logic.py
+tests/test_risk_manager.py
+tests/test_strategy.py

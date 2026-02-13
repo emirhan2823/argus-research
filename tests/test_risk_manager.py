@@ -2,7 +2,6 @@ import unittest
 import sys
 import os
 
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 
 from src.core.risk_manager import RiskManager
 from config.settings import MAX_RISK_PER_TRADE, MAX_DAILY_LOSS, MAX_DRAWDOWN, LEVERAGE

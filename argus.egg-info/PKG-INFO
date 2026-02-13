@@ -1,0 +1,13 @@
+Metadata-Version: 2.4
+Name: argus
+Version: 2.5.0
+Requires-Dist: pandas
+Requires-Dist: numpy
+Requires-Dist: ccxt
+Requires-Dist: pandas_ta
+Requires-Dist: python-dotenv
+Requires-Dist: arch
+Requires-Dist: polars
+Requires-Dist: pyarrow
+Requires-Dist: scikit-learn
+Dynamic: requires-dist

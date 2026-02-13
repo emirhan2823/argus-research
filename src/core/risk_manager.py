@@ -2,7 +2,6 @@ import sys
 import os
 
 # Ensure we can import from config
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
 from config.settings import MAX_RISK_PER_TRADE, MAX_DAILY_LOSS, MAX_DRAWDOWN, LEVERAGE
 
@@ -74,3 +73,22 @@ class RiskManager:
         self.start_of_day_balance = self.current_balance
         self.daily_pnl = 0.0
         # In a real system, we'd sync this with the exchange daily reset time.
+
+    def calculate_kelly_size(self, win_prob: float, win_loss_ratio: float, confidence: float = 1.0) -> float:
+        """
+        Calculates position size using Fractional Kelly Criterion.
+        Size = Fractional * (W - (1-W)/R)
+        """
+        if win_loss_ratio == 0:
+            return 0.0
+
+        kelly_pct = win_prob - ((1 - win_prob) / win_loss_ratio)
+
+        # Safety Half-Kelly
+        safe_kelly = kelly_pct * 0.5
+
+        # Scale by Confidence
+        scaled_size = safe_kelly * confidence
+
+        # Ensure positive
+        return max(0.0, scaled_size)

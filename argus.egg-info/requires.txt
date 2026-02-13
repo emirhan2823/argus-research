@@ -1,0 +1,9 @@
+pandas
+numpy
+ccxt
+pandas_ta
+python-dotenv
+arch
+polars
+pyarrow
+scikit-learn

@@ -5,10 +5,10 @@ import pandas as pd
 from datetime import datetime
 
 # Ensure project root is in path
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 
 from src.data.exchange import ExchangeClient
 from src.core.risk_manager import RiskManager
+from src.core.microstructure import MicrostructureEngine
 from src.strategies.trend_following import TrendFollowingStrategy
 from config.settings import SYMBOL, TIMEFRAME
 
@@ -20,6 +20,7 @@ def main():
     # Set mock=True for safety during initial run. User can change this later.
     exchange = ExchangeClient(mock=True)
     risk_manager = RiskManager()
+    microstructure_engine = MicrostructureEngine()
     strategy = TrendFollowingStrategy(risk_manager)
 
     print("Components initialized. Starting loop...")
@@ -50,6 +51,12 @@ def main():
                 time.sleep(60)
                 continue
 
+            # 2.1 Update Microstructure (GARCH)
+            # Calculate returns for GARCH
+            if len(data) > 30:
+                returns = data['close'].pct_change().dropna()
+                microstructure_engine.update_volatility_async(returns)
+
             # 3. Update Indicators
             data = strategy.calculate_indicators(data)
 
@@ -63,19 +70,25 @@ def main():
 
                 # 5. Risk Check
                 if risk_manager.check_trade_allowed():
-                    position_size = risk_manager.calculate_position_size(
+                    base_size = risk_manager.calculate_position_size(
                         entry_price, stop_loss, balance
                     )
 
-                    if position_size > 0:
-                        print(f"Executing {signal.upper()} | Size: {position_size:.4f} | Entry: {entry_price} | SL: {stop_loss}")
+                    # 5.1 Apply Volatility Guard
+                    safe_size = microstructure_engine.volatility_guard(base_size, microstructure_engine.latest_vol_forecast)
+
+                    if safe_size < base_size:
+                        print(f"Volatility Guard Active: Reduced size from {base_size:.4f} to {safe_size:.4f}")
+
+                    if safe_size > 0:
+                        print(f"Executing {signal.upper()} | Size: {safe_size:.4f} | Entry: {entry_price} | SL: {stop_loss}")
 
                         # 6. Execute Order (Market Order with SL/TP)
                         # Note: For market orders, price is None.
                         # Some exchanges require SL/TP to be separate orders, but CCXT often unifies them.
                         order = exchange.create_order(
                             signal,
-                            position_size,
+                            safe_size,
                             type='market',
                             stop_loss=metadata['stop_loss'],
                             take_profit=metadata['take_profit']

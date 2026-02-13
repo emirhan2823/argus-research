@@ -5,7 +5,6 @@ import os
 import sys
 
 # Ensure we can import from config
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
 from config.settings import BINGX_API_KEY, BINGX_SECRET_KEY, SYMBOL, TIMEFRAME
 

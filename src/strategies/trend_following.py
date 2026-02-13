@@ -5,7 +5,6 @@ import sys
 import os
 
 # Ensure we can import from src
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
 from src.strategies.base_strategy import BaseStrategy
 from config.settings import EMA_SHORT_PERIOD, EMA_LONG_PERIOD, RSI_PERIOD, ATR_PERIOD, ATR_MULTIPLIER_SL, ATR_MULTIPLIER_TP
