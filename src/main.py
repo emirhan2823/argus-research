@@ -12,6 +12,7 @@ from src.core.risk_manager import RiskManager
 from src.core.microstructure import MicrostructureEngine
 from src.strategies.trend_following import TrendFollowingStrategy
 from src.connectors.bingx_websocket import BingXWebSocket
+from src.data.data_factory import DataFactory
 from config.settings import SYMBOL, TIMEFRAME
 
 async def run_bot():
@@ -24,6 +25,19 @@ async def run_bot():
     risk_manager = RiskManager()
     microstructure_engine = MicrostructureEngine()
     strategy = TrendFollowingStrategy(risk_manager)
+    data_factory = DataFactory()
+
+    # 0. Data Factory Initialization (Sync/Heal Data)
+    print("Initializing Data Factory...")
+    # Wrap exchange fetch in lambda to match signature
+    fetch_wrapper = lambda start_time: exchange.fetch_ohlcv(limit=1000, start_time=start_time)
+    # Use strategy's indicator calculation as feature function
+    feature_wrapper = lambda df: strategy.calculate_indicators(df)
+
+    # This might take time, ideally run in thread executor if heavy IO
+    # Returns LazyFrame
+    historical_data_lazy = data_factory.load_or_sync(SYMBOL, fetch_wrapper, feature_wrapper)
+    print("Data Factory synced.")
 
     # --- WebSocket Setup ---
     # Define Callbacks

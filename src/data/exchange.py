@@ -33,10 +33,11 @@ class ExchangeClient:
             self.exchange = None
             print("Exchange Client initialized in MOCK mode.")
 
-    def fetch_ohlcv(self, limit=1000):
+    def fetch_ohlcv(self, limit=1000, start_time: int = None):
         """
         Fetches historical OHLCV data.
         Returns a DataFrame with columns: open, high, low, close, volume.
+        start_time: Milliseconds UTC
         """
         if self.mock:
             # Generate dummy data for testing purposes if needed, or return empty DF
@@ -44,7 +45,7 @@ class ExchangeClient:
             return pd.DataFrame()
 
         try:
-            ohlcv = self.exchange.fetch_ohlcv(self.symbol, self.timeframe, limit=limit)
+            ohlcv = self.exchange.fetch_ohlcv(self.symbol, self.timeframe, limit=limit, since=start_time)
             df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
             df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
             df.set_index('timestamp', inplace=True)
