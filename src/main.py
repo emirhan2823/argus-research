@@ -3,8 +3,10 @@ import sys
 import os
 import pandas as pd
 from datetime import datetime
+from dotenv import load_dotenv
 
 # Ensure project root is in path
+load_dotenv()
 
 import asyncio
 from src.data.exchange import ExchangeClient
@@ -86,12 +88,27 @@ async def run_research_loop(data_factory, darwin, exchange, strategy, interval_h
         await loop.run_in_executor(None, run_sync_research_cycle, data_factory, darwin, exchange, strategy)
 
 async def run_bot(evolve_mode=False, live_mode=False):
+    # Load Environment Variables
+    env_mock_mode = os.getenv("USE_MOCK_MODE", "True").lower() == "true"
+
+    # Priority: Command Line Flag > Env Var > Default True
+    # If --live is passed, live_mode is True, so mock should be False.
+    # If --live is NOT passed, check ENV.
+
+    is_live = live_mode or (not env_mock_mode)
+    use_mock = not is_live
+
     print(f"--- Starting Hedge Fund Bot (Async) ---")
     print(f"Symbol: {SYMBOL}, Timeframe: {TIMEFRAME}")
-    print(f"Mode: {'LIVE' if live_mode else 'MOCK'}")
+    print(f"Mode: {'LIVE' if is_live else 'MOCK'}")
+
+    if is_live:
+        api_key = os.getenv("BINGX_API_KEY", "")
+        masked_key = f"{api_key[:4]}...{api_key[-4:]}" if len(api_key) > 8 else "********"
+        print(f"[Connection] Using Live API Key: {masked_key}")
 
     # Initialize Components
-    exchange = ExchangeClient(mock=not live_mode)
+    exchange = ExchangeClient(mock=use_mock)
     risk_manager = RiskManager()
     microstructure_engine = MicrostructureEngine()
     strategy = TrendFollowingStrategy(risk_manager)
