@@ -6,14 +6,16 @@ from datetime import datetime
 
 # Ensure project root is in path
 
+import asyncio
 from src.data.exchange import ExchangeClient
 from src.core.risk_manager import RiskManager
 from src.core.microstructure import MicrostructureEngine
 from src.strategies.trend_following import TrendFollowingStrategy
+from src.connectors.bingx_websocket import BingXWebSocket
 from config.settings import SYMBOL, TIMEFRAME
 
-def main():
-    print(f"--- Starting Hedge Fund Bot ---")
+async def run_bot():
+    print(f"--- Starting Hedge Fund Bot (Async) ---")
     print(f"Symbol: {SYMBOL}, Timeframe: {TIMEFRAME}")
 
     # Initialize Components
@@ -22,6 +24,28 @@ def main():
     risk_manager = RiskManager()
     microstructure_engine = MicrostructureEngine()
     strategy = TrendFollowingStrategy(risk_manager)
+
+    # --- WebSocket Setup ---
+    # Define Callbacks
+    async def on_depth_update(bids, asks):
+        # Update OBI (Order Book Imbalance)
+        # This function must be lightweight or offloaded
+        pass
+        # For full implementation, we would call microstructure_engine.update_obi(bids, asks)
+
+    async def on_kline_update(close_price):
+        # Trigger GARCH Update
+        # Ideally, accumulate returns and update periodically
+        pass
+
+    ws_client = BingXWebSocket(
+        symbol=SYMBOL,
+        callback_depth=on_depth_update,
+        callback_kline=on_kline_update
+    )
+
+    # Start WS in background
+    asyncio.create_task(ws_client.connect())
 
     print("Components initialized. Starting loop...")
 
@@ -41,14 +65,14 @@ def main():
                 # Logic to manage exit could go here (e.g., Trailing Stop)
                 # For now, we skip new entries if a position is open
                 print("Skipping entry logic due to open position.")
-                time.sleep(60)
+                await asyncio.sleep(60)
                 continue
 
-            # 2. Fetch Data
+            # 2. Fetch Data (REST Fallback / Historical)
             data = exchange.fetch_ohlcv(limit=300)
             if data.empty:
                 print("No data received. Retrying in 60s...")
-                time.sleep(60)
+                await asyncio.sleep(60)
                 continue
 
             # 2.1 Update Microstructure (GARCH)
@@ -106,12 +130,17 @@ def main():
 
             # Sleep before next cycle (e.g., 1 minute)
             print("Sleeping for 60 seconds...")
-            time.sleep(60)
+            await asyncio.sleep(60)
 
-    except KeyboardInterrupt:
+    except asyncio.CancelledError:
         print("\nBot stopped by user.")
+        await ws_client.stop()
     except Exception as e:
         print(f"\nCritical Error: {e}")
+        await ws_client.stop()
 
 if __name__ == "__main__":
-    main()
+    try:
+        asyncio.run(run_bot())
+    except KeyboardInterrupt:
+        pass
