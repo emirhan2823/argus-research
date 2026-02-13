@@ -113,3 +113,19 @@ class ExchangeClient:
         except Exception as e:
             print(f"Error fetching positions: {e}")
             return []
+
+    def fetch_closed_trades(self, since: int = None):
+        """
+        Fetches closed trades (for Reflector analysis).
+        since: Timestamp in ms
+        """
+        if self.mock:
+            return []
+
+        try:
+            # fetch_my_trades or fetch_closed_orders depending on exchange support
+            trades = self.exchange.fetch_my_trades(self.symbol, since=since)
+            return trades
+        except Exception as e:
+            print(f"Error fetching closed trades: {e}")
+            return []
