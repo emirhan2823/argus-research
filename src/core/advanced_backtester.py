@@ -40,15 +40,21 @@ class AdvancedBacktester:
             test_start = i * fold_size
             test_end = (i + 1) * fold_size
 
-            # For Darwin Engine, we typically evaluate on the specific fold or whole history depending on design.
-            # Here we simulate metric calculation.
+            # Define Test Indices
+            test_indices = indices[test_start:test_end]
+
+            # Define Train Indices (All except test block +/- embargo)
+            # Purging: Remove data overlapping with test
+            # Embargo: Remove data immediately following test to prevent leakage from trade overlap
+            train_mask = (indices < test_start) | (indices > test_end + embargo_size)
+            train_indices = indices[train_mask]
 
             # Run Strategy Logic
             if strategy_genome:
                 metrics = self._run_vectorized_strategy(strategy_genome, train_indices, test_indices)
                 results.append(metrics)
             else:
-                results.append({"fold": i, "train_len": 0, "test_len": 0})
+                results.append({"fold": i, "train_len": len(train_indices), "test_len": len(test_indices)})
 
         if strategy_genome:
             # Average metrics across folds

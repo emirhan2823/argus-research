@@ -1,40 +1,48 @@
 {
-    "XAU/USDT": {
-        "id": "gen_82211",
-        "genes": {
-            "ema_short": 70,
-            "ema_long": 113,
-            "rsi_period": 7,
-            "rsi_upper": 63,
-            "rsi_lower": 16,
-            "sl_atr_mult": 4.849328872848937,
-            "tp_atr_mult": 8.743209763386554,
-            "use_rsi": 1,
-            "use_macd": 1,
-            "use_bollinger": 0,
-            "bb_period": 18,
-            "bb_std": 1.8595222591312421
-        },
-        "fitness": 0.0,
-        "metrics": {}
-    },
     "BTC/USDT": {
-        "id": "gen_428268",
+        "id": "gen_248913",
         "genes": {
-            "ema_short": 79,
-            "ema_long": 236,
-            "rsi_period": 30,
-            "rsi_upper": 67,
-            "rsi_lower": 22,
-            "sl_atr_mult": 4.727289628913345,
-            "tp_atr_mult": 6.463349488021375,
+            "ema_short": 60,
+            "ema_long": 200,
+            "rsi_period": 19,
+            "rsi_upper": 87,
+            "rsi_lower": 26,
+            "sl_atr_mult": 4.088509815944737,
+            "tp_atr_mult": 5.663610597311962,
             "use_rsi": 0,
             "use_macd": 1,
-            "use_bollinger": 0,
-            "bb_period": 21,
-            "bb_std": 1.9010202416179998
+            "use_bollinger": 1,
+            "bb_period": 41,
+            "bb_std": 2.49128356560625
         },
-        "fitness": 1.0,
-        "metrics": {}
+        "fitness": 0.0,
+        "metrics": {
+            "sharpe": 6.084705848660594,
+            "cagr": 0.2,
+            "max_drawdown": 5.404661042830099
+        }
+    },
+    "XAU/USDT": {
+        "id": "gen_954060",
+        "genes": {
+            "ema_short": 52,
+            "ema_long": 271,
+            "rsi_period": 26,
+            "rsi_upper": 85,
+            "rsi_lower": 36,
+            "sl_atr_mult": 4.445772353611573,
+            "tp_atr_mult": 1.8955167749139643,
+            "use_rsi": 0,
+            "use_macd": 0,
+            "use_bollinger": 1,
+            "bb_period": 26,
+            "bb_std": 2.134384644778679
+        },
+        "fitness": 0.0,
+        "metrics": {
+            "sharpe": 6.005562342711674,
+            "cagr": 0.2,
+            "max_drawdown": 5.447953792475772
+        }
     }
 }
