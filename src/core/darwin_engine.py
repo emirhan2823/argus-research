@@ -1,8 +1,10 @@
 import numpy as np
 import random
 import concurrent.futures
-from dataclasses import dataclass, field
-from typing import List, Dict, Callable, Optional
+import json
+import os
+from dataclasses import dataclass, field, asdict
+from typing import List, Dict, Callable, Optional, Union
 import copy
 
 @dataclass
@@ -28,57 +30,93 @@ class Genome:
                 genes[name] = random.uniform(min_val, max_val)
         return cls(id=f"gen_{random.randint(0, 1000000)}", genes=genes)
 
+    def to_dict(self):
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data):
+        return cls(**data)
+
 class DarwinEngine:
     """
     Evolutionary Optimization Engine.
+    Supports Multi-Asset Populations (Islands).
     """
     def __init__(self,
                  population_size: int = 64,
                  mutation_rate: float = 0.1,
                  crossover_rate: float = 0.5,
-                 max_drawdown_limit: float = 0.15):
+                 max_drawdown_limit: float = 0.15,
+                 champions_file: str = "data/champions.json"):
         self.pop_size = population_size
         self.mutation_rate = mutation_rate
         self.crossover_rate = crossover_rate
         self.max_dd_limit = max_drawdown_limit
+        self.champions_file = champions_file
 
         # Default Gene Config (Strategy Parameters)
+        # Expanded for Dynamic Indicator Search
         self.gene_ranges = {
             'ema_short': (10, 100),
             'ema_long': (100, 300),
-            'rsi_period': (7, 21),
+            'rsi_period': (7, 30),
             'rsi_upper': (60, 90),
             'rsi_lower': (10, 40),
             'sl_atr_mult': (1.0, 5.0),
-            'tp_atr_mult': (1.5, 10.0)
+            'tp_atr_mult': (1.5, 10.0),
+            # New Genes
+            'use_rsi': (0, 1),       # Binary: 0 or 1
+            'use_macd': (0, 1),      # Binary
+            'use_bollinger': (0, 1), # Binary
+            'bb_period': (10, 50),
+            'bb_std': (1.5, 3.0)
         }
 
-        self.population: List[Genome] = []
-        self.generation = 0
+        # Multi-Asset Populations: {symbol: List[Genome]}
+        self.populations: Dict[str, List[Genome]] = {}
+        self.generations: Dict[str, int] = {}
 
-    def initialize_population(self):
+    def register_asset(self, symbol: str):
         """
-        Generates initial random population.
+        Initializes a population for a specific asset.
         """
-        self.population = [Genome.random(self.gene_ranges) for _ in range(self.pop_size)]
+        if symbol not in self.populations:
+            self.populations[symbol] = [Genome.random(self.gene_ranges) for _ in range(self.pop_size)]
+            self.generations[symbol] = 0
+            print(f"Registered asset: {symbol} with random population.")
 
-    def evaluate_population(self, backtest_func: Callable):
+    def evaluate_population(self, backtest_func: Callable, specific_symbol: str = None):
         """
         Runs backtests in parallel.
-        backtest_func: Function that takes a Genome and returns metrics dict.
+        If specific_symbol is provided, only evaluates that asset.
+        Otherwise evaluates ALL assets.
+        backtest_func: Function that takes (Genome, Symbol) and returns metrics dict.
         """
+        tasks = []
+
+        target_symbols = [specific_symbol] if specific_symbol else list(self.populations.keys())
+
+        for sym in target_symbols:
+            if sym not in self.populations: continue
+            for genome in self.populations[sym]:
+                tasks.append((genome, sym))
+
         with concurrent.futures.ProcessPoolExecutor() as executor:
-            # Map genomes to futures
-            future_to_genome = {executor.submit(backtest_func, genome): genome for genome in self.population}
+            # Map (genome, symbol) to futures
+            # Note: backtest_func needs to handle the tuple or we wrap it
+            future_to_genome = {
+                executor.submit(backtest_func, genome, symbol): (genome, symbol)
+                for genome, symbol in tasks
+            }
 
             for future in concurrent.futures.as_completed(future_to_genome):
-                genome = future_to_genome[future]
+                genome, symbol = future_to_genome[future]
                 try:
                     metrics = future.result()
                     genome.metrics = metrics
                     genome.fitness = self.calculate_fitness(metrics)
                 except Exception as e:
-                    print(f"Backtest Error for {genome.id}: {e}")
+                    print(f"Backtest Error for {genome.id} on {symbol}: {e}")
                     genome.fitness = 0.0
 
     def calculate_fitness(self, metrics: Dict[str, float]) -> float:
@@ -99,26 +137,36 @@ class DarwinEngine:
 
         return max(0.0, score) # No negative fitness
 
-    def evolve(self):
+    def evolve(self, specific_symbol: str = None):
         """
-        Creates the next generation.
+        Creates the next generation for each asset's population.
         """
-        sorted_pop = sorted(self.population, key=lambda x: x.fitness, reverse=True)
+        target_symbols = [specific_symbol] if specific_symbol else list(self.populations.keys())
 
-        # Elitism: Keep top 2
-        next_gen = sorted_pop[:2]
+        for sym in target_symbols:
+            if sym not in self.populations: continue
 
-        while len(next_gen) < self.pop_size:
-            parent_a = self._tournament_selection(self.population)
-            parent_b = self._tournament_selection(self.population)
+            pop = self.populations[sym]
+            sorted_pop = sorted(pop, key=lambda x: x.fitness, reverse=True)
 
-            child = self._crossover(parent_a, parent_b)
-            self._mutate(child)
+            # Elitism: Keep top 2
+            next_gen = sorted_pop[:2]
 
-            next_gen.append(child)
+            while len(next_gen) < self.pop_size:
+                parent_a = self._tournament_selection(pop)
+                parent_b = self._tournament_selection(pop)
 
-        self.population = next_gen
-        self.generation += 1
+                child = self._crossover(parent_a, parent_b)
+                self._mutate(child)
+
+                next_gen.append(child)
+
+            self.populations[sym] = next_gen
+            self.generations[sym] += 1
+            print(f"[{sym}] Evolved to Generation {self.generations[sym]}. Best Fitness: {sorted_pop[0].fitness:.4f}")
+
+        # Auto-save champions after evolution
+        self.save_champions()
 
     def _tournament_selection(self, pop: List[Genome], k: int = 4) -> Genome:
         """
@@ -150,8 +198,12 @@ class DarwinEngine:
 
                 # Apply Jitter
                 if isinstance(min_val, int):
-                    jitter = random.randint(-2, 2)
-                    new_val = int(current_val + jitter)
+                    # For binary flags (0, 1), flip it
+                    if min_val == 0 and max_val == 1:
+                        new_val = 1 - int(current_val)
+                    else:
+                        jitter = random.randint(-2, 2)
+                        new_val = int(current_val + jitter)
                 else:
                     jitter = random.gauss(0, (max_val - min_val) * 0.05) # 5% StdDev
                     new_val = current_val + jitter
@@ -159,3 +211,40 @@ class DarwinEngine:
                 # Clamp
                 new_val = max(min_val, min(new_val, max_val))
                 genome.genes[gene] = new_val
+
+    def save_champions(self):
+        """
+        Saves the best genome for each asset to a JSON file.
+        """
+        champions = {}
+        for sym, pop in self.populations.items():
+            if not pop: continue
+            best = max(pop, key=lambda x: x.fitness)
+            champions[sym] = best.to_dict()
+
+        try:
+            os.makedirs(os.path.dirname(self.champions_file), exist_ok=True)
+            with open(self.champions_file, 'w') as f:
+                json.dump(champions, f, indent=4)
+        except Exception as e:
+            print(f"Failed to save champions: {e}")
+
+    def load_champions(self):
+        """
+        Loads champions from file and injects them into populations.
+        """
+        if not os.path.exists(self.champions_file):
+            return
+
+        try:
+            with open(self.champions_file, 'r') as f:
+                data = json.load(f)
+
+            for sym, genome_dict in data.items():
+                champion = Genome.from_dict(genome_dict)
+                self.register_asset(sym) # Ensure population exists
+                # Inject champion at index 0 (Elitism)
+                self.populations[sym][0] = champion
+                print(f"[{sym}] Loaded Champion: {champion.id} (Fitness: {champion.fitness:.2f})")
+        except Exception as e:
+            print(f"Failed to load champions: {e}")

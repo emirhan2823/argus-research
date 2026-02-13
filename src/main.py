@@ -13,6 +13,7 @@ from src.core.microstructure import MicrostructureEngine
 from src.strategies.trend_following import TrendFollowingStrategy
 from src.connectors.bingx_websocket import BingXWebSocket
 from src.data.data_factory import DataFactory
+from src.core.darwin_engine import DarwinEngine
 from config.settings import SYMBOL, TIMEFRAME
 
 async def run_bot():
@@ -26,6 +27,11 @@ async def run_bot():
     microstructure_engine = MicrostructureEngine()
     strategy = TrendFollowingStrategy(risk_manager)
     data_factory = DataFactory()
+
+    # Initialize Darwin Engine (Evolution)
+    darwin = DarwinEngine()
+    darwin.register_asset(SYMBOL)
+    darwin.load_champions() # Load learnt parameters
 
     # 0. Data Factory Initialization (Sync/Heal Data)
     print("Initializing Data Factory...")
