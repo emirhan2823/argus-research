@@ -1,0 +1,48 @@
+{
+    "BTC/USDT": {
+        "id": "gen_55317",
+        "genes": {
+            "ema_short": 76,
+            "ema_long": 250,
+            "rsi_period": 17,
+            "rsi_upper": 82,
+            "rsi_lower": 33,
+            "sl_atr_mult": 3.4557091813158727,
+            "tp_atr_mult": 5.91562438179026,
+            "use_rsi": 0,
+            "use_macd": 1,
+            "use_bollinger": 0,
+            "bb_period": 27,
+            "bb_std": 1.7936181218748484
+        },
+        "fitness": 2.877292003741935,
+        "metrics": {
+            "sharpe": 1.5351612507487435,
+            "cagr": 0.2,
+            "max_drawdown": 0.07860609955111049
+        }
+    },
+    "XAU/USDT": {
+        "id": "gen_158296",
+        "genes": {
+            "ema_short": 16,
+            "ema_long": 191,
+            "rsi_period": 30,
+            "rsi_upper": 62,
+            "rsi_lower": 24,
+            "sl_atr_mult": 3.81798015141081,
+            "tp_atr_mult": 8.732863537636653,
+            "use_rsi": 0,
+            "use_macd": 0,
+            "use_bollinger": 1,
+            "bb_period": 11,
+            "bb_std": 2.9828210840463445
+        },
+        "fitness": 2.5658048013521664,
+        "metrics": {
+            "sharpe": 1.5024839607468838,
+            "cagr": 0.2,
+            "max_drawdown": 0.12783262402832032
+        }
+    }
+}
