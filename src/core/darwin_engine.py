@@ -158,7 +158,9 @@ class DarwinEngine:
                 parent_a = self._tournament_selection(pop)
                 parent_b = self._tournament_selection(pop)
 
-                child = self._crossover(parent_a, parent_b)
+                # Pass current generation count for ID generation
+                current_gen = self.generations[sym]
+                child = self._crossover(parent_a, parent_b, current_gen)
                 self._mutate(child, adjustment_vector)
 
                 next_gen.append(child)
@@ -177,7 +179,7 @@ class DarwinEngine:
         tournament = random.sample(pop, k)
         return max(tournament, key=lambda x: x.fitness)
 
-    def _crossover(self, parent_a: Genome, parent_b: Genome) -> Genome:
+    def _crossover(self, parent_a: Genome, parent_b: Genome, generation_index: int) -> Genome:
         """
         Uniform Crossover.
         """
@@ -188,7 +190,8 @@ class DarwinEngine:
             else:
                 child_genes[gene] = parent_b.genes[gene]
 
-        return Genome(id=f"gen_{self.generation}_child_{random.randint(0, 100000)}", genes=child_genes)
+        # Use provided generation index for ID
+        return Genome(id=f"gen_{generation_index}_child_{random.randint(0, 100000)}", genes=child_genes)
 
     def _mutate(self, genome: Genome, adjustment_vector: Dict[str, float] = None):
         """
