@@ -6,6 +6,7 @@ import os
 import time
 from typing import List, Callable, Optional
 from datetime import datetime, timedelta
+from src.core.integrity_manager import IntegrityManager
 
 class DataFactory:
     """
@@ -15,6 +16,7 @@ class DataFactory:
     def __init__(self, data_dir: str = "data/time_machine"):
         self.data_dir = data_dir
         os.makedirs(data_dir, exist_ok=True)
+        self.integrity_manager = IntegrityManager()
 
     def get_parquet_path(self, symbol: str) -> str:
         safe_symbol = symbol.replace("/", "_").replace(":", "_")
@@ -102,7 +104,28 @@ class DataFactory:
             except Exception as e:
                 print(f"Feature Generation Failed: {e}")
 
+        # 3.1 Integrity Check (Post-Healing)
+        if not df.is_empty():
+            # Check for Gaps
+            gaps = self.integrity_manager.analyze_gaps(df)
+            if gaps:
+                print(f"[{symbol}] WARNING: {len(gaps)} remaining gaps detected.")
+                # Could log to specific report file
+
+            # Check for Outliers
+            # Only on recent data for speed, or full dataset if small
+            # For HFT, we scan everything if possible, or last day
+            # Here we demonstrate full scan as it's Polars (fast)
+            df = self.integrity_manager.detect_and_flag_outliers(df)
+
+            # Optional: Cross-Check if implemented async (requires await, skipped in sync flow for now)
+            # Would be ideal to have an async sync method.
+
         # 4. Return LazyFrame
+        # If we modified df (outlier flagging), we should save it first?
+        # Yes, save the clean version with flags
+        df.write_parquet(path)
+
         return pl.scan_parquet(path)
 
     def _fetch_data(self, fetch_func: Callable, start_time: int) -> pl.DataFrame:
