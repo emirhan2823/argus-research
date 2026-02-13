@@ -149,6 +149,72 @@ class AdvancedBacktester:
 
         return results
 
+    def extract_trades(self, genome):
+        """
+        Runs strategy on full dataset and returns list of TradeRecord objects.
+        Required for Autopsy/Reflector.
+        """
+        from src.core.reflector import TradeRecord
+
+        # Load all data
+        df = self.data_lazy.collect()
+        if df.height < 50:
+            return []
+
+        # Indicators
+        short_p = int(genome.genes.get('ema_short', 20))
+        long_p = int(genome.genes.get('ema_long', 50))
+        sl_mult = float(genome.genes.get('sl_atr_mult', 2.0))
+        tp_mult = float(genome.genes.get('tp_atr_mult', 4.0))
+
+        df = df.with_columns([
+            pl.col("close").ewm_mean(span=short_p, adjust=False).alias("ema_short"),
+            pl.col("close").ewm_mean(span=long_p, adjust=False).alias("ema_long"),
+            (pl.col("high") - pl.col("low")).rolling_mean(14).alias("atr")
+        ])
+
+        # Signal: 1 (Long), 0 (Flat)
+        df = df.with_columns(
+            pl.when(pl.col("ema_short") > pl.col("ema_long")).then(1)
+            .otherwise(0)
+            .alias("signal")
+        )
+
+        # Identify Signal Changes
+        # change = 1 (Buy), -1 (Sell/Exit)
+        events = df.select(["timestamp", "close", "signal", "atr"]).with_columns(
+            (pl.col("signal") - pl.col("signal").shift(1)).fill_null(0).alias("change")
+        ).filter(pl.col("change") != 0).to_dicts()
+
+        trades = []
+        current_entry = None
+
+        for e in events:
+            ts = e['timestamp']
+            price = e['close']
+            atr = e['atr'] if e['atr'] is not None else price * 0.01 # Fallback
+
+            if e['change'] == 1:
+                current_entry = e
+            elif e['change'] == -1 and current_entry:
+                entry_price = current_entry['close']
+                entry_atr = current_entry['atr'] if current_entry['atr'] is not None else entry_price * 0.01
+
+                # Construct Trade Record
+                pnl = price - entry_price
+                tr = TradeRecord(
+                    id=f"t_{ts}", symbol="BACKTEST", direction="LONG",
+                    entry_time=current_entry['timestamp'], exit_time=ts,
+                    entry_price=entry_price, exit_price=price,
+                    stop_loss=entry_price - (entry_atr * sl_mult),
+                    take_profit=entry_price + (entry_atr * tp_mult),
+                    pnl=pnl
+                )
+                trades.append(tr)
+                current_entry = None
+
+        return trades
+
     def simulate_execution(self, side: str, size: float, l2_snapshot: dict, base_slippage_bps: float = 5.0) -> float:
         """
         Simulates walking the order book to fill 'size'.

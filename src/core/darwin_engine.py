@@ -138,10 +138,11 @@ class DarwinEngine:
 
         return max(0.0, score) # No negative fitness
 
-    def evolve(self, specific_symbol: str = None, adjustment_vector: Dict[str, float] = None):
+    def evolve(self, specific_symbol: str = None, adjustment_vector: Dict[str, float] = None, reflector_callback: Callable = None):
         """
         Creates the next generation for each asset's population.
         adjustment_vector: Optional dict to bias mutations (e.g., from Reflector).
+        reflector_callback: Optional function(genome, symbol) to trigger if fitness is 0 (Survival Failure).
         """
         target_symbols = [specific_symbol] if specific_symbol else list(self.populations.keys())
 
@@ -150,6 +151,20 @@ class DarwinEngine:
 
             pop = self.populations[sym]
             sorted_pop = sorted(pop, key=lambda x: x.fitness, reverse=True)
+
+            # Autopsy Trigger: Check for Survival Failures (Fitness = 0)
+            if reflector_callback:
+                failures = [g for g in pop if g.fitness == 0.0]
+                if failures:
+                    print(f"[{sym}] {len(failures)} Genomes Failed Survival. Triggering Autopsy...")
+                    # Analyze the worst failure (or random one) to get adjustment
+                    # Ideally we analyze all, but for speed let's just do one if adjustment_vector is missing
+                    if not adjustment_vector:
+                        worst_failure = failures[0] # Since 0 is equal, pick first
+                        new_adj = reflector_callback(worst_failure, sym)
+                        if new_adj:
+                            print(f"[{sym}] Autopsy generated adjustment: {new_adj}")
+                            adjustment_vector = new_adj
 
             # Elitism: Keep top 2
             next_gen = sorted_pop[:2]
