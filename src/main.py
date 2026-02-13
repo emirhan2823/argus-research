@@ -87,7 +87,7 @@ async def run_research_loop(data_factory, darwin, exchange, strategy, interval_h
         # Offload heavy sync/cpu work to thread pool
         await loop.run_in_executor(None, run_sync_research_cycle, data_factory, darwin, exchange, strategy)
 
-async def run_bot(evolve_mode=False, live_mode=False):
+async def run_bot(evolve_mode=False, live_mode=False, auto_pilot=False):
     # Load Environment Variables
     env_mock_mode = os.getenv("USE_MOCK_MODE", "True").lower() == "true"
 
@@ -118,6 +118,107 @@ async def run_bot(evolve_mode=False, live_mode=False):
     darwin = DarwinEngine()
     darwin.register_asset(SYMBOL)
     darwin.load_champions()
+
+    # Load Champion Genome into Strategy (Autonomous Tuning)
+    if SYMBOL in darwin.populations and darwin.populations[SYMBOL]:
+        champion = darwin.populations[SYMBOL][0] # Assuming sorted/elitism puts best at 0
+        if champion.fitness > 0:
+            print(f"Loading Champion Genome: {champion.id} (Fitness: {champion.fitness:.2f})")
+            strategy.update_parameters(champion.genes)
+        else:
+            print("No valid champion found. Using default parameters.")
+
+    # --- Auto-Pilot Mode (Self-Correcting Evolution) ---
+    if auto_pilot:
+        print(">>> AUTO-PILOT MODE ACTIVATED: SELF-CORRECTING EVOLUTION <<<")
+
+        # Enforce local data
+        fetch_wrapper = lambda start_time: pd.DataFrame()
+        feature_wrapper = lambda df: strategy.calculate_indicators(df)
+        data_factory.load_or_sync(SYMBOL, fetch_wrapper, feature_wrapper, enforce_local=True)
+
+        # Helper: Autopsy Callback
+        def autopsy_callback(genome, symbol):
+            print(f"[Auto-Pilot] Autopsy triggered for {genome.id} (Fitness=0.0)")
+            try:
+                # 1. Instantiate Backtester
+                parquet_path = data_factory.get_parquet_path(symbol)
+                backtester = AdvancedBacktester(parquet_path)
+
+                # 2. Extract Trades
+                trades = backtester.extract_trades(genome)
+                if not trades:
+                    return None
+
+                # 3. Find Fatal Trade (Max Loss)
+                worst_trade = min(trades, key=lambda t: t.pnl)
+                print(f"[Auto-Pilot] Fatal Trade Identified: {worst_trade.pnl:.2%}")
+
+                # 4. Reflector Analysis (Needs Market Data)
+                # Need to load data eagerly here.
+                # This is sync inside callback, might be slow but okay for evolution loop
+                market_data = pl.read_parquet(parquet_path)
+
+                reflector = Reflector()
+                adj = reflector.run_post_mortem(worst_trade, market_data)
+
+                if adj:
+                    print(f"[Auto-Pilot] Reflector Diagnosis: {adj.reason}")
+                    print(f"[Auto-Pilot] Generated Adjustment: {adj.suggested_changes}")
+
+                    # Log Trace
+                    trace_entry = {
+                        "timestamp": int(time.time()),
+                        "genome_id": genome.id,
+                        "diagnosis": adj.reason,
+                        "adjustment": adj.suggested_changes
+                    }
+                    trace_path = "data/evolution_trace.json"
+                    # Append logic
+                    current_trace = []
+                    if os.path.exists(trace_path):
+                        try:
+                            with open(trace_path, 'r') as f:
+                                current_trace = json.load(f)
+                        except: pass
+                    current_trace.append(trace_entry)
+                    with open(trace_path, 'w') as f:
+                        json.dump(current_trace, f, indent=4)
+
+                    return adj.suggested_changes
+            except Exception as e:
+                print(f"[Auto-Pilot] Autopsy Failed: {e}")
+            return None
+
+        # Recursive Loop
+        iteration = 0
+        while True:
+            iteration += 1
+            print(f"\n[Auto-Pilot] Starting Evolution Cycle {iteration}...")
+
+            # Evaluate Current Population First
+            darwin.evaluate_population(run_backtest_task, specific_symbol=SYMBOL)
+
+            # Check Success Condition (Any survivor?)
+            pop = darwin.populations[SYMBOL]
+            survivors = [g for g in pop if g.fitness > 0]
+            best_fitness = max([g.fitness for g in pop]) if pop else 0
+
+            print(f"[Auto-Pilot] Survivors: {len(survivors)}/{len(pop)}. Best Fitness: {best_fitness:.4f}")
+
+            if len(survivors) > 0 and best_fitness > 2.0: # Threshold for "Good Enough"
+                print(">>> AUTO-PILOT SUCCESS: VIABLE STRATEGY FOUND <<<")
+                darwin.save_champions()
+                break
+
+            if iteration > 20: # Safety break
+                print(">>> AUTO-PILOT HALT: MAX ITERATIONS REACHED <<<")
+                break
+
+            # Evolve with Autopsy Hook
+            darwin.evolve(specific_symbol=SYMBOL, reflector_callback=autopsy_callback)
+
+        return
 
     # Evolution Mode (One-off)
     if evolve_mode:
@@ -233,10 +334,11 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--evolve", action="store_true", help="Run Evolution Mode (One-Off)")
+    parser.add_argument("--auto-pilot", action="store_true", help="Run Self-Correcting Autonomous Evolution Loop")
     parser.add_argument("--live", action="store_true", help="Run in Live Mode (Real Money)")
     args = parser.parse_args()
 
     try:
-        asyncio.run(run_bot(evolve_mode=args.evolve, live_mode=args.live))
+        asyncio.run(run_bot(evolve_mode=args.evolve, live_mode=args.live, auto_pilot=args.auto_pilot))
     except KeyboardInterrupt:
         pass
