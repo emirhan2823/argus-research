@@ -1,14 +1,23 @@
-"""Historical OHLCV source orchestration with local-first evolve mode."""
+"""Historical OHLCV source orchestration with local-first evolve mode.
+
+Modes:
+    mock   - Existing behavior (exchange client or local fallback)
+    live   - REST fetch latest from exchange client
+    replay - Deterministic load from month-partitioned Parquet (data/binance/)
+"""
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 import pandas as pd
+
+_LOG = logging.getLogger(__name__)
 
 
 _OHLCV_ALIASES: dict[str, tuple[str, ...]] = {
@@ -89,6 +98,12 @@ class LocalDataProvider:
 class DataFactory:
     """Data source selector for backtest/live/evolve paths.
 
+    Modes:
+        "mock"   - (default) ExchangeClient first, local fallback.
+        "live"   - Same as mock; explicit alias for real-time data.
+        "replay" - Deterministic load from month-partitioned Parquet
+                   (data/binance/{SYMBOL}/{interval}/{YYYY-MM}.parquet).
+
     - In evolve mode, history is strictly loaded from LocalDataProvider.
     - In non-evolve mode, ExchangeClient is used first, then local fallback.
     """
@@ -98,12 +113,25 @@ class DataFactory:
     exchange_client: ExchangeClient | None = None
     local_provider: LocalDataProvider | None = None
     extreme_gap_floor: pd.Timedelta = pd.Timedelta(days=30)
+    mode: str = "mock"  # "mock" | "live" | "replay"
+    replay_root: Path | str = Path("data/binance")
     _frame_cache: dict[str, pd.DataFrame] = field(default_factory=dict)
     _cursor: dict[str, int] = field(default_factory=dict)
+    _replay_loader: Any = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         if self.local_provider is None:
             self.local_provider = LocalDataProvider(root=self.data_root)
+
+        # Lazily initialize replay loader when mode is "replay"
+        if self.mode == "replay" and self._replay_loader is None:
+            try:
+                from src.data.replay_loader import ReplayLoader
+                self._replay_loader = ReplayLoader(root=self.replay_root)
+                _LOG.info("DataFactory: replay mode enabled (root=%s)", self.replay_root)
+            except Exception as exc:
+                _LOG.warning("Failed to init ReplayLoader: %s. Falling back to mock.", exc)
+                self.mode = "mock"
 
     def reset_timeline(self, symbol: str) -> None:
         self._cursor[_symbol_key(symbol)] = 0
@@ -119,6 +147,20 @@ class DataFactory:
         if self.evolve:
             # In evolve mode never call exchange; we want deterministic local replay.
             return self._fetch_local(symbol=symbol, limit=limit, now=now, advance=True)
+
+        # Replay mode: deterministic load from month-partitioned Parquet
+        if self.mode == "replay" and self._replay_loader is not None:
+            try:
+                rows = self._replay_loader.load_ohlcv_rows(
+                    symbol=symbol,
+                    interval=timeframe,
+                    limit=limit,
+                    now=now,
+                )
+                if rows:
+                    return rows
+            except FileNotFoundError:
+                _LOG.debug("Replay data not found for %s/%s, falling back.", symbol, timeframe)
 
         if self.exchange_client is not None:
             remote = self.exchange_client.fetch_ohlcv(symbol=symbol, timeframe=timeframe, limit=limit)

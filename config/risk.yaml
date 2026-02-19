@@ -1,10 +1,10 @@
 risk:
   sizing:
-    base_risk_pct: 0.02
+    base_risk_pct: 0.015
     min_risk_pct: 0.005
-    max_risk_pct: 0.03
-    max_position_size: 0.15
-    max_leverage: 2.0
+    max_risk_pct: 0.025
+    max_position_size: 0.20
+    max_leverage: 3.0
 
   stop_loss:
     min_stop: 0.01
@@ -19,20 +19,20 @@ risk:
       phoenix_basis: 3.0
 
   drawdown:
-    dd_caution: 0.02
-    dd_defensive: 0.04
-    dd_halt: 0.06
-    dd_lockdown: 0.10
+    dd_caution: 0.015
+    dd_defensive: 0.03
+    dd_halt: 0.04
+    dd_lockdown: 0.08
     dd_multipliers:
-      below_2pct: 1.0
-      below_4pct: 0.5
-      below_6pct: 0.25
-      above_6pct: 0.0
+      below_1_5pct: 1.0
+      below_3pct: 0.5
+      below_4pct: 0.25
+      above_4pct: 0.0
 
   daily_limits:
-    soft_cap: -0.015
-    hard_cap: -0.025
-    max_trades: 15
+    soft_cap: -0.01
+    hard_cap: -0.015
+    max_trades: 30
 
   kill_switch:
     levels: [0, 1, 2, 3, 4]
@@ -42,12 +42,12 @@ risk:
       defensive_to_caution: 48
 
   guards:
-    correlation_max: 0.6
+    correlation_max: 0.5
     funding_settlement_blackout_min: 15
     weekend_size_mult: 0.5
-    consecutive_loss_cooldown: 3
+    consecutive_loss_cooldown: 5
     equity_curve_ma_period: 20
-    single_trade_max_loss: 0.03
+    single_trade_max_loss: 0.015
 
   portfolio_allocation:
     max_crypto_pct: 0.50
@@ -58,41 +58,42 @@ risk:
   # v2.5 Adaptive Growth Sizer
   growth_sizer:
     enabled: true
-    initial_capital: 500.0
-    hard_floor_pct: 0.60
-    conviction_min_alignment: 0.70
-    cold_streak_decay_rate: 0.15
+    initial_capital: 100.0
+    monthly_deposit: 100.0
+    hard_floor_pct: 0.55
+    conviction_min_alignment: 0.65
+    cold_streak_decay_rate: 0.12
     hard_floor_decay_steepness: 8.0
     phases:
       survival:
-        equity_range: [0, 2000]
-        kelly_fraction: 0.30
-        max_leverage: 1.0
-        max_risk_pct: 0.015
+        equity_range: [0, 500]
+        kelly_fraction: 0.40
+        max_leverage: 2.0
+        max_risk_pct: 0.02
         conviction_cap: 1.0
       foundation:
-        equity_range: [2000, 10000]
-        kelly_fraction: 0.50
-        max_leverage: 1.5
+        equity_range: [500, 2000]
+        kelly_fraction: 0.55
+        max_leverage: 2.5
         max_risk_pct: 0.025
         conviction_cap: 1.15
       growth:
-        equity_range: [10000, 50000]
-        kelly_fraction: 0.75
-        max_leverage: 2.0
-        max_risk_pct: 0.035
+        equity_range: [2000, 10000]
+        kelly_fraction: 0.70
+        max_leverage: 3.0
+        max_risk_pct: 0.03
         conviction_cap: 1.30
       acceleration:
-        equity_range: [50000, 200000]
-        kelly_fraction: 1.00
-        max_leverage: 2.5
-        max_risk_pct: 0.045
+        equity_range: [10000, 50000]
+        kelly_fraction: 0.85
+        max_leverage: 3.0
+        max_risk_pct: 0.03
         conviction_cap: 1.50
       compounding:
-        equity_range: [200000, 999999999]
-        kelly_fraction: 0.85
-        max_leverage: 2.0
-        max_risk_pct: 0.035
+        equity_range: [50000, 999999999]
+        kelly_fraction: 0.75
+        max_leverage: 2.5
+        max_risk_pct: 0.025
         conviction_cap: 1.20
 
   # v2.5 Darwin Evolution Engine
@@ -113,3 +114,22 @@ risk:
     underperformance_ratio: 0.30
     failure_lookback: 20
     micro_evolution_threshold: 5
+
+  # v2.5 Global Risk Caps
+  global_caps:
+    per_trade_risk_cap: 0.03
+    min_risk_pct: 0.005
+    max_position_size: 0.20
+    max_leverage_core: 3.0
+    max_leverage_accel: 3.0
+    max_leverage_global: 3.0
+
+  # v2.5 Fee Model
+  fee_model:
+    maker_fee_pct: 0.0002
+    taker_fee_pct: 0.0005
+    spread_estimate_pct: 0.0003
+    slippage_base_pct: 0.0002
+    slippage_per_10k: 0.0001
+    backtest_cost_mult: 2.0
+

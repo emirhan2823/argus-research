@@ -3,27 +3,42 @@
 from __future__ import annotations
 
 import argparse
+import json
+import logging
 import os
 import random
+import sqlite3
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Any
+from decimal import Decimal
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import pandas as pd
 
+# Allow direct script execution: `python src/main.py ...`
+if __package__ in (None, ""):
+    _PROJECT_ROOT = Path(__file__).resolve().parent.parent
+    if str(_PROJECT_ROOT) not in sys.path:
+        sys.path.insert(0, str(_PROJECT_ROOT))
+
 from src.core.clock import Clock
 from src.core.config import load_config
+from src.core.constants import ENGINE_PHOENIX, REGIME_CRISIS, REGIME_TO_ENGINE
 from src.core.events import EventBus, EventType
-from src.core.types import Decision, TelemetryEvent
+from src.core.types import Decision, EngineSignal, FeatureVector, RegimeState, TelemetryEvent
 from src.data.data_factory import DataFactory
 from src.data.sentinel.validator import SentinelInput, SentinelValidator
 from src.engines.atlas.risk_overlay import AtlasRiskOverlay
 from src.engines.hermes.engine import HermesEngine
+from src.engines.hydra.engine import HydraEngine
 from src.engines.nautilus.engine import NautilusEngine
 from src.engines.phoenix.engine import PhoenixEngine
 from src.engines.titan.engine import TitanEngine
 from src.execution.executor import Executor
+from src.execution.hermes_position_manager import HermesPositionManager
 from src.mde.gates import GateInput, evaluate_gates
 from src.mde.router import RegimeRouter
 from src.mde.sizing import SizingInput, compute_size
@@ -33,6 +48,17 @@ from src.regime.state_machine import RegimeStateMachine
 from src.risk.kill_switch import KillSwitch
 from src.risk.pre_trade import PreTradeChecker, PreTradeInput
 from src.telemetry.event_logger import EventLogger
+from src.v25.config.loader import DynamicExitConfig
+from src.v25.telemetry.log_writer import log_decision, log_dynamic_exit, log_validated_sizing, log_whale_momentum
+from src.engines.hermes.whale_momentum import (
+    compute_whale_momentum,
+    apply_whale_boost_to_signal,
+)
+from src.v25.contracts.intelligence import WhaleAlert
+from src.correlation.tracker import CorrelationTracker
+from src.correlation.signals import CorrelationSignalGenerator
+from src.engines.gemini.engine import GeminiEngine
+from src.mde.precision_filter import PrecisionConfig
 
 if TYPE_CHECKING:
     from src.data.features.builder import FeatureBuilder
@@ -52,6 +78,17 @@ class DemoBroker:
         }
 
 
+class ShadowNoopHermesBroker:
+    def close_position(self, *, symbol: str, reason: str) -> None:
+        return None
+
+    def modify_stop_loss(self, *, symbol: str, stop_price: float) -> None:
+        return None
+
+    def modify_take_profit(self, *, symbol: str, tp_price: float) -> None:
+        return None
+
+
 @dataclass
 class PipelineContext:
     mode: str
@@ -59,7 +96,21 @@ class PipelineContext:
     run_id: str
 
 
+@dataclass(frozen=True)
+class V25RoutedDecision:
+    action: str
+    confidence: float
+    sqs_score: float
+    stop_loss: float
+    take_profit: float
+    engine: str
+    reason: str
+    sub_strategy: str | None = None
+
+
 class ArgusPipeline:
+    _LOG = logging.getLogger("argus.pipeline")
+
     def __init__(
         self,
         *,
@@ -67,17 +118,48 @@ class ArgusPipeline:
         assets: list[str],
         evolve: bool = False,
         time_machine_dir: str = "data/time_machine",
+        data_mode: str | None = None,
+        replay_now: pd.Timestamp | None = None,
+        ohlcv_limit: int = 260,
+        v25_conn: sqlite3.Connection | None = None,
+        risk_profile: str = "normal",
+        allow_crisis: bool = False,
     ) -> None:
         self.clock = Clock(mode="live")
         self.config = load_config()
         self.event_bus = EventBus()
         self.ctx = PipelineContext(mode=mode, assets=assets, run_id=f"run-{int(datetime.now(timezone.utc).timestamp())}")
         self.evolve = evolve
+        self.replay_now = replay_now
+        self.ohlcv_limit = max(1, int(ohlcv_limit))
+        self.v25_conn = v25_conn
+        normalized_risk = str(risk_profile).strip().lower()
+        self.risk_profile = normalized_risk if normalized_risk in {"strict", "normal", "relaxed"} else "normal"
+        self.allow_crisis = bool(allow_crisis)
+        resolved_data_mode = (data_mode or os.getenv("ARGUS_DATA_MODE", "mock")).lower()
+        if replay_now is not None and resolved_data_mode == "mock":
+            resolved_data_mode = "replay"
         self.data_factory = DataFactory(
             data_root=time_machine_dir,
             evolve=evolve,
-            exchange_client=None,
+            mode=resolved_data_mode,
+            replay_root="data/binance",
+            exchange_client=self._init_exchange_client(evolve),
         )
+        self._replay_smoke_logged = False
+        if self.data_factory.mode == "replay":
+            self._LOG.debug(
+                "replay mode enabled: replay_now=%s limit=%d replay_root=%s",
+                self.replay_now.isoformat() if isinstance(self.replay_now, pd.Timestamp) else self.replay_now,
+                self.ohlcv_limit,
+                "data/binance",
+            )
+        # Track open positions for shadow dynamic exit
+        self._open_positions: dict[str, dict[str, Any]] = {}
+        # Whale alerts for momentum boost (populated by external data source)
+        self._whale_alerts: list[WhaleAlert] = []
+        # PR-J02: When True, dynamic exit intents are executed live via broker
+        self._live_exit_enabled: bool = False
 
         self.sentinel = SentinelValidator()
         self.feature_builder = self._init_feature_builder()
@@ -86,12 +168,17 @@ class ArgusPipeline:
         self.state_machines: dict[str, RegimeStateMachine] = {}
 
         self.hermes_engine = HermesEngine()
+        self.nautilus_engine = NautilusEngine()
+        # Initialize Gemini (correlation pairs engine) from config
+        self._gemini_engine, self._correlation_tracker = self._init_gemini_engine()
         self.router = RegimeRouter(
             engines={
                 "TITAN": TitanEngine(),
-                "NAUTILUS": NautilusEngine(),
+                "NAUTILUS": self.nautilus_engine,
                 "PHOENIX": PhoenixEngine(),
+                "HYDRA": HydraEngine(),
                 "HERMES": self.hermes_engine,
+                **({"GEMINI": self._gemini_engine} if self._gemini_engine else {}),
             }
         )
         self.atlas = AtlasRiskOverlay()
@@ -99,29 +186,56 @@ class ArgusPipeline:
         self.kill_switch = KillSwitch(db_path=runtime_db)
         self.pre_trade = PreTradeChecker()
         self.executor = Executor(broker=DemoBroker())
+        self._dynamic_exit_config = self._load_dynamic_exit_config()
+        self._precision_config = self._load_precision_config()
+        self.shadow_position_manager = HermesPositionManager(
+            broker=ShadowNoopHermesBroker(),
+            shadow_enabled=bool(self.config.engines.hermes.position_management.dynamic_exit_shadow_enabled),
+            shadow_noop_debug_sample_n=max(
+                int(self.config.engines.hermes.position_management.dynamic_exit_noop_debug_sample_n),
+                0,
+            ),
+            dynamic_exit_config=self._dynamic_exit_config,
+        )
         self.telemetry = EventLogger(sqlite_path=runtime_db)
 
-    def run_once(self) -> list[dict[str, Any]]:
+    def run_once(self, *, now: datetime | None = None) -> list[dict[str, Any]]:
         if self.feature_builder is None:
-            raise ModuleNotFoundError(
-                "pandas_ta is required for run_once() feature computation. "
-                "Install pandas_ta or skip integration tests with importorskip."
-            )
+            raise ModuleNotFoundError("Feature builder is unavailable")
 
         outputs: list[dict[str, Any]] = []
-        now = datetime.now(timezone.utc)
+        cycle_now = now or datetime.now(timezone.utc)
+        gate9_threshold = self._active_gate9_threshold()
 
         for asset_class in self.ctx.assets:
+            if self._live_exit_enabled:
+                self._run_live_dynamic_exit(asset_class=asset_class, now=cycle_now)
+            else:
+                self._run_shadow_dynamic_exit(asset_class=asset_class, now=cycle_now)
             for symbol in self._symbols_for_asset(asset_class):
-                candles = self._load_ohlcv(symbol=symbol, now=now)
+                candles = self._load_ohlcv(symbol=symbol, now=cycle_now)
                 last_close = float(candles["close"].iloc[-1])
+
+                # Feed candle data to NautilusEngine for range detection (micro-reversion)
+                self.nautilus_engine.feed_candles(
+                    symbol=symbol,
+                    highs=list(candles["high"].astype(float)),
+                    lows=list(candles["low"].astype(float)),
+                    closes=list(candles["close"].astype(float)),
+                )
+
+                # Update correlation tracker with latest prices for Gemini + chop_corr_gap
+                if self._correlation_tracker is not None:
+                    self._correlation_tracker.update(
+                        {symbol: candles["close"].astype(float)}
+                    )
 
                 # Step 1-2: data acquisition + sentinel
                 sentinel_report = self.sentinel.validate(
                     SentinelInput(
                         symbol=symbol,
                         asset_class=asset_class,
-                        last_candle_time=now - timedelta(minutes=20),
+                        last_candle_time=cycle_now - timedelta(minutes=20),
                         expected_interval=timedelta(hours=1),
                         current_price=last_close,
                         previous_prices=list(candles["close"].tail(30).values),
@@ -133,7 +247,7 @@ class ArgusPipeline:
                         orderbook_depth_pct=0.7 if asset_class == "crypto" else None,
                         funding_rate=0.0001 if asset_class == "crypto" else None,
                         normal_funding_rate=0.0001 if asset_class == "crypto" else None,
-                        now=now,
+                        now=cycle_now,
                     )
                 )
 
@@ -142,7 +256,7 @@ class ArgusPipeline:
                     df=candles,
                     symbol=symbol,
                     asset_class=asset_class,
-                    timestamp=now,
+                    timestamp=cycle_now,
                     spread_pct=0.001,
                     funding_rate=0.0001 if asset_class == "crypto" else None,
                     funding_pctile_30d=50.0 if asset_class == "crypto" else None,
@@ -151,6 +265,16 @@ class ArgusPipeline:
                     hermes_urgency="LOW",
                 ).feature_vector
                 if fv is None:
+                    self._reject(
+                        outputs=outputs,
+                        asset_class=asset_class,
+                        symbol=symbol,
+                        reason="feature_build_failed",
+                        engine="ROUTER",
+                        action="rejected",
+                        confidence=0.0,
+                        gate_results={"path": "run_once", "mode": self.ctx.mode},
+                    )
                     continue
 
                 # Step 5: regime
@@ -176,12 +300,128 @@ class ArgusPipeline:
                     direction=1,
                     rule_regime=rule_vote,
                     ml_regime=rule_vote,
-                    timestamp=now,
+                    timestamp=cycle_now,
                     hermes_override=consensus.regime if consensus.reason == "hermes_critical_override" else None,
                 )
 
-                # Step 6-7: routing + gates
-                signal = self.router.route(regime=regime_state, features=fv)
+                crisis_override_active = self._is_crisis_override_active(regime_state.regime)
+                base_gate_results: dict[str, Any] = {
+                    "path": "run_once",
+                    "mode": self.ctx.mode,
+                    "features_snapshot": {
+                        "regime": regime_state.regime,
+                    },
+                }
+                if crisis_override_active:
+                    base_gate_results["crisis_override"] = True
+
+                # Step 6: routing
+                try:
+                    signal = self.router.route(
+                        regime=regime_state,
+                        features=fv,
+                        allow_crisis_override=crisis_override_active,
+                    )
+                except Exception as exc:
+                    reject_engine = self._engine_hint_for_regime(regime_state.regime)
+                    self._reject(
+                        outputs=outputs,
+                        asset_class=asset_class,
+                        symbol=symbol,
+                        reason=self._annotate_reason(f"engine_error:{exc}", crisis_override=crisis_override_active),
+                        engine=reject_engine,
+                        action="rejected",
+                        confidence=0.0,
+                        gate_results=base_gate_results,
+                    )
+                    continue
+
+                # Step 6.5: signal quality assessment (NEW)
+                if signal is not None:
+                    from src.mde.signal_quality import assess_signal_quality
+                    sq = assess_signal_quality(
+                        bias=signal.bias,
+                        confidence=signal.confidence,
+                        engine=signal.engine,
+                        rsi_14=fv.rsi_14,
+                        adx_14=fv.adx_14,
+                        bb_pct_b=fv.bb_pct_b,
+                        volume_ratio=fv.volume_ratio,
+                        volume_delta=fv.volume_delta,
+                        ema_21_vs_55=fv.ema_21_vs_55,
+                        price_vs_ma200=fv.price_vs_ma200,
+                        roc_10=fv.roc_10,
+                        willr_14=fv.willr_14,
+                        cci_20=fv.cci_20,
+                        hurst_exponent=fv.hurst_exponent,
+                        aroon_osc=fv.aroon_osc,
+                        supertrend_dir=fv.supertrend_dir,
+                        orderbook_imbalance=fv.orderbook_imbalance,
+                        funding_rate=fv.funding_rate,
+                        long_short_ratio=fv.long_short_ratio,
+                        regime=regime_state.regime,
+                        candles_in_regime=regime_state.candles_in_regime,
+                        regime_confidence=regime_state.confidence,
+                    )
+                    if not sq.pass_quality:
+                        self._reject(
+                            outputs=outputs, asset_class=asset_class,
+                            symbol=symbol,
+                            reason=self._annotate_reason(
+                                f"signal_quality_too_low ({sq.quality_score:.2f})",
+                                crisis_override=crisis_override_active,
+                            ),
+                            engine=str(signal.engine),
+                            action="rejected",
+                            confidence=float(signal.confidence),
+                            gate_results=base_gate_results,
+                        )
+                        continue
+                    # Update confidence with quality-adjusted value
+                    signal = signal.model_copy(update={"confidence": sq.adjusted_confidence})
+
+                # Step 6.6: whale momentum boost (Blueprint Pivot 4)
+                if signal is not None:
+                    signal = self._apply_whale_momentum_boost(
+                        signal=signal,
+                        regime_state=regime_state,
+                        symbol=symbol,
+                        now=cycle_now,
+                    )
+
+                # Step 6.7: precision entry filter (Phase E)
+                if signal is not None:
+                    from src.mde.precision_filter import assess_entry_precision
+                    _prec = assess_entry_precision(
+                        direction=signal.bias,
+                        current_price=max(fv.atr_14 / max(fv.atr_14_pct, 1e-6), 1.0),
+                        obi=fv.orderbook_imbalance,
+                        spread_pct=fv.spread_pct,
+                        median_spread_pct=max(fv.spread_pct, 0.0005),  # fallback median
+                        vwap_dev_pct=fv.vwap_dev_pct,
+                        volume_ratio=fv.volume_ratio,
+                        atr_pct=fv.atr_14_pct,
+                        config=self._precision_config,
+                    )
+                    if not _prec.passed:
+                        self._reject(
+                            outputs=outputs, asset_class=asset_class,
+                            symbol=symbol,
+                            reason=self._annotate_reason(
+                                f"precision_grade_F ({_prec.score:.2f})",
+                                crisis_override=crisis_override_active,
+                            ),
+                            engine=str(signal.engine),
+                            action="rejected",
+                            confidence=float(signal.confidence),
+                            gate_results=base_gate_results,
+                        )
+                        continue
+                    # Apply confidence adjustment from precision grade
+                    _adj_conf = max(0.0, min(1.0, signal.confidence + _prec.confidence_adjustment))
+                    signal = signal.model_copy(update={"confidence": _adj_conf})
+
+                # Step 7: gates
                 gate_result = evaluate_gates(
                     GateInput(
                         sentinel_score=sentinel_report.score,
@@ -193,10 +433,30 @@ class ArgusPipeline:
                             sentiment_score=fv.hermes_sentiment_score,
                             urgency=fv.hermes_urgency,
                         ),
+                        allow_crisis_override=crisis_override_active,
                     )
                 )
                 if not gate_result.approved or signal is None:
-                    self._reject(outputs=outputs, asset_class=asset_class, symbol=symbol, reason=gate_result.reason)
+                    reject_engine = str(signal.engine) if signal is not None else "ROUTER"
+                    reject_confidence = float(signal.confidence) if signal is not None else 0.0
+                    gate_diag = dict(base_gate_results)
+                    gate_diag.update(
+                        {
+                            "gate": gate_result.gate_number,
+                            "gate_action": gate_result.action,
+                            "features_snapshot": gate_result.features_snapshot,
+                        }
+                    )
+                    self._reject(
+                        outputs=outputs,
+                        asset_class=asset_class,
+                        symbol=symbol,
+                        reason=self._annotate_reason(gate_result.reason, crisis_override=crisis_override_active),
+                        engine=reject_engine,
+                        action="rejected",
+                        confidence=reject_confidence,
+                        gate_results=gate_diag,
+                    )
                     continue
 
                 # Step 8: risk + sizing
@@ -220,19 +480,42 @@ class ArgusPipeline:
                         hermes_mult=1.0,
                     )
                 )
+                position_size_pct = float(size.position_size)
+                if crisis_override_active:
+                    position_size_pct = min(position_size_pct, 0.02)
+
                 pre = self.pre_trade.check(
                     PreTradeInput(
                         asset_class=asset_class,
-                        position_size=size.position_size,
+                        position_size=position_size_pct,
                         leverage=1.0,
                         trades_today=0,
                         stop_loss=signal.stop_distance,
                         correlation_with_book=0.1,
                         allocation_ok=True,
+                        gate9_threshold=gate9_threshold,
                     )
                 )
+                # Persist validated sizing telemetry (both approved and rejected)
+                self._persist_validated_sizing(pre=pre, symbol=symbol)
+
+                gate9_diag = self._gate9_diagnostics(pre=pre, threshold=gate9_threshold)
+                pretrade_gate_results = dict(base_gate_results)
+                if gate9_diag is not None:
+                    pretrade_gate_results.update(gate9_diag)
+
                 if not pre.approved:
-                    self._reject(outputs=outputs, asset_class=asset_class, symbol=symbol, reason=pre.reason)
+                    self._reject(
+                        outputs=outputs,
+                        asset_class=asset_class,
+                        symbol=symbol,
+                        reason=self._annotate_reason(pre.reason, crisis_override=crisis_override_active),
+                        engine=str(signal.engine),
+                        action="rejected",
+                        confidence=float(signal.confidence),
+                        position_size_pct=float(pre.adjusted_position_size),
+                        gate_results=pretrade_gate_results,
+                    )
                     continue
 
                 # Step 9: execution
@@ -255,26 +538,48 @@ class ArgusPipeline:
                     take_profit=signal.expected_return,
                     confidence=signal.confidence,
                     engine=signal.engine,
-                    reason="pipeline_entry",
-                    timestamp=now,
+                    reason=self._annotate_reason("pipeline_entry", crisis_override=crisis_override_active),
+                    timestamp=cycle_now,
                     **advisory_fields,
                 )
                 ex_result = self.executor.execute(decision=decision)
 
+                # Track open position for shadow dynamic exit
+                if ex_result.success:
+                    pos_id = f"pos-{symbol}-{int(cycle_now.timestamp())}"
+                    self._open_positions[pos_id] = {
+                        "position_id": pos_id,
+                        "symbol": symbol,
+                        "side": signal.bias.upper() if hasattr(signal, "bias") else "LONG",
+                        "entry_price": last_close,
+                        "current_price": last_close,
+                        "sl_pct": signal.stop_distance,
+                        "r_value_pct": signal.stop_distance,
+                        "atr_pct": max(float(getattr(fv, "atr_ratio_5_20", 0.005) or 0.005), 0.001),
+                    }
+
                 # Step 10-11: telemetry + post
                 evt_type = "order_filled" if ex_result.success else "order_rejected"
                 self._log_event(evt_type, asset_class, reason=ex_result.reason)
+                output_reason = self._annotate_reason(str(ex_result.reason), crisis_override=crisis_override_active)
                 outputs.append(
                     {
                         "symbol": symbol,
                         "status": "executed" if ex_result.success else "failed",
-                        "reason": ex_result.reason,
+                        "reason": output_reason,
+                        "action": decision.action,
+                        "engine": decision.engine,
+                        "confidence": float(decision.confidence),
+                        "position_size_pct": float(decision.position_size),
+                        "leverage": float(decision.leverage),
+                        "stop_loss_pct": float(decision.stop_loss),
+                        "gate_results": pretrade_gate_results,
                         "execution_mode": decision.execution_mode,
                         "advisory_message": ex_result.advisory_message,
                     }
                 )
 
-        self.event_bus.publish(EventType.HEARTBEAT, {"run_id": self.ctx.run_id, "ts": now.isoformat()})
+        self.event_bus.publish(EventType.HEARTBEAT, {"run_id": self.ctx.run_id, "ts": cycle_now.isoformat()})
         return outputs
 
     def _symbols_for_asset(self, asset_class: str) -> list[str]:
@@ -294,6 +599,9 @@ class ArgusPipeline:
         }.get(asset_class, "BTCUSDT")
 
     def _execution_mode(self, asset_class: str) -> str:
+        if self.ctx.mode == "backtest":
+            return "advisory"
+
         cfg = self.config.base.asset_classes.get(asset_class)
         if not cfg:
             return "advisory"
@@ -309,6 +617,45 @@ class ArgusPipeline:
                 return "auto"
             return "advisory"
         return requested
+
+    def _active_gate9_threshold(self) -> Decimal:
+        if self.ctx.mode != "backtest":
+            return Decimal("0.30")
+        if self.risk_profile == "relaxed":
+            return Decimal("0.35")
+        if self.risk_profile == "strict":
+            return Decimal("0.25")
+        return Decimal("0.30")
+
+    def _is_crisis_override_active(self, regime: str) -> bool:
+        return self.ctx.mode == "backtest" and self.allow_crisis and regime == REGIME_CRISIS
+
+    @staticmethod
+    def _annotate_reason(reason: str, *, crisis_override: bool) -> str:
+        if not crisis_override:
+            return reason
+        text = str(reason)
+        if "crisis_override" in text:
+            return text
+        return f"{text}|crisis_override"
+
+    @staticmethod
+    def _gate9_diagnostics(*, pre: Any, threshold: Decimal) -> dict[str, Any] | None:
+        sizing = getattr(pre, "validated_sizing", None)
+        if sizing is None:
+            return None
+        try:
+            return {
+                "gate9": {
+                    "pass": bool(getattr(sizing, "passed_gate9")),
+                    "fee_est_usd": float(getattr(sizing, "fee_est_usd")),
+                    "risk_usd": float(getattr(sizing, "risk_usd")),
+                    "fee_risk_ratio": float(getattr(sizing, "fee_risk_ratio")),
+                    "threshold": float(threshold),
+                }
+            }
+        except (TypeError, ValueError, AttributeError):
+            return None
 
     @staticmethod
     def _build_advisory_fields(*, signal: Any, last_price: float) -> dict[str, Any]:
@@ -349,9 +696,949 @@ class ArgusPipeline:
         )
         self.telemetry.log(evt, asset_class=asset_class, reason=reason, payload={"reason": reason})
 
-    def _reject(self, *, outputs: list[dict[str, Any]], asset_class: str, symbol: str, reason: str) -> None:
+    def run_v25_minimal_cycle(self, *, now: datetime | None = None) -> list[dict[str, Any]]:
+        """Run one minimal v2.5 cycle without pandas_ta-dependent feature building.
+
+        This path is used only when pandas_ta is unavailable and v25 mode is enabled.
+        It consumes OHLCV data, builds fallback features, routes into real engines
+        (Gemini first, then existing router), and persists decision/trade telemetry.
+        """
+        if self.feature_builder is None:
+            raise ModuleNotFoundError("Feature builder is unavailable")
+
+        cycle_now = now or datetime.now(timezone.utc)
+        outputs: list[dict[str, Any]] = []
+
+        for asset_class in self.ctx.assets:
+            for symbol in self._symbols_for_asset(asset_class):
+                candles = self._load_ohlcv(symbol=symbol, now=cycle_now)
+                if candles.empty:
+                    outputs.append({
+                        "symbol": symbol,
+                        "status": "rejected",
+                        "action": "rejected",
+                        "engine": "ROUTER",
+                        "confidence": 0.0,
+                        "sqs_score": 0.0,
+                        "reason": "no_candles",
+                        "asset_class": asset_class,
+                    })
+                    continue
+
+                last_close = float(candles["close"].iloc[-1])
+                fv = self.feature_builder.build(
+                    df=candles,
+                    symbol=symbol,
+                    asset_class=asset_class,
+                    timestamp=cycle_now,
+                    spread_pct=0.001,
+                    funding_rate=0.0001 if asset_class == "crypto" else None,
+                    funding_pctile_30d=50.0 if asset_class == "crypto" else None,
+                    hermes_sentiment_score=0.0,
+                    hermes_sentiment_confidence=0.5,
+                    hermes_urgency="LOW",
+                ).feature_vector
+
+                if fv is None:
+                    routed = V25RoutedDecision(
+                        action="rejected",
+                        confidence=0.0,
+                        sqs_score=0.0,
+                        stop_loss=0.01,
+                        take_profit=0.0,
+                        engine="ROUTER",
+                        reason="feature_build_failed",
+                        sub_strategy="minimal_router",
+                    )
+                else:
+                    regime_state = self._compute_regime_state(symbol=symbol, fv=fv, now=cycle_now)
+                    routed = self._route_v25_engine(regime_state=regime_state, features=fv)
+
+                decision: Decision | None = None
+                ex_result: Any | None = None
+                if routed.action in {"long", "short"}:
+                    decision = Decision(
+                        action=routed.action,
+                        asset_class=asset_class,
+                        symbol=symbol,
+                        execution_mode=self._execution_mode(asset_class),
+                        position_size=0.01,
+                        leverage=1.0,
+                        stop_loss=routed.stop_loss,
+                        take_profit=routed.take_profit,
+                        confidence=routed.confidence,
+                        engine=routed.engine,
+                        reason=routed.reason,
+                        timestamp=cycle_now,
+                    )
+                    ex_result = self.executor.execute(decision=decision)
+
+                status = "rejected"
+                execution_reason: str | None = None
+                if decision is not None and ex_result is not None:
+                    status = "executed" if ex_result.success else "failed"
+                    execution_reason = str(ex_result.reason)
+
+                # Persist decision row for observability/backtest audit
+                if self.v25_conn is not None:
+                    try:
+                        log_decision(
+                            self.v25_conn,
+                            run_id=self.ctx.run_id,
+                            timestamp=cycle_now.isoformat(),
+                            symbol=symbol,
+                            action=routed.action,
+                            capital_engine="core",
+                            position_size_pct=float(decision.position_size) if decision is not None else 0.0,
+                            leverage=float(decision.leverage) if decision is not None else 1.0,
+                            stop_loss_pct=float(routed.stop_loss),
+                            confidence=float(routed.confidence),
+                            sqs_score=float(routed.sqs_score),
+                            engine=routed.engine,
+                            sub_strategy=routed.sub_strategy or "minimal_router",
+                            regime="REPLAY" if self.data_factory.mode == "replay" else "UNKNOWN",
+                            reason=routed.reason,
+                            status=status,
+                            gate_results={
+                                "path": "v25_engine_router",
+                                "mode": self.ctx.mode,
+                                "execution_attempted": decision is not None,
+                            },
+                        )
+                        if decision is not None and ex_result is not None and ex_result.success:
+                            self._persist_v25_fallback_trade(
+                                symbol=symbol,
+                                side=decision.action,
+                                entry_price=float(ex_result.fill_price or last_close),
+                                size=float(ex_result.fill_quantity or decision.position_size),
+                                confidence=float(routed.confidence),
+                                stop_distance=float(routed.stop_loss),
+                                engine=str(routed.engine),
+                                reason_entry=str(routed.reason),
+                                entry_time=cycle_now,
+                                fees=float(ex_result.fees or 0.0),
+                                slippage=float(ex_result.slippage or 0.0),
+                            )
+                        self.v25_conn.commit()
+                    except Exception:
+                        self._LOG.debug("v25 minimal cycle persistence failed", exc_info=True)
+
+                outputs.append(
+                    {
+                        "symbol": symbol,
+                        "status": status,
+                        "reason": routed.reason,
+                        "execution_reason": execution_reason,
+                        "action": routed.action,
+                        "engine": routed.engine,
+                        "confidence": float(routed.confidence),
+                        "sqs_score": float(routed.sqs_score),
+                        "asset_class": asset_class,
+                    }
+                )
+
+        return outputs
+
+    def _compute_regime_state(self, *, symbol: str, fv: FeatureVector, now: datetime) -> RegimeState:
+        rule_vote = self.rule_classifier.classify(
+            RuleBasedInput(
+                adx_14=fv.adx_14,
+                price_vs_ma200=fv.price_vs_ma200,
+                ema_21_vs_55=fv.ema_21_vs_55,
+                hurst_exponent=fv.hurst_exponent,
+                atr_ratio_5_20=fv.atr_ratio_5_20,
+                vol_multiple_60d=max(fv.volume_ratio, 0.0),
+                directional_alignment_candles=24,
+                hermes_urgency=fv.hermes_urgency,
+                hermes_sentiment_score=fv.hermes_sentiment_score,
+            )
+        )
+        consensus = self.consensus.resolve(
+            {"rule": rule_vote, "ml": rule_vote, "x1": rule_vote, "x2": rule_vote}
+        )
+        sm = self.state_machines.setdefault(symbol, RegimeStateMachine(initial_regime=consensus.regime))
+        return sm.step(
+            candidate_regime=consensus.regime,
+            confidence=consensus.confidence,
+            stability=0.6,
+            direction=1,
+            rule_regime=rule_vote,
+            ml_regime=rule_vote,
+            timestamp=now,
+            hermes_override=consensus.regime if consensus.reason == "hermes_critical_override" else None,
+        )
+
+    def _route_v25_engine(self, *, regime_state: RegimeState, features: FeatureVector) -> V25RoutedDecision:
+        crisis_override_active = self._is_crisis_override_active(regime_state.regime)
+        reject_engine = (
+            "GEMINI" if self._gemini_engine is not None else self._engine_hint_for_regime(regime_state.regime)
+        )
+        try:
+            signal: EngineSignal | None = None
+
+            # Minimal engine-router call for v2.5 fallback path.
+            # Prefer explicit Gemini call, then existing regime router.
+            if self._gemini_engine is not None:
+                signal = self._gemini_engine.generate_signal(regime=regime_state, features=features)
+            if signal is None:
+                signal = self.router.route(
+                    regime=regime_state,
+                    features=features,
+                    allow_crisis_override=self._is_crisis_override_active(regime_state.regime),
+                )
+
+            if signal is None:
+                return V25RoutedDecision(
+                    action="rejected",
+                    confidence=0.0,
+                    sqs_score=0.0,
+                    stop_loss=0.01,
+                    take_profit=0.0,
+                    engine="ROUTER",
+                    reason=self._annotate_reason("no_signal", crisis_override=crisis_override_active),
+                    sub_strategy="minimal_router",
+                )
+
+            engine_name = str(signal.engine or reject_engine)
+            action = str(signal.bias).lower()
+            if action not in {"long", "short"}:
+                return V25RoutedDecision(
+                    action="rejected",
+                    confidence=0.0,
+                    sqs_score=0.0,
+                    stop_loss=0.01,
+                    take_profit=0.0,
+                    engine=engine_name,
+                    reason="invalid_signal_bias",
+                    sub_strategy=str(signal.sub_strategy),
+                )
+
+            confidence = max(0.0, min(1.0, float(signal.confidence)))
+            stop_loss = max(0.001, min(float(signal.stop_distance), 0.10))
+            take_profit = max(stop_loss * 1.5, float(signal.expected_return))
+            sqs_score = max(0.0, min(1.0, confidence))
+            return V25RoutedDecision(
+                action=action,
+                confidence=confidence,
+                sqs_score=sqs_score,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                engine=engine_name,
+                reason=self._annotate_reason(
+                    f"engine_signal:{signal.sub_strategy}",
+                    crisis_override=crisis_override_active,
+                ),
+                sub_strategy=str(signal.sub_strategy),
+            )
+        except Exception:
+            self._LOG.debug("v25 engine routing failed", exc_info=True)
+            return V25RoutedDecision(
+                action="rejected",
+                confidence=0.0,
+                sqs_score=0.0,
+                stop_loss=0.01,
+                take_profit=0.0,
+                engine=reject_engine,
+                reason="engine_error",
+                sub_strategy="minimal_router",
+            )
+
+    def _persist_v25_fallback_trade(
+        self,
+        *,
+        symbol: str,
+        side: str,
+        entry_price: float,
+        size: float,
+        confidence: float,
+        stop_distance: float,
+        engine: str,
+        reason_entry: str,
+        entry_time: datetime,
+        fees: float,
+        slippage: float,
+    ) -> None:
+        """Insert one append-only trade row for fallback execution path."""
+        if self.v25_conn is None:
+            return
+
+        trade_id = f"v25-{symbol}-{entry_time.strftime('%Y%m%d%H%M%S%f')}"
+        self.v25_conn.execute(
+            """
+            INSERT INTO trades (
+              trade_id, symbol, side, capital_engine, entry_time, entry_price, size,
+              fees, slippage, net_pnl_pct, regime_at_entry, engine, sub_strategy,
+              confidence, sqs_score, stop_distance, reason_entry
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                trade_id,
+                symbol,
+                side,
+                "core",
+                entry_time.isoformat(),
+                float(entry_price),
+                float(size),
+                float(fees),
+                float(slippage),
+                0.0,
+                "REPLAY" if self.data_factory.mode == "replay" else "UNKNOWN",
+                engine,
+                "fallback_no_pandas_ta",
+                float(confidence),
+                0.50,
+                float(stop_distance),
+                reason_entry,
+            ),
+        )
+
+    def _persist_backtest_time_exit_trade(
+        self,
+        *,
+        symbol: str,
+        side: str,
+        engine: str,
+        reason_entry: str,
+        confidence: float,
+        stop_distance: float,
+        entry_time: datetime,
+        entry_price: float = 100.0,
+        size: float = 1.0,
+        hold_minutes: int = 5,
+    ) -> None:
+        """Persist one closed backtest trade with a minimal time-based exit."""
+        if self.v25_conn is None:
+            return
+
+        s = "long" if str(side).lower() != "short" else "short"
+        hold = max(1, int(hold_minutes))
+        exit_time = entry_time + timedelta(minutes=hold)
+
+        entry_px = max(float(entry_price), 1e-6)
+        move = 0.002  # 20 bps synthetic move for deterministic closure
+        if s == "long":
+            exit_px = entry_px * (1.0 + move)
+            pnl_pct = (exit_px - entry_px) / entry_px
+        else:
+            exit_px = entry_px * (1.0 - move)
+            pnl_pct = (entry_px - exit_px) / entry_px
+
+        fees = 0.0005
+        slippage = 0.0002
+        net_pnl_pct = float(pnl_pct - fees - slippage)
+        pnl = float(entry_px * float(size) * net_pnl_pct)
+        duration_hours = float((exit_time - entry_time).total_seconds() / 3600.0)
+
+        trade_id = f"bt-{symbol}-{entry_time.strftime('%Y%m%d%H%M%S%f')}-{s}"
+        regime = "REPLAY" if self.data_factory.mode == "replay" else "UNKNOWN"
+
+        self.v25_conn.execute(
+            """
+            INSERT INTO trades (
+              trade_id, symbol, side, capital_engine, entry_time, exit_time,
+              entry_price, exit_price, size, pnl, pnl_pct, fees, slippage,
+              net_pnl_pct, regime_at_entry, regime_at_exit, engine, sub_strategy,
+              confidence, sqs_score, stop_distance, duration_hours, hold_minutes, reason_entry, reason_exit
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                trade_id,
+                symbol,
+                s,
+                "core",
+                entry_time.isoformat(),
+                exit_time.isoformat(),
+                entry_px,
+                float(exit_px),
+                float(size),
+                pnl,
+                float(pnl_pct),
+                fees,
+                slippage,
+                net_pnl_pct,
+                regime,
+                regime,
+                engine,
+                "time_exit_backtest",
+                float(confidence),
+                0.50,
+                float(max(0.0001, stop_distance)),
+                duration_hours,
+                hold,
+                reason_entry,
+                "time_exit_backtest",
+            ),
+        )
+
+    def _resolve_backtest_close_price(self, *, symbol: str, at: datetime) -> float | None:
+        """Resolve deterministic close price at/near a timestamp for backtest sim."""
+        try:
+            rows = self.data_factory.fetch_ohlcv(
+                symbol=symbol,
+                timeframe="1m",
+                limit=1,
+                now=at,
+            )
+            if rows:
+                return float(rows[-1][4])
+        except Exception:
+            self._LOG.debug("backtest close fetch failed at now=%s symbol=%s", at, symbol, exc_info=True)
+
+        # Deterministic fallback: last known close from source.
+        try:
+            rows = self.data_factory.fetch_ohlcv(
+                symbol=symbol,
+                timeframe="1m",
+                limit=1,
+                now=None,
+            )
+            if rows:
+                return float(rows[-1][4])
+        except Exception:
+            self._LOG.debug("backtest close fallback fetch failed symbol=%s", symbol, exc_info=True)
+
+        try:
+            frame = self._load_ohlcv(symbol=symbol, now=at)
+            if not frame.empty:
+                return float(frame["close"].iloc[-1])
+        except Exception:
+            self._LOG.debug("backtest close fallback _load_ohlcv failed symbol=%s", symbol, exc_info=True)
+
+        return None
+
+    @staticmethod
+    def _estimate_backtest_costs(
+        *,
+        fee_model: Any | None,
+        entry_price: float,
+        size: float,
+        leverage: float,
+    ) -> tuple[float, float]:
+        """Return (fees_pct, slippage_pct) for deterministic backtest sim."""
+        if fee_model is None:
+            return 0.0005, 0.0002
+
+        try:
+            notional_usd = max(float(entry_price) * float(size) * float(leverage), 0.0)
+            fees_pct = float(getattr(fee_model, "backtest_round_trip"))
+            slippage_pct = float(fee_model.estimate_slippage(notional_usd))
+            return max(fees_pct, 0.0), max(slippage_pct, 0.0)
+        except Exception:
+            return 0.0005, 0.0002
+
+    @staticmethod
+    def _compute_backtest_pnl(
+        *,
+        side: str,
+        entry_price: float,
+        exit_price: float,
+        leverage: float,
+        fees_pct: float,
+        slippage_pct: float,
+    ) -> tuple[float, float]:
+        """Return (gross_pnl_pct, net_pnl_pct) for deterministic backtest sim."""
+        s = "long" if str(side).lower() != "short" else "short"
+        entry_px = max(float(entry_price), 1e-6)
+        exit_px = max(float(exit_price), 1e-6)
+        lev = max(float(leverage), 0.0)
+
+        if s == "long":
+            gross = ((exit_px - entry_px) / entry_px) * lev
+        else:
+            gross = ((entry_px - exit_px) / entry_px) * lev
+
+        net = float(gross - max(float(fees_pct), 0.0) - max(float(slippage_pct), 0.0))
+        return float(gross), net
+
+    @staticmethod
+    def _extract_regime_from_gate_results(gate_results: Any) -> str:
+        """Extract regime label from persisted gate_results payload."""
+        if not isinstance(gate_results, dict):
+            return "UNKNOWN"
+        feature_snapshot = gate_results.get("features_snapshot")
+        if isinstance(feature_snapshot, dict):
+            regime = feature_snapshot.get("regime")
+            if regime is not None:
+                text = str(regime).strip()
+                if text:
+                    return text
+        return "UNKNOWN"
+
+    def _persist_backtest_exit_sweep_row(
+        self,
+        *,
+        run_id: str,
+        decision_id: int,
+        symbol: str,
+        side: str,
+        entry_time: datetime,
+        hold_minutes: int,
+        exit_time: datetime,
+        entry_price: float,
+        exit_price: float,
+        gross_pnl_pct: float,
+        net_pnl_pct: float,
+        fee_est_usd: float | None,
+        slippage_est_pct: float | None,
+        regime: str,
+    ) -> None:
+        if self.v25_conn is None:
+            return
+
+        self.v25_conn.execute(
+            """
+            INSERT INTO backtest_exit_sweep (
+              run_id, decision_id, symbol, side, entry_time, hold_minutes, exit_time,
+              entry_price, exit_price, gross_pnl_pct, net_pnl_pct, fee_est_usd,
+              slippage_est_pct, regime
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                run_id,
+                int(decision_id),
+                symbol,
+                "long" if str(side).lower() != "short" else "short",
+                entry_time.isoformat(),
+                int(hold_minutes),
+                exit_time.isoformat(),
+                float(entry_price),
+                float(exit_price),
+                float(gross_pnl_pct),
+                float(net_pnl_pct),
+                float(fee_est_usd) if fee_est_usd is not None else None,
+                float(slippage_est_pct) if slippage_est_pct is not None else None,
+                regime,
+            ),
+        )
+
+    def _persist_backtest_execution_sim_trade(
+        self,
+        *,
+        symbol: str,
+        side: str,
+        engine: str,
+        confidence: float,
+        stop_distance: float,
+        entry_time: datetime,
+        exit_time: datetime,
+        entry_price: float,
+        exit_price: float,
+        size: float,
+        leverage: float,
+        hold_minutes: int,
+        fees_pct: float,
+        slippage_pct: float,
+    ) -> None:
+        """Persist one deterministic closed trade from advisory backtest output."""
+        if self.v25_conn is None:
+            return
+
+        s = "long" if str(side).lower() != "short" else "short"
+        entry_px = max(float(entry_price), 1e-6)
+        exit_px = max(float(exit_price), 1e-6)
+        lev = max(float(leverage), 0.0)
+
+        fees = max(float(fees_pct), 0.0)
+        slippage = max(float(slippage_pct), 0.0)
+        raw_pnl_pct, net_pnl_pct = self._compute_backtest_pnl(
+            side=s,
+            entry_price=entry_px,
+            exit_price=exit_px,
+            leverage=lev,
+            fees_pct=fees,
+            slippage_pct=slippage,
+        )
+
+        qty = max(float(size), 0.0)
+        pnl = float(entry_px * qty * net_pnl_pct)
+        duration_hours = float((exit_time - entry_time).total_seconds() / 3600.0)
+        regime = "REPLAY" if self.data_factory.mode == "replay" else "UNKNOWN"
+
+        trade_id = f"btsim-{symbol}-{entry_time.strftime('%Y%m%d%H%M%S%f')}-{s}"
+        self.v25_conn.execute(
+            """
+            INSERT INTO trades (
+              trade_id, symbol, side, capital_engine, entry_time, exit_time,
+              entry_price, exit_price, size, pnl, pnl_pct, fees, slippage,
+              net_pnl_pct, regime_at_entry, regime_at_exit, engine, sub_strategy,
+              confidence, sqs_score, stop_distance, duration_hours, hold_minutes, reason_entry, reason_exit
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                trade_id,
+                symbol,
+                s,
+                "core",
+                entry_time.isoformat(),
+                exit_time.isoformat(),
+                entry_px,
+                exit_px,
+                qty,
+                pnl,
+                float(raw_pnl_pct),
+                fees,
+                slippage,
+                net_pnl_pct,
+                regime,
+                regime,
+                str(engine or "ROUTER"),
+                "backtest_execution_sim",
+                float(max(0.0, min(1.0, confidence))),
+                0.50,
+                float(max(0.0001, stop_distance)),
+                duration_hours,
+                int(max(1, int(hold_minutes))),
+                "backtest_sim_entry",
+                "time_exit_backtest_sim",
+            ),
+        )
+
+    def _run_shadow_dynamic_exit(self, *, asset_class: str, now: datetime) -> None:
+        positions = self._shadow_positions_snapshot(asset_class=asset_class)
+        intents = self.shadow_position_manager.shadow_dynamic_exit_intents(
+            positions=positions,
+            ts=now,
+        )
+        for intent in intents:
+            self._log_event(
+                "dynamic_exit_shadow_intent",
+                asset_class,
+                reason=intent.reason,
+            )
+            # Persist shadow exit intent to v2.5 DB
+            self._persist_dynamic_exit_intent(intent=intent, now=now)
+
+    def _run_live_dynamic_exit(self, *, asset_class: str, now: datetime) -> None:
+        """Live dynamic exit: compute intents AND execute via broker (PR-J02)."""
+        positions = self._shadow_positions_snapshot(asset_class=asset_class)
+        intents = self.shadow_position_manager.live_dynamic_exit_intents(
+            positions=positions,
+            ts=now,
+        )
+        for intent in intents:
+            self._log_event(
+                "dynamic_exit_live_intent",
+                asset_class,
+                reason=intent.reason,
+            )
+            self._persist_dynamic_exit_intent(intent=intent, now=now)
+
+    def _shadow_positions_snapshot(self, *, asset_class: str) -> list[dict[str, float | str]]:
+        """Return tracked open positions for shadow dynamic exit.
+
+        In production, this would read from the broker/exchange.
+        Currently uses pipeline-tracked positions from successful fills.
+        """
+        _ = asset_class
+        return list(self._open_positions.values())
+
+    @staticmethod
+    def _engine_hint_for_regime(regime: str | None) -> str:
+        if regime:
+            mapped = REGIME_TO_ENGINE.get(regime)
+            if mapped:
+                return str(mapped)
+        return ENGINE_PHOENIX
+
+    def _reject(
+        self,
+        *,
+        outputs: list[dict[str, Any]],
+        asset_class: str,
+        symbol: str,
+        reason: str,
+        engine: str | None = None,
+        action: str = "rejected",
+        confidence: float = 0.0,
+        position_size_pct: float = 0.0,
+        gate_results: dict[str, Any] | None = None,
+    ) -> None:
         self._log_event("signal_rejected", asset_class, reason=reason)
-        outputs.append({"symbol": symbol, "status": "rejected", "reason": reason})
+        out: dict[str, Any] = {
+            "symbol": symbol,
+            "status": "rejected",
+            "reason": reason,
+            "action": action,
+            "engine": engine or "ROUTER",
+            "confidence": float(confidence),
+            "position_size_pct": float(max(position_size_pct, 0.0)),
+            "leverage": 1.0,
+        }
+        if gate_results is not None:
+            out["gate_results"] = dict(gate_results)
+        outputs.append(out)
+
+    @staticmethod
+    def _stage_from_reason(reason: str) -> str:
+        """Map intent reason to a valid dynamic_exit_log stage."""
+        _map = {
+            "to_breakeven_lock": "BREAKEVEN_LOCK",
+            "to_profit_capture": "PROFIT_CAPTURE",
+            "to_trend_rider": "TREND_RIDER",
+        }
+        return _map.get(reason, "ENTRY")
+
+    def _persist_dynamic_exit_intent(self, *, intent: Any, now: datetime) -> None:
+        """Persist a shadow dynamic exit intent to the v2.5 DB. Silently skips if no DB connection."""
+        if self.v25_conn is None:
+            return
+        try:
+            reason = str(getattr(intent, "reason", "shadow_intent"))
+            log_dynamic_exit(
+                self.v25_conn,
+                position_id=str(getattr(intent, "symbol", "unknown")),
+                symbol=str(getattr(intent, "symbol", "unknown")),
+                stage=self._stage_from_reason(reason),
+                current_r=0.0,  # R not available on OrderIntent; logged for audit completeness
+                pct_closed=float(intent.take_profit_fraction) if getattr(intent, "take_profit_fraction", None) else 0.0,
+                partial_pnl_locked=0.0,  # Not computed in shadow path
+                regime="shadow",
+                trigger_reason=reason,
+                trailing_sl=float(intent.new_stop_price) if getattr(intent, "new_stop_price", None) else None,
+                timestamp=now.isoformat(),
+            )
+            self.v25_conn.commit()
+        except Exception:
+            self._LOG.debug("persist_dynamic_exit_intent failed", exc_info=True)
+
+    def _persist_validated_sizing(self, *, pre: Any, symbol: str) -> None:
+        """Persist validated sizing telemetry to the v2.5 DB. Silently skips if no DB or no sizing."""
+        if self.v25_conn is None:
+            return
+        sizing = getattr(pre, "validated_sizing", None)
+        if sizing is None:
+            return
+        try:
+            log_validated_sizing(
+                self.v25_conn,
+                symbol=sizing.symbol,
+                equity=float(sizing.leverage * sizing.notional_usd / sizing.leverage) if sizing.leverage else 0.0,
+                risk_pct=0.0,  # Not carried on ValidatedSizing; placeholder
+                risk_usd=float(sizing.risk_usd),
+                entry_price=float(sizing.notional_usd / sizing.qty) if sizing.qty else 0.0,
+                sl_price=0.0,  # Absolute SL price not on contract; placeholder
+                sl_pct=float(sizing.sl_pct),
+                notional_usd=float(sizing.notional_usd),
+                quantity=float(sizing.qty) if sizing.qty else 0.0,
+                leverage_derived=float(sizing.leverage) if sizing.leverage else 0.0,
+                breakeven_r=float(sizing.fee_risk_ratio),
+                fee_reserved=float(sizing.fee_est_usd),
+                net_risk_usd=float(sizing.net_risk_usd),
+                passed_breakeven_gate=sizing.passed_gate9,
+            )
+            self.v25_conn.commit()
+        except Exception:
+            self._LOG.debug("persist_validated_sizing failed", exc_info=True)
+
+    def _apply_whale_momentum_boost(
+        self,
+        *,
+        signal: Any,
+        regime_state: Any,
+        symbol: str,
+        now: datetime,
+    ) -> Any:
+        """Apply whale momentum boost to signal confidence (Blueprint Pivot 4).
+
+        Computes whale momentum from stored alerts, applies boost to
+        signal confidence if regime qualifies as TREND_STRONG, then
+        persists telemetry.  Returns the (possibly boosted) signal.
+        """
+        if not self._whale_alerts:
+            return signal
+
+        try:
+            whale_signal = compute_whale_momentum(self._whale_alerts)
+            boosted_conf, was_applied, reason = apply_whale_boost_to_signal(
+                base_confidence=signal.confidence,
+                whale=whale_signal,
+                regime=regime_state.regime,
+                regime_confidence=regime_state.confidence,
+                regime_stability=regime_state.stability,
+            )
+            # Persist telemetry regardless of whether boost was applied
+            self._persist_whale_momentum(whale=whale_signal, now=now)
+
+            if was_applied:
+                self._LOG.info(
+                    "whale_boost applied: symbol=%s conf=%.3f->%.3f reason=%s",
+                    symbol, signal.confidence, boosted_conf, reason,
+                )
+                return signal.model_copy(update={"confidence": boosted_conf})
+            return signal
+        except Exception:
+            self._LOG.debug("whale_momentum_boost failed", exc_info=True)
+            return signal
+
+    def _persist_whale_momentum(self, *, whale: Any, now: datetime) -> None:
+        """Persist whale momentum telemetry to the v2.5 DB."""
+        if self.v25_conn is None:
+            return
+        try:
+            log_whale_momentum(
+                self.v25_conn,
+                symbol=str(whale.symbol),
+                net_flow_usd_24h=float(whale.net_flow_usd_24h),
+                exchange_reserve_change_pct=float(whale.exchange_reserve_change_pct),
+                is_bullish_flow=bool(whale.is_bullish_flow),
+                is_bearish_flow=bool(whale.is_bearish_flow),
+                momentum_score=float(whale.momentum_score),
+                sqs_boost=float(whale.sqs_boost),
+                size_modifier=float(whale.size_modifier),
+                stablecoin_mint_usd_24h=float(whale.stablecoin_mint_usd_24h),
+                timestamp=now.isoformat(),
+            )
+            self.v25_conn.commit()
+        except Exception:
+            self._LOG.debug("persist_whale_momentum failed", exc_info=True)
+
+    @staticmethod
+    def _load_dynamic_exit_config() -> DynamicExitConfig | None:
+        """Load DynamicExitConfig from engines.yaml. Returns None if unavailable."""
+        try:
+            import yaml
+            from pathlib import Path
+            engines_path = Path("config/engines.yaml")
+            if not engines_path.exists():
+                return None
+            raw = yaml.safe_load(engines_path.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict):
+                return None
+            engines = raw.get("engines", raw)
+            hermes = engines.get("hermes", {})
+            de = hermes.get("dynamic_exit", {})
+            if not de:
+                return None
+            return DynamicExitConfig(
+                r_breakeven=float(de.get("r_breakeven", 0.5)),
+                r_profit_capture=float(de.get("r_profit_capture", 1.5)),
+                r_trend_rider=float(de.get("r_trend_rider", 3.0)),
+                atr_mult_profit_capture=float(de.get("atr_mult_profit_capture", 2.0)),
+                atr_mult_trend_rider=float(de.get("atr_mult_trend_rider", 1.2)),
+                partial_fraction_profit_capture=float(de.get("partial_fraction_profit_capture", 0.30)),
+                partial_fraction_trend_rider=float(de.get("partial_fraction_trend_rider", 0.20)),
+            )
+        except Exception:
+            return None
+
+    @staticmethod
+    def _init_gemini_engine() -> tuple[GeminiEngine | None, CorrelationTracker | None]:
+        """Initialize GeminiEngine from engines.yaml pairs config.
+
+        Returns (engine, tracker) or (None, None) if config unavailable.
+        """
+        try:
+            import yaml
+            from pathlib import Path
+            engines_path = Path("config/engines.yaml")
+            if not engines_path.exists():
+                return None, None
+            raw = yaml.safe_load(engines_path.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict):
+                return None, None
+            engines = raw.get("engines", raw)
+            gemini_node = engines.get("gemini", {})
+            if not gemini_node:
+                return None, None
+            pairs_raw = gemini_node.get("pairs", [])
+            if not pairs_raw:
+                return None, None
+
+            pairs_config = [
+                {
+                    "symbol_a": str(p["symbol_a"]),
+                    "symbol_b": str(p["symbol_b"]),
+                    "pair_id": str(p.get("pair_id", f"{p['symbol_a']}_{p['symbol_b']}")),
+                }
+                for p in pairs_raw
+            ]
+            corr_cfg = gemini_node.get("correlation", {})
+            tracker = CorrelationTracker(
+                pairs_config,
+                window=int(corr_cfg.get("window", 100)),
+            )
+            signal_gen = CorrelationSignalGenerator(
+                entry_zscore=float(corr_cfg.get("entry_zscore", 2.0)),
+                exit_zscore=float(corr_cfg.get("exit_zscore", 0.5)),
+                stop_zscore=float(corr_cfg.get("stop_zscore", 3.0)),
+            )
+            engine = GeminiEngine(
+                tracker=tracker,
+                signal_generator=signal_gen,
+                max_simultaneous_pairs=int(gemini_node.get("max_simultaneous_pairs", 3)),
+            )
+            return engine, tracker
+        except Exception:
+            return None, None
+
+    @staticmethod
+    def _load_precision_config() -> PrecisionConfig:
+        """Load PrecisionConfig from engines.yaml. Returns defaults if unavailable."""
+        try:
+            import yaml
+            from pathlib import Path
+            engines_path = Path("config/engines.yaml")
+            if not engines_path.exists():
+                return PrecisionConfig()
+            raw = yaml.safe_load(engines_path.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict):
+                return PrecisionConfig()
+            engines = raw.get("engines", raw)
+            pf = engines.get("precision_filter", {})
+            if not pf:
+                return PrecisionConfig()
+            adj = pf.get("confidence_adjustments", {})
+            return PrecisionConfig(
+                grade_a_threshold=float(pf.get("grade_a_threshold", 0.80)),
+                grade_b_threshold=float(pf.get("grade_b_threshold", 0.65)),
+                grade_c_threshold=float(pf.get("grade_c_threshold", 0.50)),
+                grade_d_threshold=float(pf.get("grade_d_threshold", 0.35)),
+                conf_boost_a=float(adj.get("grade_a", 0.05)),
+                conf_boost_b=float(adj.get("grade_b", 0.02)),
+                conf_penalty_d=float(adj.get("grade_d", -0.05)),
+                conf_penalty_f=float(adj.get("grade_f", -0.10)),
+            )
+        except Exception:
+            return PrecisionConfig()
+
+    @staticmethod
+    def _init_exchange_client(evolve: bool) -> Any | None:
+        """Initialize exchange client for live data.
+
+        Uses Binance public API by default (no API key needed for klines).
+        Set ARGUS_DATA_SOURCE=bingx to use BingX instead.
+        In evolve mode, returns None (local parquet only).
+        """
+        if evolve:
+            return None
+        try:
+            # Load .env if available
+            from pathlib import Path
+            env_path = Path(".env")
+            if env_path.exists():
+                for line in env_path.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        key, _, val = line.partition("=")
+                        os.environ.setdefault(key.strip(), val.strip())
+
+            source = os.getenv("ARGUS_DATA_SOURCE", "binance").lower()
+
+            if source == "bingx":
+                from src.data.exchange_clients import BingXClient
+                client = BingXClient()
+                logging.getLogger(__name__).info(
+                    "[DataSource] BingX (authenticated=%s)", client.is_authenticated,
+                )
+                return client
+            else:
+                from src.data.exchange_clients import BinancePublicClient
+                client = BinancePublicClient(use_futures=True)
+                logging.getLogger(__name__).info("[DataSource] Binance Futures (public)")
+                return client
+        except Exception as exc:
+            logging.getLogger(__name__).warning("[DataSource] Failed to init: %s", exc)
+            return None
 
     @staticmethod
     def _init_feature_builder() -> Any | None:
@@ -359,18 +1646,53 @@ class ArgusPipeline:
             from src.data.features.builder import FeatureBuilder
         except ModuleNotFoundError as exc:
             if exc.name == "pandas_ta":
-                return None
+                from src.data.features.basic_builder import BasicFeatureBuilder
+
+                logging.getLogger(__name__).warning(
+                    "pandas_ta not available; using BasicFeatureBuilder fallback"
+                )
+                return BasicFeatureBuilder()
             raise
         return FeatureBuilder()
 
     def _load_ohlcv(self, *, symbol: str, now: datetime) -> pd.DataFrame:
+        # Replay mode: deterministic local parquet slice around replay_now
+        if self.data_factory.mode == "replay":
+            replay_anchor = self.replay_now if self.replay_now is not None else None
+            rows = self.data_factory.fetch_ohlcv(
+                symbol=symbol,
+                timeframe="1m",
+                limit=self.ohlcv_limit,
+                now=replay_anchor,
+            )
+            if not rows:
+                raise ValueError(f"Replay mode requires local OHLCV data for symbol={symbol}")
+            frame = pd.DataFrame(rows, columns=["timestamp", "open", "high", "low", "close", "volume"])
+            frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True, errors="coerce")
+            frame = frame.dropna(subset=["timestamp"]).reset_index(drop=True)
+
+            if not self._replay_smoke_logged:
+                first_ts = frame["timestamp"].iloc[0] if not frame.empty else None
+                last_ts = frame["timestamp"].iloc[-1] if not frame.empty else None
+                self._LOG.debug(
+                    "replay smoke: replay_now=%s symbol=%s bars=%d first_ts=%s last_ts=%s",
+                    replay_anchor.isoformat() if isinstance(replay_anchor, pd.Timestamp) else replay_anchor,
+                    symbol,
+                    len(frame),
+                    first_ts.isoformat() if isinstance(first_ts, pd.Timestamp) else first_ts,
+                    last_ts.isoformat() if isinstance(last_ts, pd.Timestamp) else last_ts,
+                )
+                self._replay_smoke_logged = True
+
+            return frame
+
         if not self.evolve:
-            return self._mock_ohlcv(now)
+            return self._mock_ohlcv(now, limit=self.ohlcv_limit)
 
         rows = self.data_factory.fetch_ohlcv(
             symbol=symbol,
             timeframe="1m",
-            limit=260,
+            limit=self.ohlcv_limit,
             now=now,
         )
         if not rows:
@@ -380,9 +1702,9 @@ class ArgusPipeline:
         return frame.dropna(subset=["timestamp"]).reset_index(drop=True)
 
     @staticmethod
-    def _mock_ohlcv(now: datetime) -> pd.DataFrame:
+    def _mock_ohlcv(now: datetime, *, limit: int = 260) -> pd.DataFrame:
         rng = np.random.default_rng(123)
-        n = 260
+        n = max(1, int(limit))
         close = 100 + np.cumsum(rng.normal(0.0, 0.8, n))
         high = close + np.abs(rng.normal(0.4, 0.1, n))
         low = close - np.abs(rng.normal(0.4, 0.1, n))
@@ -402,6 +1724,7 @@ class ArgusPipeline:
 
 
 def main() -> None:
+    # Smoke test: python -m src.main --mode paper --assets crypto --v25 --v25-db runs/v25/argus_v25.db
     parser = argparse.ArgumentParser(description="ARGUS v2.0 pipeline")
     parser.add_argument("--mode", choices=["paper", "live", "backtest"], default="paper")
     parser.add_argument("--assets", default="crypto", help="Comma-separated asset classes")
@@ -415,18 +1738,523 @@ def main() -> None:
         default="data/time_machine",
         help="Parquet directory for local evolve runs.",
     )
+    parser.add_argument(
+        "--replay-now",
+        default=None,
+        help="Replay anchor time (UTC ISO-8601, e.g. 2024-01-01T00:10:00Z).",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=260,
+        help="OHLCV bars per symbol fetch (default: 260).",
+    )
+    parser.add_argument(
+        "--max-cycles",
+        type=int,
+        default=None,
+        help="Max pipeline cycles to run (paper default: 5, backtest default: 1).",
+    )
+    parser.add_argument(
+        "--run-dir",
+        default=None,
+        help="Output directory for run artifacts (default: runs/paper_v2 for paper, runs/backtest_v25 for backtest).",
+    )
+    parser.add_argument(
+        "--synthetic-exit",
+        action="store_true",
+        default=False,
+        help="Enable synthetic time-based trade exits for backtest telemetry.",
+    )
+    parser.add_argument(
+        "--cycle-step-minutes",
+        type=int,
+        default=1,
+        help="Backtest replay step between cycles in minutes (default: 1).",
+    )
+    parser.add_argument(
+        "--hold-minutes",
+        type=int,
+        default=30,
+        help="Backtest simulator holding period in minutes (default: 30).",
+    )
+    parser.add_argument(
+        "--hold-grid-minutes",
+        default=None,
+        help="Comma-separated hold minutes grid for exit sweep analysis (e.g. 10,20,30).",
+    )
+    parser.add_argument(
+        "--hold-grid-by",
+        choices=["overall", "regime"],
+        default="overall",
+        help="Exit sweep aggregation mode for best-hold reporting.",
+    )
+    parser.add_argument(
+        "--adaptive-hold-from-sweep",
+        action="store_true",
+        default=False,
+        help="Backtest-only: use regime-aware best hold from sweep for simulated trade exits.",
+    )
+    parser.add_argument(
+        "--risk-profile",
+        choices=["strict", "normal", "relaxed"],
+        default="normal",
+        help="Backtest-only risk profile tuning for gate thresholds.",
+    )
+    parser.add_argument(
+        "--allow-crisis",
+        action="store_true",
+        default=False,
+        help="Backtest-only crisis override (route with capped size).",
+    )
+    parser.add_argument("--v25", action="store_true", help="Enable v2.5 foundation bootstrap")
+    parser.add_argument("--v25-db", default="runs/v25/argus_v25.db", help="SQLite path for v2.5 runtime DB")
+    parser.add_argument("--v25-dryrun-log", default="runs/v25/dryrun_events.jsonl", help="Write v2.5 dry-run telemetry as JSONL (no behavior change).")
     args = parser.parse_args()
 
+    conn: sqlite3.Connection | None = None
+    fee_model: Any | None = None
+    v25_cfg: Any | None = None
+    evaluate_accel_gates_fn: Any | None = None
+
+    # --- v2.5 bootstrap (no-op unless --v25 flag is provided) ---
+    if args.v25:
+        try:
+            from src.v25.bootstrap import (
+                build_fee_model,
+                evaluate_accel_gates as _evaluate_accel_gates,
+                load_v25_config,
+                run_v25_migrations,
+            )
+
+            os.makedirs(os.path.dirname(args.v25_db) or ".", exist_ok=True)
+            v25_cfg = load_v25_config()
+            conn = run_v25_migrations(args.v25_db)
+            fee_model = build_fee_model(v25_cfg)
+            evaluate_accel_gates_fn = _evaluate_accel_gates
+            print(f"[v25] bootstrap ok | db={args.v25_db} | fee_model_loaded=true")
+        except Exception as exc:  # noqa: BLE001
+            print(f"[v25] bootstrap FAILED: {exc}")
+            raise SystemExit(1) from exc
+
+    replay_now_ts: pd.Timestamp | None = None
+    replay_now_dt: datetime | None = None
+    if args.replay_now:
+        try:
+            raw_iso = str(args.replay_now).replace("Z", "+00:00")
+            replay_now_dt = datetime.fromisoformat(raw_iso)
+            if replay_now_dt.tzinfo is None:
+                replay_now_dt = replay_now_dt.replace(tzinfo=timezone.utc)
+            else:
+                replay_now_dt = replay_now_dt.astimezone(timezone.utc)
+            replay_now_ts = cast(pd.Timestamp, pd.Timestamp(replay_now_dt))
+        except Exception as exc:  # noqa: BLE001
+            print(f"[replay] invalid --replay-now value: {args.replay_now!r} ({exc})")
+            raise SystemExit(2) from exc
+
     assets = [a.strip() for a in args.assets.split(",") if a.strip()]
+    v25_conn_ref = conn if args.v25 else None
     pipeline = ArgusPipeline(
         mode=args.mode,
         assets=assets,
         evolve=bool(args.evolve),
         time_machine_dir=str(args.time_machine_dir),
+        replay_now=replay_now_ts,
+        ohlcv_limit=int(args.limit),
+        v25_conn=v25_conn_ref,
+        risk_profile=str(args.risk_profile),
+        allow_crisis=bool(args.allow_crisis),
     )
-    outputs = pipeline.run_once()
-    for item in outputs:
-        print(item)
+
+    default_cycles = 1 if args.mode == "backtest" else 5 if args.mode == "paper" else 1
+    max_cycles = max(1, int(args.max_cycles if args.max_cycles is not None else default_cycles))
+    default_run_dir = "runs/paper_v2" if args.mode == "paper" else "runs/backtest_v25"
+    run_dir = Path(args.run_dir or default_run_dir)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    decisions_log = run_dir / "decisions.jsonl"
+
+    print(
+        f"[run] mode={args.mode} cycles={max_cycles} assets={','.join(assets)} "
+        f"run_dir={run_dir} replay_now={replay_now_ts.isoformat() if replay_now_ts is not None else 'None'}"
+    )
+
+    cycle_step_minutes = max(1, int(args.cycle_step_minutes))
+    hold_minutes = max(1, int(args.hold_minutes))
+
+    def _parse_hold_grid_minutes(raw: Any) -> list[int]:
+        if raw is None:
+            return []
+        text = str(raw).strip()
+        if not text:
+            return []
+        values: set[int] = set()
+        for part in text.split(","):
+            token = part.strip()
+            if not token:
+                continue
+            try:
+                minute = int(token)
+            except ValueError as exc:
+                raise ValueError(f"invalid hold grid minute: {token!r}") from exc
+            if minute < 1 or minute > 24 * 60:
+                raise ValueError(f"hold grid minute out of range [1,1440]: {minute}")
+            values.add(minute)
+        return sorted(values)
+
+    try:
+        hold_grid_minutes = _parse_hold_grid_minutes(args.hold_grid_minutes)
+    except ValueError as exc:
+        print(f"[backtest] invalid --hold-grid-minutes value: {args.hold_grid_minutes!r} ({exc})")
+        raise SystemExit(2) from exc
+
+    sweep_skipped_rows = 0
+
+    def _opt_float(value: Any) -> float | None:
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _as_float_default(value: Any, default: float) -> float:
+        maybe = _opt_float(value)
+        return default if maybe is None else float(maybe)
+
+    adaptive_hold_enabled = bool(
+        args.mode == "backtest"
+        and bool(args.adaptive_hold_from_sweep)
+        and bool(hold_grid_minutes)
+    )
+    adaptive_series_by_regime: dict[str, dict[int, list[tuple[str, float]]]] = {}
+
+    def _performance_from_series(series: list[tuple[str, float]]) -> tuple[float, float, float]:
+        ordered = sorted(series, key=lambda x: x[0])
+        if not ordered:
+            return 0.0, 0.0, 0.0
+
+        equity = 1.0
+        peak = 1.0
+        max_drawdown = 0.0
+        wins = 0
+        for _, ret in ordered:
+            val = float(ret)
+            if val > 0.0:
+                wins += 1
+            equity *= (1.0 + val)
+            peak = max(peak, equity)
+            dd = (equity / peak) - 1.0 if peak > 0.0 else 0.0
+            max_drawdown = min(max_drawdown, dd)
+        return float(equity - 1.0), float(max_drawdown), float(wins / len(ordered))
+
+    def _choose_best_hold(series_by_hold: dict[int, list[tuple[str, float]]]) -> int | None:
+        candidates: list[tuple[int, float, float, float]] = []
+        for hold in hold_grid_minutes:
+            data = series_by_hold.get(int(hold), [])
+            if not data:
+                continue
+            total_return, max_drawdown, win_rate = _performance_from_series(data)
+            candidates.append((int(hold), total_return, max_drawdown, win_rate))
+        if not candidates:
+            return None
+        best = max(candidates, key=lambda x: (x[1], x[2], x[3], -x[0]))
+        return int(best[0])
+
+    for cycle in range(1, max_cycles + 1):
+        if args.mode == "backtest" and replay_now_dt is not None:
+            cycle_now = replay_now_dt + timedelta(minutes=cycle_step_minutes * (cycle - 1))
+            cycle_now_ts = cast(pd.Timestamp, pd.Timestamp(cycle_now))
+            pipeline.replay_now = cycle_now_ts
+        else:
+            cycle_now = datetime.now(timezone.utc)
+        try:
+            outputs = pipeline.run_once(now=cycle_now)
+        except ModuleNotFoundError as exc:
+            if args.v25 and "pandas_ta" in str(exc):
+                print("[v25] pandas_ta missing; using v25 minimal execution path for this cycle")
+                outputs = pipeline.run_v25_minimal_cycle(now=cycle_now)
+            else:
+                raise
+
+        for item in outputs:
+            print(item)
+
+        # Always append observable decisions log for cycle-level debugging
+        with open(decisions_log, "a", encoding="utf-8") as f:
+            for item in outputs:
+                rec = {
+                    "_ts": cycle_now.isoformat(),
+                    "_cycle": cycle,
+                    "mode": args.mode,
+                    **item,
+                }
+                f.write(json.dumps(rec, ensure_ascii=True, default=str) + "\n")
+
+        # Persist summary decisions into v25 DB (append-only) even on fallback path
+        persisted_cycle_records: list[dict[str, Any]] = []
+        if v25_conn_ref is not None:
+            try:
+                cycle_run_id = f"{pipeline.ctx.run_id}:c{cycle:04d}"
+                for item in outputs:
+                    out_engine = str(item.get("engine") or "").strip()
+                    if not out_engine or out_engine == "PIPELINE":
+                        out_engine = pipeline._engine_hint_for_regime(None)
+                    out_action = str(item.get("action") or item.get("status") or "rejected")
+                    merged_gate_results: dict[str, Any] = {}
+                    raw_gate_results = item.get("gate_results")
+                    if isinstance(raw_gate_results, dict):
+                        merged_gate_results.update(raw_gate_results)
+                    merged_gate_results.setdefault("path", "cycle_output")
+                    merged_gate_results.setdefault("mode", args.mode)
+                    merged_gate_results["cycle"] = cycle
+                    merged_gate_results["status"] = item.get("status")
+                    decision_id = log_decision(
+                        v25_conn_ref,
+                        run_id=cycle_run_id,
+                        timestamp=cycle_now.isoformat(),
+                        symbol=str(item.get("symbol", "UNKNOWN")),
+                        action=out_action,
+                        capital_engine="core",
+                        position_size_pct=_opt_float(item.get("position_size_pct")),
+                        leverage=_opt_float(item.get("leverage")),
+                        stop_loss_pct=_opt_float(item.get("stop_loss_pct")),
+                        confidence=_opt_float(item.get("confidence")),
+                        sqs_score=_opt_float(item.get("sqs_score")),
+                        regime="REPLAY" if pipeline.data_factory.mode == "replay" else "UNKNOWN",
+                        reason=str(item.get("reason", "cycle_output")),
+                        status=str(item.get("status", "unknown")),
+                        engine=out_engine,
+                        gate_results=merged_gate_results,
+                    )
+                    persisted_cycle_records.append(
+                        {
+                            "decision_id": decision_id,
+                            "run_id": cycle_run_id,
+                            "symbol": str(item.get("symbol", "UNKNOWN")),
+                            "action": out_action,
+                            "item": item,
+                            "gate_results": merged_gate_results,
+                        }
+                    )
+                v25_conn_ref.commit()
+            except Exception as e:
+                print(f"[v25] decision persistence error: {e}")
+
+        # Deterministic backtest execution simulator from advisory outputs.
+        if args.mode == "backtest" and v25_conn_ref is not None:
+            try:
+                for rec in persisted_cycle_records:
+                    item = rec["item"]
+                    status = str(item.get("status", "")).lower()
+                    reason = str(item.get("reason", ""))
+                    action = str(item.get("action", "")).lower()
+                    if not (
+                        status == "executed"
+                        and reason == "advisory_signal_sent"
+                        and action in {"long", "short"}
+                    ):
+                        continue
+
+                    symbol = str(rec.get("symbol", item.get("symbol", "UNKNOWN")))
+                    entry_time = cycle_now
+                    entry_price = pipeline._resolve_backtest_close_price(symbol=symbol, at=entry_time)
+                    if entry_price is None:
+                        continue
+
+                    size = _as_float_default(item.get("position_size_pct"), 0.01)
+                    leverage = _as_float_default(item.get("leverage"), 1.0)
+                    stop_distance = _as_float_default(item.get("stop_loss_pct"), 0.01)
+                    confidence = _as_float_default(item.get("confidence"), 0.0)
+                    engine = str(item.get("engine") or pipeline._engine_hint_for_regime(None))
+                    fees_pct, slippage_pct = pipeline._estimate_backtest_costs(
+                        fee_model=fee_model,
+                        entry_price=entry_price,
+                        size=size,
+                        leverage=leverage,
+                    )
+                    regime = pipeline._extract_regime_from_gate_results(rec.get("gate_results"))
+                    by_hold_eval: dict[int, tuple[datetime, float, float, float]] = {}
+
+                    if hold_grid_minutes:
+                        decision_id_raw = rec.get("decision_id")
+                        if decision_id_raw is None:
+                            sweep_skipped_rows += len(hold_grid_minutes)
+                            continue
+
+                        decision_id = int(decision_id_raw)
+                        run_id = str(rec.get("run_id", ""))
+                        fee_est_usd = max(float(entry_price) * float(size) * float(leverage), 0.0) * max(fees_pct, 0.0)
+
+                        for hold in hold_grid_minutes:
+                            sweep_exit_time = entry_time + timedelta(minutes=int(hold))
+                            sweep_exit_price = pipeline._resolve_backtest_close_price(
+                                symbol=symbol,
+                                at=sweep_exit_time,
+                            )
+                            if sweep_exit_price is None:
+                                sweep_skipped_rows += 1
+                                continue
+
+                            gross_pct, net_pct = pipeline._compute_backtest_pnl(
+                                side=action,
+                                entry_price=entry_price,
+                                exit_price=sweep_exit_price,
+                                leverage=leverage,
+                                fees_pct=fees_pct,
+                                slippage_pct=slippage_pct,
+                            )
+                            by_hold_eval[int(hold)] = (
+                                sweep_exit_time,
+                                float(sweep_exit_price),
+                                float(gross_pct),
+                                float(net_pct),
+                            )
+                            pipeline._persist_backtest_exit_sweep_row(
+                                run_id=run_id,
+                                decision_id=decision_id,
+                                symbol=symbol,
+                                side=action,
+                                entry_time=entry_time,
+                                hold_minutes=int(hold),
+                                exit_time=sweep_exit_time,
+                                entry_price=entry_price,
+                                exit_price=sweep_exit_price,
+                                gross_pnl_pct=gross_pct,
+                                net_pnl_pct=net_pct,
+                                fee_est_usd=fee_est_usd,
+                                slippage_est_pct=slippage_pct,
+                                regime=regime,
+                            )
+
+                            if adaptive_hold_enabled:
+                                regime_series = adaptive_series_by_regime.setdefault(regime, {})
+                                regime_series.setdefault(int(hold), []).append(
+                                    (sweep_exit_time.isoformat(), float(net_pct))
+                                )
+
+                    selected_hold = int(hold_minutes)
+                    if adaptive_hold_enabled:
+                        best_hold = _choose_best_hold(adaptive_series_by_regime.get(regime, {}))
+                        if best_hold is not None:
+                            selected_hold = int(best_hold)
+
+                    if selected_hold in by_hold_eval:
+                        exit_time, exit_price, _, _ = by_hold_eval[selected_hold]
+                    else:
+                        exit_time = entry_time + timedelta(minutes=int(selected_hold))
+                        resolved_exit = pipeline._resolve_backtest_close_price(symbol=symbol, at=exit_time)
+                        if resolved_exit is None:
+                            if by_hold_eval:
+                                fallback_hold = min(by_hold_eval)
+                                selected_hold = int(fallback_hold)
+                                exit_time, exit_price, _, _ = by_hold_eval[fallback_hold]
+                            else:
+                                continue
+                        else:
+                            exit_price = float(resolved_exit)
+
+                    pipeline._persist_backtest_execution_sim_trade(
+                        symbol=symbol,
+                        side=action,
+                        engine=engine,
+                        confidence=confidence,
+                        stop_distance=stop_distance,
+                        entry_time=entry_time,
+                        exit_time=exit_time,
+                        entry_price=entry_price,
+                        exit_price=float(exit_price),
+                        size=size,
+                        leverage=leverage,
+                        hold_minutes=int(selected_hold),
+                        fees_pct=fees_pct,
+                        slippage_pct=slippage_pct,
+                    )
+                v25_conn_ref.commit()
+            except Exception as e:
+                print(f"[v25] backtest execution simulator error: {e}")
+
+        # Backtest-only optional synthetic exits (disabled by default)
+        if args.mode == "backtest" and args.synthetic_exit and v25_conn_ref is not None:
+            try:
+                executed = [o for o in outputs if str(o.get("status", "")).lower() == "executed"]
+                if executed:
+                    for item in executed:
+                        pipeline._persist_backtest_time_exit_trade(
+                            symbol=str(item.get("symbol", "UNKNOWN")),
+                            side=str(item.get("action", "long")),
+                            engine=str(item.get("engine") or pipeline._engine_hint_for_regime(None)),
+                            reason_entry=str(item.get("reason", "backtest_cycle")),
+                            confidence=float(item.get("confidence", 0.55)),
+                            stop_distance=0.01,
+                            entry_time=cycle_now,
+                        )
+                else:
+                    fallback_symbol = str(outputs[0].get("symbol", pipeline._fallback_symbol("crypto"))) if outputs else pipeline._fallback_symbol("crypto")
+                    pipeline._persist_backtest_time_exit_trade(
+                        symbol=fallback_symbol,
+                        side="long",
+                        engine="BACKTEST_TIME_EXIT",
+                        reason_entry="backtest_cycle_no_executions",
+                        confidence=0.50,
+                        stop_distance=0.01,
+                        entry_time=cycle_now,
+                    )
+                v25_conn_ref.commit()
+            except Exception as e:
+                print(f"[v25] backtest trade persistence error: {e}")
+
+        print(f"[cycle {cycle}/{max_cycles}] outputs={len(outputs)}")
+
+    if args.mode == "backtest" and args.v25:
+        try:
+            from src.v25.reports.backtest_summary import write_backtest_summary
+
+            write_backtest_summary(
+                db_path=str(args.v25_db),
+                run_dir=str(run_dir),
+                hold_grid_minutes=hold_grid_minutes,
+                hold_grid_by=str(args.hold_grid_by),
+                sweep_skipped_rows=int(sweep_skipped_rows),
+                adaptive_hold_used=bool(adaptive_hold_enabled),
+            )
+            print(f"[v25] backtest summary written | run_dir={run_dir}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"[v25] backtest summary error: {exc}")
+
+    if args.v25:
+        # v2.5 Dry-Run Telemetry
+        try:
+            if evaluate_accel_gates_fn is None or v25_cfg is None:
+                raise RuntimeError("v25 bootstrap not initialized")
+            # Conservative defaults (plumbing check only)
+            passed, reason = evaluate_accel_gates_fn(
+                sub_regime="UNCERTAIN",         # S1: Fail (sub_regime_ok=False)
+                alignment_score=0.0,            # S2: Fail (alignment_ok=False)
+                sqs_score=0.0,                  # S3: Fail (sqs_ok=False)
+                kill_switch_level=0,            # R1: Pass (ok=True)
+                rolling_vol_24h=0.01,           # A: Pass (ok=True)
+                current_drawdown_pct=0.0,       # B: Pass (ok=True)
+                recent_slippage_err=None,       # C: Neutral
+                filled_order_count=0,           # D: Fail (count < 20)
+                config=v25_cfg,
+            )
+
+            log_entry = {
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "mode": args.mode,
+                "assets": args.assets,
+                "accel_passed": passed,
+                "accel_reason": reason,
+                "max_cycles": max_cycles,
+                "run_dir": str(run_dir),
+            }
+
+            os.makedirs(os.path.dirname(args.v25_dryrun_log) or ".", exist_ok=True)
+            with open(args.v25_dryrun_log, "a", encoding="utf-8") as f:
+                f.write(json.dumps(log_entry) + "\n")
+
+        except Exception as e:
+            print(f"[v25] telemetry error: {e}")
 
 
 if __name__ == "__main__":

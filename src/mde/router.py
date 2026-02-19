@@ -5,7 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping, Optional, Protocol
 
-from src.core.constants import ENGINE_HERMES, ENGINE_PHOENIX, REGIME_CRISIS, REGIME_TO_ENGINE
+from src.core.constants import (
+    ENGINE_HERMES,
+    ENGINE_PHOENIX,
+    REGIME_CRISIS,
+    REGIME_TO_ENGINE,
+    REGIME_TO_SECONDARY_ENGINES,
+)
 from src.core.types import EngineSignal, FeatureVector, RegimeState
 
 
@@ -23,16 +29,35 @@ class EngineProtocol(Protocol):
 class RegimeRouter:
     engines: Mapping[str, EngineProtocol]
 
-    def route(self, *, regime: RegimeState, features: FeatureVector) -> Optional[EngineSignal]:
-        if regime.regime == REGIME_CRISIS:
+    def route(
+        self,
+        *,
+        regime: RegimeState,
+        features: FeatureVector,
+        allow_crisis_override: bool = False,
+    ) -> Optional[EngineSignal]:
+        if regime.regime == REGIME_CRISIS and not allow_crisis_override:
             return None
 
+        # Run primary engine
         lead_name = REGIME_TO_ENGINE.get(regime.regime)
         lead_signal = self._run_engine(lead_name, regime, features) if lead_name else None
-        if lead_signal is not None:
-            return self._apply_hermes_override(regime, features, lead_signal)
 
-        # Fallback to PHOENIX when lead engine has no signal.
+        # Run secondary engines (e.g., Hydra in RANGING)
+        secondary_names = REGIME_TO_SECONDARY_ENGINES.get(regime.regime, [])
+        secondary_signals = []
+        for sec_name in secondary_names:
+            sig = self._run_engine(sec_name, regime, features)
+            if sig is not None:
+                secondary_signals.append(sig)
+
+        # Pick the best signal from all candidates
+        all_candidates = [s for s in [lead_signal] + secondary_signals if s is not None]
+        if all_candidates:
+            best = max(all_candidates, key=lambda s: s.confidence)
+            return self._apply_hermes_override(regime, features, best)
+
+        # Fallback to PHOENIX when no engine has a signal.
         fallback_signal = self._run_engine(ENGINE_PHOENIX, regime, features)
         if fallback_signal is None:
             return None

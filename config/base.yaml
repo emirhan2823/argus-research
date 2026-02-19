@@ -9,7 +9,7 @@ asset_classes:
     enabled: true
     execution_mode: "auto"
     exchange: "bingx"
-    symbols: ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+    symbols: ["BTCUSDT", "ETHUSDT", "SOLUSDT", "DOGEUSDT", "AVAXUSDT", "LINKUSDT", "ARBUSDT", "MATICUSDT"]
   us_equity:
     enabled: true
     execution_mode: "auto"
@@ -33,6 +33,8 @@ asset_classes:
 
 timeframes:
   primary: "1h"
+  scalp: "15m"
+  micro: "5m"
   confirmation: "4h"
   direction: "1d"
 

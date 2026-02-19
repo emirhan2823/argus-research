@@ -118,6 +118,8 @@ class HermesPositionManagement(BaseModel):
     critical_news_close_immediately: bool = True
     high_news_tighten_sl: bool = True
     positive_news_trail_tp: bool = True
+    dynamic_exit_shadow_enabled: bool = True
+    dynamic_exit_noop_debug_sample_n: int = 100
 
 
 class HermesConfig(BaseModel):

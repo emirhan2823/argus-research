@@ -2,8 +2,8 @@ engines:
   titan:
     active_regimes: ["TRENDING"]
     min_adx: 25
-    min_confidence: 0.55
-    max_concurrent: 2
+    min_confidence: 0.65
+    max_concurrent: 3
     trend_follow:
       ema_fast: 21
       ema_slow: 55
@@ -14,11 +14,17 @@ engines:
       volume_spike: 1.5
       atr_filter: 0.005
       confirmation_candles: 2
+    partial_tp:
+      enabled: true
+      first_target_pct: 0.50
+      first_close_pct: 0.50
+      trail_remaining: true
 
   nautilus:
     active_regimes: ["RANGING"]
     max_adx: 22
-    min_confidence: 0.55
+    min_confidence: 0.65
+    max_chop_trades_per_day: 6
     bb_reversion:
       period: 20
       std: 2.0
@@ -32,6 +38,22 @@ engines:
       extreme_neg_pctile: 10
       hold_periods: 8
       stop_pct: 0.03
+    micro_reversion:
+      obi_threshold: 0.55
+      rsi_oversold: 35
+      rsi_overbought: 65
+      boundary_proximity_atr: 0.5
+      stop_atr_mult: 0.5
+    chop_corr_gap:
+      min_correlation: 0.60
+      max_adx: 25
+      min_spread_zscore: 1.5
+      stop_zscore: 3.0
+    partial_tp:
+      enabled: true
+      first_target_pct: 0.40
+      first_close_pct: 0.50
+      trail_remaining: true
 
   phoenix:
     active_regimes: ["TRENDING", "RANGING", "VOLATILE"]
@@ -59,6 +81,19 @@ engines:
       critical_news_close_immediately: true
       high_news_tighten_sl: true
       positive_news_trail_tp: true
+      dynamic_exit_shadow_enabled: true
+      dynamic_exit_noop_debug_sample_n: 100
+    dynamic_exit:
+      # R-multiple thresholds for stage transitions
+      r_breakeven: 0.5        # ENTRY -> BREAKEVEN_LOCK at +0.5R
+      r_profit_capture: 1.5   # BREAKEVEN_LOCK -> PROFIT_CAPTURE at +1.5R
+      r_trend_rider: 3.0      # PROFIT_CAPTURE -> TREND_RIDER at +3.0R
+      # ATR multipliers for trailing stop calculation
+      atr_mult_profit_capture: 2.0   # Trailing stop distance in PROFIT_CAPTURE stage
+      atr_mult_trend_rider: 1.2      # Trailing stop distance in TREND_RIDER stage (tighter)
+      # Partial close fractions at stage transitions
+      partial_fraction_profit_capture: 0.30  # Close 30% at BREAKEVEN -> PROFIT_CAPTURE
+      partial_fraction_trend_rider: 0.20     # Close 20% at PROFIT_CAPTURE -> TREND_RIDER
     feeds:
       crypto: ["coindesk", "cointelegraph", "theblock", "decrypt"]
       finance: ["yahoo_finance", "reuters"]
@@ -69,3 +104,79 @@ engines:
     risk_neutral_mult: [0.7, 1.0]
     risk_off_mult: [0.2, 0.5]
     crisis_mult: 0.0
+
+  hydra:
+    active_regimes: ["RANGING"]
+    min_confidence: 0.60
+    max_concurrent: 5
+    timeframe: "15m"
+    scalp:
+      bb_period: 20
+      bb_std: 2.0
+      rsi_period: 14
+      rsi_oversold: 30
+      rsi_overbought: 70
+      adx_max: 25
+      obi_threshold: 0.15
+      volume_delta_periods: 3
+      min_volume_ratio: 1.2
+    execution:
+      order_type: "LIMIT"
+      chase_attempts: 3
+      chase_timeout_s: 10
+    targets:
+      tp_option: "band_mid"
+      tp_fixed_pct: 0.004
+      sl_atr_mult: 1.5
+      sl_fixed_pct: 0.003
+    partial_tp:
+      enabled: true
+      first_target_pct: 0.30
+      first_close_pct: 0.60
+      trail_remaining: true
+
+  gemini:
+    active_regimes: ["RANGING"]
+    min_confidence: 0.60
+    max_simultaneous_pairs: 3
+    pairs:
+      - symbol_a: "BTC/USDT"
+        symbol_b: "ETH/USDT"
+        pair_id: "BTC_ETH"
+      - symbol_a: "BTC/USDT"
+        symbol_b: "SOL/USDT"
+        pair_id: "BTC_SOL"
+      - symbol_a: "ETH/USDT"
+        symbol_b: "SOL/USDT"
+        pair_id: "ETH_SOL"
+    correlation:
+      window: 100
+      min_correlation: 0.60
+      entry_zscore: 2.0
+      exit_zscore: 0.5
+      max_half_life: 50
+
+  # v2.5 Precision Entry Filter (Phase E)
+  precision_filter:
+    enabled: true
+    grade_a_threshold: 0.80
+    grade_b_threshold: 0.65
+    grade_c_threshold: 0.50
+    grade_d_threshold: 0.35
+    min_passing_grade: "D"
+    confidence_adjustments:
+      grade_a: 0.05
+      grade_b: 0.02
+      grade_c: 0.00
+      grade_d: -0.05
+      grade_f: -0.10
+
+  # v2.5 Dual-Speed Architecture
+  dual_speed:
+    accel:
+      max_rolling_vol: 0.04
+      rolling_vol_window: 24
+      max_dd_for_activation: 0.02
+      max_slippage_err: 0.001
+      slippage_lookback_orders: 10
+      min_orders_for_accel: 20

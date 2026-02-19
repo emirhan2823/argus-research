@@ -6,3 +6,11 @@ httpx>=0.27.0
 flask>=3.0.0
 yfinance>=0.2.0
 feedparser>=6.0.0
+
+# v2.5 Dependencies
+pydantic>=2.0.0
+pyyaml>=6.0
+
+# Legacy Dependencies (fixing import error)
+pandas_ta>=0.3.14b
+

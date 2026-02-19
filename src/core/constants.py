@@ -29,6 +29,8 @@ ENGINE_TITAN = "TITAN"
 ENGINE_NAUTILUS = "NAUTILUS"
 ENGINE_PHOENIX = "PHOENIX"
 ENGINE_HERMES = "HERMES"
+ENGINE_HYDRA = "HYDRA"
+ENGINE_GEMINI = "GEMINI"
 
 # ── Overlays ──────────────────────────────────────────────────────
 OVERLAY_ATLAS = "ATLAS"
@@ -108,7 +110,7 @@ MIN_REWARD_RISK_RATIO = 1.5
 # ── Daily Limits ──────────────────────────────────────────────────
 DAILY_SOFT_CAP = -0.015
 DAILY_HARD_CAP = -0.025
-MAX_TRADES_PER_DAY = 15
+MAX_TRADES_PER_DAY = 30
 
 # ── Drawdown Thresholds ──────────────────────────────────────────
 DD_CAUTION = 0.02
@@ -145,9 +147,17 @@ BUDGET_TOTAL_MS = 10000
 # ── Regime Routing Map ────────────────────────────────────────────
 REGIME_TO_ENGINE = {
     REGIME_TRENDING: ENGINE_TITAN,
-    REGIME_RANGING: ENGINE_NAUTILUS,
+    REGIME_RANGING: ENGINE_NAUTILUS,  # Hydra also active in RANGING
     REGIME_VOLATILE: ENGINE_PHOENIX,
     REGIME_CRISIS: None,
+}
+
+# Secondary engines per regime (run after primary)
+REGIME_TO_SECONDARY_ENGINES = {
+    REGIME_TRENDING: [],
+    REGIME_RANGING: [ENGINE_HYDRA, ENGINE_GEMINI],
+    REGIME_VOLATILE: [],
+    REGIME_CRISIS: [],
 }
 
 # ── Feature Tiers ────────────────────────────────────────────────

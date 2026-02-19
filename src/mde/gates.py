@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any, Optional
 
 from src.core.constants import ENGINE_PHOENIX, REGIME_CRISIS
@@ -29,6 +30,37 @@ class GateInput:
     min_confidence: float = 0.55
     min_net_expected_return: float = 0.001
     min_reward_risk: float = 1.5
+    allow_crisis_override: bool = False
+
+
+def gate_breakeven_r_fee(
+    risk_usd: Decimal,
+    notional_usd: Decimal,
+    fee_bps: Decimal,
+    slippage_bps: Decimal,
+    threshold: Decimal = Decimal("0.30"),
+    epsilon: Decimal = Decimal("0.000001"),
+) -> tuple[bool, Decimal, Decimal, str]:
+    """Gate 9: reject trades where fee burden exceeds 30% of risk."""
+    if risk_usd <= Decimal("0"):
+        raise ValueError("risk_usd must be > 0")
+    if notional_usd <= Decimal("0"):
+        raise ValueError("notional_usd must be > 0")
+    if fee_bps < Decimal("0") or slippage_bps < Decimal("0"):
+        raise ValueError("fee_bps and slippage_bps must be >= 0")
+
+    fee_est_usd = notional_usd * (fee_bps + slippage_bps) / Decimal("10000")
+    fee_risk_ratio = fee_est_usd / risk_usd
+    passed = fee_risk_ratio <= (threshold + epsilon)
+    if passed:
+        reason = "gate9_pass"
+    else:
+        reason = (
+            "gate9_fail "
+            f"fee_est_usd={fee_est_usd} risk_usd={risk_usd} "
+            f"fee_risk_ratio={fee_risk_ratio} threshold={threshold}"
+        )
+    return passed, fee_est_usd, fee_risk_ratio, reason
 
 
 def evaluate_gates(inp: GateInput) -> GateResult:
@@ -46,7 +78,9 @@ def evaluate_gates(inp: GateInput) -> GateResult:
 
     # Gate 1: crisis regime
     if inp.regime.regime == REGIME_CRISIS:
-        return GateResult(False, 1, "close_all", "crisis_regime", snapshot)
+        if not inp.allow_crisis_override:
+            return GateResult(False, 1, "close_all", "crisis_regime", snapshot)
+        snapshot["crisis_override"] = True
 
     # Gate 2: HERMES block
     if inp.hermes_block_active:
@@ -74,5 +108,11 @@ def evaluate_gates(inp: GateInput) -> GateResult:
     reward_risk_ratio = inp.signal.expected_return / max(inp.signal.stop_distance, 1e-9)
     if reward_risk_ratio < inp.min_reward_risk:
         return GateResult(False, 7, "hold", "reward_risk_below_threshold", snapshot)
+
+    # Gate 9 (Breakeven-R fee burden) is enforced in pre_trade.py via
+    # compute_validated_size(). It requires sizing output (notional_usd)
+    # which is only available after the sizing step. See GR-12 in
+    # PROJECT_STATE_MEMORY_MAP.md. The gate_breakeven_r_fee() utility
+    # function above remains available for standalone use.
 
     return GateResult(True, 8, "proceed", "all_gates_passed", snapshot)
