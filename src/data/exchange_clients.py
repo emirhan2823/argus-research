@@ -9,8 +9,10 @@ Both satisfy the ExchangeClient protocol in data_factory.py:
 
 from __future__ import annotations
 
+from http.client import RemoteDisconnected
 import logging
 import os
+import random
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -71,22 +73,112 @@ class BinancePublicClient:
 
     Uses the public REST endpoint for candlestick data.
     Supports both spot and futures endpoints.
+
+    Features:
+        - In-memory TTL cache to avoid redundant API calls within a cycle
+        - Inter-request rate limiter (100ms min between calls)
     """
 
     SPOT_URL = "https://api.binance.com/api/v3/klines"
     FUTURES_URL = "https://fapi.binance.com/fapi/v1/klines"
+
+    # Cache settings
+    DEFAULT_CACHE_TTL = 55.0   # seconds (just under 1m candle interval)
+    MAX_CACHE_ENTRIES = 100
+    MIN_REQUEST_INTERVAL = 0.1  # 100ms between API calls
+    DEFAULT_IDLE_REFRESH_SECONDS = 180.0
+    DEFAULT_BREAKER_FAILURES = 5
+    DEFAULT_BREAKER_COOLDOWN_SECONDS = 60.0
 
     def __init__(
         self,
         use_futures: bool = True,
         timeout: float = 10.0,
         max_retries: int = 3,
+        cache_ttl: float | None = None,
+        idle_refresh_seconds: float = DEFAULT_IDLE_REFRESH_SECONDS,
+        breaker_failures: int = DEFAULT_BREAKER_FAILURES,
+        breaker_cooldown_seconds: float = DEFAULT_BREAKER_COOLDOWN_SECONDS,
     ) -> None:
         self.base_url = self.FUTURES_URL if use_futures else self.SPOT_URL
         self.timeout = timeout
         self.max_retries = max_retries
-        self._session = requests.Session()
-        self._session.headers.update({"User-Agent": "ARGUS/2.5"})
+        self.cache_ttl = cache_ttl if cache_ttl is not None else self.DEFAULT_CACHE_TTL
+        self.idle_refresh_seconds = max(float(idle_refresh_seconds), 1.0)
+        self.breaker_failures = max(int(breaker_failures), 1)
+        self.breaker_cooldown_seconds = max(float(breaker_cooldown_seconds), 1.0)
+        self._session = self._new_session()
+        # TTL cache: {(symbol, timeframe): (timestamp, rows)}
+        self._cache: dict[tuple[str, str], tuple[float, list]] = {}
+        self._last_request_time: float = 0.0
+        self._request_count: int = 0
+        self._last_activity_time: float = time.monotonic()
+        self._consecutive_failures: int = 0
+        self._breaker_open_until: float = 0.0
+
+    @staticmethod
+    def _new_session() -> requests.Session:
+        session = requests.Session()
+        session.headers.update({"User-Agent": "ARGUS/2.5"})
+        return session
+
+    def _refresh_session(self, *, reason: str) -> None:
+        try:
+            self._session.close()
+        except Exception:
+            pass
+        self._session = self._new_session()
+        LOG.info("Binance session refreshed: reason=%s", reason)
+
+    def _maybe_refresh_session(self, *, now_mono: float) -> None:
+        idle = now_mono - self._last_activity_time
+        if idle >= self.idle_refresh_seconds:
+            self._refresh_session(reason=f"idle_{idle:.1f}s")
+
+    def _is_breaker_open(self, *, now_mono: float) -> bool:
+        if now_mono < self._breaker_open_until:
+            remaining = self._breaker_open_until - now_mono
+            LOG.warning(
+                "Binance circuit breaker OPEN: remaining=%.2fs failures=%d",
+                remaining,
+                self._consecutive_failures,
+            )
+            return True
+
+        if self._breaker_open_until > 0.0 and self._consecutive_failures >= self.breaker_failures:
+            LOG.info("Binance circuit breaker CLOSED: cooldown elapsed")
+            self._consecutive_failures = 0
+            self._breaker_open_until = 0.0
+        return False
+
+    def _record_failure(self, *, now_mono: float, attempt: int, exc: Exception) -> None:
+        self._consecutive_failures += 1
+        LOG.warning(
+            "Binance request failed: attempt=%d/%d failures=%d error=%s",
+            attempt,
+            self.max_retries,
+            self._consecutive_failures,
+            exc,
+        )
+        self._refresh_session(reason="request_error")
+
+        if self._consecutive_failures >= self.breaker_failures:
+            self._breaker_open_until = now_mono + self.breaker_cooldown_seconds
+            LOG.error(
+                "Binance circuit breaker OPENED: failures=%d cooldown=%.1fs",
+                self._consecutive_failures,
+                self.breaker_cooldown_seconds,
+            )
+
+    def _record_success(self) -> None:
+        if self._consecutive_failures > 0:
+            LOG.info("Binance request recovered after %d failures", self._consecutive_failures)
+        self._consecutive_failures = 0
+        self._breaker_open_until = 0.0
+
+    @staticmethod
+    def _backoff_delay(*, attempt: int) -> float:
+        return min(30.0, (2 ** int(attempt)) + random.uniform(0.0, 1.0))
 
     def fetch_ohlcv(
         self,
@@ -99,9 +191,30 @@ class BinancePublicClient:
 
         Returns list of [timestamp, open, high, low, close, volume].
         Timestamps are pandas-compatible UTC datetime strings.
+        Uses TTL cache to avoid redundant API calls within a cycle.
         """
         binance_symbol = _to_binance_symbol(symbol)
         interval = _BINANCE_TF_MAP.get(timeframe, timeframe)
+        cache_key = (binance_symbol, interval)
+
+        # Cache hit check
+        now_mono = time.monotonic()
+        self._maybe_refresh_session(now_mono=now_mono)
+        cached = self._cache.get(cache_key)
+        if cached is not None:
+            cached_at, cached_rows = cached
+            if (now_mono - cached_at) < self.cache_ttl:
+                LOG.debug("Cache HIT %s/%s (%d bars)", binance_symbol, interval, len(cached_rows))
+                return cached_rows
+
+        if self._is_breaker_open(now_mono=now_mono):
+            return []
+
+        # Inter-request rate limiter
+        elapsed = now_mono - self._last_request_time
+        if elapsed < self.MIN_REQUEST_INTERVAL:
+            time.sleep(self.MIN_REQUEST_INTERVAL - elapsed)
+
         params = {
             "symbol": binance_symbol,
             "interval": interval,
@@ -110,6 +223,9 @@ class BinancePublicClient:
 
         for attempt in range(1, self.max_retries + 1):
             try:
+                self._last_request_time = time.monotonic()
+                self._last_activity_time = self._last_request_time
+                self._request_count += 1
                 resp = self._session.get(
                     self.base_url, params=params, timeout=self.timeout,
                 )
@@ -121,7 +237,20 @@ class BinancePublicClient:
                         "Binance returned empty/invalid for %s/%s (attempt %d)",
                         binance_symbol, interval, attempt,
                     )
-                    return []
+                    self._record_failure(
+                        now_mono=time.monotonic(),
+                        attempt=attempt,
+                        exc=ValueError("empty_or_invalid_response"),
+                    )
+                    if attempt < self.max_retries:
+                        delay = self._backoff_delay(attempt=attempt)
+                        LOG.warning(
+                            "Binance retry backoff: attempt=%d sleep=%.2fs",
+                            attempt,
+                            delay,
+                        )
+                        time.sleep(delay)
+                    continue
 
                 rows: list[list[Any]] = []
                 for k in raw:
@@ -137,15 +266,31 @@ class BinancePublicClient:
                     ])
 
                 LOG.debug("Binance: %s %s -> %d bars", binance_symbol, interval, len(rows))
+
+                # Store in cache
+                self._cache[cache_key] = (time.monotonic(), rows)
+                # LRU eviction if cache is too large
+                if len(self._cache) > self.MAX_CACHE_ENTRIES:
+                    oldest_key = min(self._cache, key=lambda k: self._cache[k][0])
+                    del self._cache[oldest_key]
+
+                self._record_success()
                 return rows
 
-            except requests.exceptions.RequestException as exc:
-                LOG.warning(
-                    "Binance request failed (attempt %d/%d): %s",
-                    attempt, self.max_retries, exc,
+            except (requests.exceptions.RequestException, RemoteDisconnected) as exc:
+                self._record_failure(
+                    now_mono=time.monotonic(),
+                    attempt=attempt,
+                    exc=exc,
                 )
                 if attempt < self.max_retries:
-                    time.sleep(1.0 * attempt)
+                    delay = self._backoff_delay(attempt=attempt)
+                    LOG.warning(
+                        "Binance retry backoff: attempt=%d sleep=%.2fs",
+                        attempt,
+                        delay,
+                    )
+                    time.sleep(delay)
 
         LOG.error("Binance: all %d attempts failed for %s", self.max_retries, binance_symbol)
         return []
@@ -338,7 +483,7 @@ class HistoricalDataDownloader:
                 end_time=end_time,
                 limit=1500,
             )
-            if not batch:
+            if not isinstance(batch, list) or not batch:
                 LOG.warning("No more data for %s from %s", symbol, current_start)
                 break
 
@@ -431,12 +576,13 @@ class CryptoNewsDownloader:
                 feed = feedparser.parse(url)
                 for entry in feed.entries[:max_per_source]:
                     published = entry.get("published", entry.get("updated", ""))
+                    summary_text = str(entry.get("summary", "") or "")
                     all_headlines.append({
                         "source": source,
                         "title": entry.get("title", ""),
                         "published": published,
                         "link": entry.get("link", ""),
-                        "summary": entry.get("summary", "")[:500],
+                        "summary": summary_text[:500],
                     })
                 LOG.info("Fetched %d headlines from %s", min(len(feed.entries), max_per_source), source)
             except Exception as exc:

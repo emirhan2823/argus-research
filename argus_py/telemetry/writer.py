@@ -3,6 +3,7 @@ import json
 import math
 import os
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -224,7 +225,20 @@ class TelemetryWriter:
                 f.write(payload)
                 f.flush()
                 os.fsync(f.fileno())
-            os.replace(tmp_path, self._heartbeat_path)
+            replaced = False
+            for attempt in range(10):
+                try:
+                    os.replace(tmp_path, self._heartbeat_path)
+                    replaced = True
+                    break
+                except PermissionError:
+                    if attempt == 9:
+                        break
+                    time.sleep(0.002 * (attempt + 1))
+
+            if not replaced:
+                if tmp_path.exists():
+                    tmp_path.unlink()
 
     def flush(self) -> None:
         with self._lock:

@@ -10,7 +10,9 @@ feedparser>=6.0.0
 # v2.5 Dependencies
 pydantic>=2.0.0
 pyyaml>=6.0
+pyarrow>=16.0.0
 
-# Legacy Dependencies (fixing import error)
-pandas_ta>=0.3.14b
+# Optional technical-analysis acceleration
+# pandas_ta may be unavailable in some environments (notably certain Python 3.12 builds).
+# ARGUS auto-falls back to BasicFeatureBuilder when pandas_ta is not installed.
 

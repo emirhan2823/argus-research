@@ -384,6 +384,7 @@ TABLE_DDL: tuple[str, ...] = (
     CREATE TABLE IF NOT EXISTS backtest_exit_sweep (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       run_id TEXT NOT NULL,
+      decision_cycle INTEGER,
       decision_id INTEGER NOT NULL,
       symbol TEXT NOT NULL,
       side TEXT NOT NULL,
@@ -397,6 +398,50 @@ TABLE_DDL: tuple[str, ...] = (
       fee_est_usd REAL,
       slippage_est_pct REAL,
       regime TEXT
+    )
+    """,
+    # --- Stage-2B: Paper Cycle Log ---
+    """
+    CREATE TABLE IF NOT EXISTS paper_cycle_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      decision_cycle INTEGER NOT NULL,
+      timestamp TEXT NOT NULL,
+      symbol TEXT NOT NULL,
+      regime_json TEXT,
+      engine_weights_json TEXT,
+      candidate_signals_json TEXT,
+      final_decision_json TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    )
+    """,
+    # --- Stage-2C: Paper runtime state ---
+    """
+    CREATE TABLE IF NOT EXISTS paper_runtime_state (
+      id INTEGER PRIMARY KEY CHECK(id = 1),
+      last_cycle_ts TEXT,
+      total_cycles INTEGER NOT NULL DEFAULT 0,
+      last_trade_ts TEXT,
+      consecutive_errors INTEGER NOT NULL DEFAULT 0,
+      uptime_seconds REAL NOT NULL DEFAULT 0.0,
+      updated_at TEXT DEFAULT (datetime('now'))
+    )
+    """,
+    # --- Stage-2D: Telegram signal notification log ---
+    """
+    CREATE TABLE IF NOT EXISTS telegram_notifications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sent_at TEXT NOT NULL,
+      sent_day_utc TEXT NOT NULL,
+      symbol TEXT NOT NULL,
+      action TEXT NOT NULL,
+      confidence REAL,
+      engine TEXT,
+      regime TEXT,
+      decision_id INTEGER,
+      trade_id TEXT,
+      dedup_key TEXT NOT NULL,
+      message_text TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
     )
     """,
 )
@@ -446,6 +491,15 @@ INDEX_DDL: tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS idx_bt_exit_sweep_decision ON backtest_exit_sweep(decision_id)",
     "CREATE INDEX IF NOT EXISTS idx_bt_exit_sweep_symbol ON backtest_exit_sweep(symbol)",
     "CREATE INDEX IF NOT EXISTS idx_bt_exit_sweep_hold ON backtest_exit_sweep(hold_minutes)",
+    # --- Stage-2B Indexes ---
+    "CREATE INDEX IF NOT EXISTS idx_paper_cycle_time ON paper_cycle_log(timestamp)",
+    "CREATE INDEX IF NOT EXISTS idx_paper_cycle_symbol ON paper_cycle_log(symbol)",
+    # --- Stage-2C Indexes ---
+    "CREATE INDEX IF NOT EXISTS idx_runtime_state ON paper_runtime_state(id)",
+    # --- Stage-2D Indexes ---
+    "CREATE INDEX IF NOT EXISTS idx_tg_notify_day ON telegram_notifications(sent_day_utc)",
+    "CREATE INDEX IF NOT EXISTS idx_tg_notify_symbol_action ON telegram_notifications(symbol, action, sent_at)",
+    "CREATE INDEX IF NOT EXISTS idx_tg_notify_decision ON telegram_notifications(decision_id)",
 )
 
 
@@ -481,6 +535,19 @@ def run_v25_migrations(db_path: str) -> sqlite3.Connection:
         }
         if "hold_minutes" not in trades_cols:
             conn.execute("ALTER TABLE trades ADD COLUMN hold_minutes INTEGER")
+
+        sweep_cols = {
+            str(row[1]).lower()
+            for row in conn.execute("PRAGMA table_info(backtest_exit_sweep)").fetchall()
+        }
+        if sweep_cols and "decision_cycle" not in sweep_cols:
+            conn.execute("ALTER TABLE backtest_exit_sweep ADD COLUMN decision_cycle INTEGER")
+
+        # Stage-2B: Add fees_pct and slippage_pct to trades table
+        if "fees_pct" not in trades_cols:
+            conn.execute("ALTER TABLE trades ADD COLUMN fees_pct REAL DEFAULT 0")
+        if "slippage_pct" not in trades_cols:
+            conn.execute("ALTER TABLE trades ADD COLUMN slippage_pct REAL DEFAULT 0")
 
         conn.commit()
         return conn

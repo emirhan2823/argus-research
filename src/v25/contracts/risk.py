@@ -15,6 +15,7 @@ from src.v25.contracts.base import (
     RatioDecimal,
     TimestampedModel,
 )
+from src.v25.contracts.decision import TradeDecision
 from src.v25.contracts.signal import RegimeType
 from src.v25.contracts.trade import CapitalEngine
 
@@ -107,3 +108,12 @@ class CircuitBreakerState(ArgusModel):
         if self.cooldown_until is not None and self.cooldown_until < self.entered_at:
             raise ValueError("cooldown_until must be >= entered_at")
         return self
+
+
+class RiskVerdict(ArgusModel):
+    """Backward-compatible risk verdict contract used by Package-0 tests."""
+
+    approved: bool
+    reason: str = Field(min_length=1, max_length=512)
+    adjusted_decision: TradeDecision | None = None
+    risk_level: int = Field(ge=0, le=4)

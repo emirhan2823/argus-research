@@ -79,6 +79,7 @@ tmp/
 Argus_*.json
 *TradeHistory*.json
 *.jsonl
+argus_tam_kod.txt
 
 # SQLite databases
 *.sqlite

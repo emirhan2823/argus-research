@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import Field
 
@@ -96,3 +97,46 @@ class SignalTemplate(TimestampedModel):
     invalid_reason: str | None = Field(default=None, min_length=1, max_length=512)
     metadata: dict[str, Any] = Field(default_factory=dict)
     sentiment_bias: SignedUnitDecimal = Decimal("0")
+
+
+class Signal(ArgusModel):
+    """Backward-compatible signal contract used by Package-0 tests."""
+
+    engine: str = Field(min_length=1, max_length=64)
+    sub_strategy: str | None = Field(default=None, min_length=1, max_length=128)
+    bias: Literal["long", "short", "flat"]
+    confidence: float = Field(ge=0.0, le=1.0)
+    stop_distance: float = Field(gt=0.0, le=0.10)
+    take_profit_distance: float = Field(gt=0.0)
+    expected_return: float
+    atr: float = Field(gt=0.0)
+    regime_at_signal: str = Field(min_length=1, max_length=64)
+    timestamp: datetime
+
+
+class SignalQualityScore(ArgusModel):
+    """Backward-compatible SQS contract used by Package-0 tests."""
+
+    total_score: float = Field(ge=0.0, le=1.0)
+    regime_consistency: float = Field(ge=0.0, le=1.0)
+    trend_range_structure: float = Field(ge=0.0, le=1.0)
+    microstructure_quality: float = Field(ge=0.0, le=1.0)
+    fee_adjusted_expectancy: float = Field(ge=0.0, le=1.0)
+    hermes_news_risk: float = Field(ge=0.0, le=1.0)
+    passed: bool
+    threshold_used: float = Field(ge=0.0, le=1.0)
+    reason_if_failed: str | None = Field(default=None, max_length=512)
+    timestamp: datetime
+
+
+class ConfidenceState(ArgusModel):
+    """Backward-compatible confidence state contract used by Package-0 tests."""
+
+    alignment_score: float = Field(ge=0.0, le=1.0)
+    regime_confidence: float = Field(ge=0.0, le=1.0)
+    signal_confidence: float = Field(ge=0.0, le=1.0)
+    sqs_score: float = Field(ge=0.0, le=1.0)
+    atlas_multiplier: float = Field(ge=0.0, le=1.5)
+    composite: float = Field(ge=0.0, le=1.0)
+    accel_eligible: bool
+    timestamp: datetime

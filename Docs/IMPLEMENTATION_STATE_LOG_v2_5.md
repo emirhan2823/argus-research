@@ -1,7 +1,7 @@
 # IMPLEMENTATION_STATE_LOG_v2_5
 
-Last updated: 2026-02-18  
-Scope baseline: v2.5 implementation work completed through PR-H06, PR-G03.1, FIX-01 through FIX-05, PR-SHADOW-PERSIST, PR-EXIT-CONFIG, PR-I01, PR-I02, PR-J01, PR-J02, Phase A, Phase B (including B-05 router wiring), Phase C, Phase D, Phase E, Phase F, E2E harness, remaining gap closures (A-11, B-07, H-11, H-12), and production hardening (Gemini pipeline wiring, PrecisionConfig YAML loading, NautilusEngine candle feeding, CorrelationTracker pipeline integration) in this repository state.
+Last updated: 2026-02-21  
+Scope baseline: v2.5 implementation work completed through PR-H06, PR-G03.1, FIX-01 through FIX-05, PR-SHADOW-PERSIST, PR-EXIT-CONFIG, PR-I01, PR-I02, PR-J01, PR-J02, Phase A, Phase B (including B-05 router wiring), Phase C, Phase D, Phase E, Phase F, P4-A, P4-B, P4-C (adaptive hold optimization track), E2E harness, remaining gap closures (A-11, B-07, H-11, H-12), production hardening (Gemini pipeline wiring, PrecisionConfig YAML loading, NautilusEngine candle feeding, CorrelationTracker pipeline integration), ORION v1 meta-orchestrator, and Stage-2A real data integration in this repository state.
 
 This log records implemented changes only, current safety posture, known debt, and the next ordered PR sequence.
 
@@ -180,6 +180,101 @@ This log records implemented changes only, current safety posture, known debt, a
 - Files created: `tests/integration/test_phase_f_validation.py` (21 tests).
 - Test result: 21/21 new tests pass; 782/786 full suite pass (3 pre-existing Windows-specific failures, 1 skip). Zero regressions.
 
+### P4-A — Regime-aware adaptive hold from sweep (backtest-only, analysis-driven application)
+- What changed: Added hold-grid sweep analysis and adaptive hold application wiring in backtest simulator path only. Simulated exits continue to be deterministic and derived from replay-aware close lookup + cost model. Adaptive hold selection uses sweep-derived performance and persists selected `hold_minutes` into `trades` rows.
+- CLI added: `--hold-grid-minutes`, `--hold-grid-by`, `--adaptive-hold-from-sweep`.
+- Summary/reporting: `summary.json` now contains `exit_sweep` payload (`enabled`, `holds`, `best_hold_overall`, `by_hold`, `best_hold_by_regime`, `skipped_rows`) and `summary.md` includes an "Exit Sweep (Hold Grid)" section.
+- Tests: `test_backtest_exit_hold_grid_sweep_outputs`, `test_backtest_adaptive_hold_from_sweep_by_regime` in `tests/data/test_v25_cycle_execution.py`.
+
+### P4-B — In-sample / out-of-sample adaptive hold split (backtest-only, no leakage)
+- What changed: Added split-based adaptive learning/apply control to prevent look-ahead. For cycles in IS window, sweep rows update learning stats but persisted trades use default hold; for OOS window, adaptive per-regime hold is applied using IS-only accumulated stats.
+- CLI added: `--adaptive-split-ratio` (`0.0..1.0`, default `0.5`).
+- Summary/reporting: `summary.json` now includes `adaptive_hold_used`, `adaptive_split_ratio`, `in_sample_cycles`, `out_of_sample_cycles`.
+- Tests: `test_backtest_adaptive_hold_split_uses_is_then_oos` in `tests/data/test_v25_cycle_execution.py`.
+
+### P4-C — Rolling walk-forward adaptive hold (backtest-only, deterministic)
+- What changed: Added rolling walk-forward adaptive hold mode. When walk-forward window is configured, static split logic is disabled and hold selection uses only prior-window sweep rows (`decision_cycle` bounded to learning window), eliminating future leakage.
+- CLI added: `--adaptive-walk-window`, `--adaptive-walk-step`.
+- Summary/reporting: `summary.json.walk_forward` object added with fields: `enabled`, `window`, `step`, `segments`, `oos_cycles`.
+- Determinism: Selection remains deterministic (fixed tie-breaking, replay-timestamp based ordering, no randomness).
+- Live/paper impact: **None**. Changes are isolated to backtest simulator logic.
+- Acceptance test: `test_backtest_walk_forward_adaptive_hold` in `tests/data/test_v25_cycle_execution.py` verifies 60-cycle run, varying `hold_minutes`, and `summary.walk_forward.enabled == true`.
+
+### P4-D — Engine Observatory (always-on per-engine analytics)
+- What changed: Created `src/v25/reports/engine_observatory.py` with `write_engine_observatory(db_path, run_dir, mode)` entry point. Generates 6 output files: `engine_overview.json`, `engine_overview.md`, `engine_overview.csv`, `engine_regime_breakdown.csv`, `engine_recent_windows.csv`, `signal_funnel.csv`. Computes per-engine metrics: `closed_trades_count`, `win_rate`, `total_return`, `avg_trade_return`, `median_trade_return`, `max_drawdown` (multiplicative from sequential net_pnl_pct), `avg_hold_minutes` (from column or derived from timestamps), `exposure_proxy`. Regime breakdown repeats metrics grouped by `(engine, regime_at_entry)`. Recent windows compute metrics for last-20, last-50, last-200 trades per engine. Signal funnel aggregates from `decisions` table: `decisions_total`, `executed`, `rejected`, `no_signal`, `crisis_override_count`, `gate9_fail_count` (parsed from `gate_results_json` or `reason`). Graceful degradation: missing tables/columns default to 0/null via `_safe_query` and `_has_column` helpers. Wired into `src/main.py` for all v25 modes (backtest/paper/live). Updated `src/v25/reports/__init__.py` exports.
+- Live/paper impact: **None**. Report generation only; no trading logic touched.
+- Files created: `src/v25/reports/engine_observatory.py` (~310 lines), `tests/data/test_engine_observatory.py` (10 tests).
+- Files modified: `src/main.py` (~14 lines added), `src/v25/reports/__init__.py` (2 lines added).
+- Test result: 10/10 new tests pass; 19/19 existing v25 cycle tests pass (zero regressions).
+
+### Stage-2A — Real Data Integration (live market data pipeline)
+- What changed: Updated `BinancePublicClient` in `src/data/exchange_clients.py` with in-memory TTL cache (default 55s, LRU eviction at 100 entries) and inter-request rate limiter (100ms min between API calls). Added `cache_ttl` constructor parameter. Updated `_load_ohlcv()` in `src/main.py` with a new `"live"` mode path: when `data_factory.mode == "live"` and exchange client is available, fetches real klines from Binance API instead of generating mock random walks. Falls back to mock if fetch returns empty. Added `--live-data` CLI flag (sets `data_mode="live"`) and `--timeframe` CLI flag (default `1h`, sets `_primary_tf` on pipeline). Pipeline initialization wires these into `DataFactory` constructor via the existing `data_mode` parameter. Added startup status lines: `[data] LIVE` or `[data] MOCK`. Created `tests/integration/test_live_data.py` with 5 tests: real Binance API schema validation (online), DataFactory delegation (offline), 2-cycle paper smoke with real data (online), cache hit prevention (offline), cache TTL expiry (offline).
+- Risk addressed: Previously, paper mode always used `_mock_ohlcv()` which generates random walks — useless for evaluating real market behavior. Now paper/live modes can use real Binance klines with a single flag. TTL cache prevents redundant API calls when multiple assets share the same symbol. Rate limiter keeps requests well within Binance's 1200 req/min limit. Mock fallback ensures no crash if network is unavailable.
+- Backward compatibility: Default behavior unchanged (mock data). `--live-data` is opt-in. `BinancePublicClient` constructor accepts `cache_ttl=None` which defaults to 55s; existing callers unaffected. All 39 existing regression tests pass.
+- Files modified: `src/data/exchange_clients.py` (~40 lines changed), `src/main.py` (~40 lines added).
+- Files created: `tests/integration/test_live_data.py` (5 tests).
+- Test result: 5/5 new tests pass; 39/39 existing regression tests pass (zero regressions).
+
+### Stage-2D — Reliability + Notifications + Multi-symbol (paper/live readiness)
+- What changed: Upgraded Binance public client resilience for live-data path with (1) idle session refresh (default 180s, env-overridable), (2) exponential backoff + jitter (`min(30, 2**attempt + rand(0,1))`), and (3) circuit breaker (default open after 5 consecutive failures, 60s cooldown). Added structured logs for attempt/failure/backoff and breaker OPEN/CLOSE transitions.
+- Multi-symbol support: Added CLI `--symbols` and `--symbol-universe-size {5,15}`. For live-data runs, default crypto universe now uses a safe top-5 basket (`BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,DOGEUSDT`) unless overridden. 15-symbol option remains opt-in.
+- Telegram signal notifier: Added `src/notifications/telegram.py` and CLI `--telegram-signals`, `--telegram-min-confidence`. Notifications trigger only for actionable advisory signals (`status=executed`, `reason=advisory_signal_sent`, `action in {long,short}`) with confidence gate, dedup (same symbol/action within 10m), daily cap (30/day UTC), and DB-backed persistence via `telegram_notifications`.
+- DB/schema: Added `telegram_notifications` table and indexes in v2.5 migrations for dedup/cap audit traceability.
+- Python 3.12 migration safety: Added isolated venv setup guidance in `Docs/ENV_SETUP.md`; validated install path on 3.12; added `pyarrow` to runtime requirements for parquet/replay compatibility; kept `pandas_ta` optional with fallback behavior intact (`BasicFeatureBuilder`).
+- Verification docs: Added/updated `Docs/VERIFY_STAGE2D.md` with copy-paste commands for venv setup, dependency install, full regression (`pytest -q`), targeted Stage-2D tests, paper one-cycle, paper 24h supervisor, Telegram enablement, and online-test gating.
+- Live/paper impact: additive and opt-in (CLI/env gated). Backtest deterministic behavior remains unchanged unless backtest-specific flags are explicitly enabled.
+- Tests added:
+  - `tests/unit/test_exchange_client_resilience.py` (`test_backoff_and_circuit_breaker_behavior`, `test_session_refresh_after_idle`)
+  - `tests/unit/test_telegram_notifier.py` (`test_telegram_dedup_logic`, `test_telegram_daily_cap`)
+  - `tests/unit/test_symbol_universe.py` (`test_symbols_parsing_and_default_universe`)
+  - `tests/integration/test_live_data.py` (`test_live_data_path_uses_exchange_client_and_cache_for_multiple_symbols`, `test_binance_live_data_multi_symbol_smoke`, `test_binance_live_data_handles_disconnect_gracefully`)
+- Local verification result (2026-02-21): `973 passed, 5 skipped` on Python 3.12 (`venv312`) with full `pytest -q` run.
+
+### Release hardening update — 7/24 paper + forward/backtest analytics (2026-02-21)
+- Python 3.12 parallel venv migration path finalized with `.venv312` naming in docs (`Docs/ENV_SETUP.md`, `Docs/VERIFY_STAGE2D.md`) while preserving existing environments.
+- Binance live-data resilience hardened for `RemoteDisconnected` path in `src/data/exchange_clients.py`: explicit disconnect exception handling now routes through retry/backoff + circuit-breaker logic; cache lookup is now evaluated before breaker short-circuit to maximize cached continuity during cooldown.
+- Telegram notifier message contract updated in `src/notifications/telegram.py` to include a mandatory disclaimer line: `paper signal only`.
+- Added integration coverage for Telegram sender workflow with env-config bootstrap and mocked API call in `tests/integration/test_telegram_signal_integration.py`.
+- Added resilience coverage for disconnect breaker/recovery behavior in `tests/unit/test_exchange_client_resilience.py` (`test_remote_disconnected_triggers_breaker_and_recovers`).
+- Added long-scenario WAR backtest runner/reporter `Scripts/war_backtest_report.py`:
+  - Scenario date-range execution with replay + forward stepping
+  - Per-scenario artifacts: `equity_curve.csv`, `drawdown_curve.csv`, `trades/*.json`, `monthly_summary.csv`, `monthly_summary.md`
+  - Aggregate markdown output: `reports/WAR_BACKTEST_REPORT.md`
+  - Failure-safe behavior for missing cache ranges (scenario marked failed, run continues).
+
+### Release captain validation refresh (2026-02-21)
+- Verified Python 3.12 isolated venv path in `.venv312` without touching existing envs; `pip` upgraded and both `requirements.txt` and `requirements-dev.txt` install cleanly.
+- Hardened Telegram message contract in `src/notifications/telegram.py` with explicit `Entry Time` field while keeping `paper signal only` disclaimer.
+- Added resilience coverage in `tests/unit/test_exchange_client_resilience.py` with `test_cache_is_served_while_breaker_open` to prove TTL cache is served before HTTP calls even during breaker cooldown.
+- Updated live-data multi-symbol integration in `tests/integration/test_live_data.py` to validate 5-symbol flow (`BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,DOGEUSDT`) with cache reuse on the second cycle.
+- Full-suite verification on Python 3.12 (`.venv312`): `976 passed, 5 skipped` (`pytest -q`).
+
+## Verification (Local Commands)
+
+1) Run backtest with walk-forward adaptive hold (copy/paste):
+
+```bash
+python src/main.py --mode backtest --assets crypto --max-cycles 60 --replay-now 2024-02-01T12:00:00Z --cycle-step-minutes 1 --risk-profile relaxed --allow-crisis --hold-minutes 45 --hold-grid-minutes 10,30,60 --adaptive-hold-from-sweep --adaptive-walk-window 20 --adaptive-walk-step 10 --hold-grid-by regime --v25 --v25-db "runs/v25/bt_p4c_verify.db"
+```
+
+2) SQLite checks for decisions/trades/hold distribution:
+
+```bash
+python -c "import sqlite3; conn=sqlite3.connect('runs/v25/bt_p4c_verify.db'); cur=conn.cursor(); print('decisions', cur.execute('select count(*) from decisions').fetchone()[0]); print('closed_trades', cur.execute('select count(*) from trades where exit_time is not null').fetchone()[0]); print('hold_dist', cur.execute('select hold_minutes, count(*) from trades where exit_time is not null group by hold_minutes order by hold_minutes').fetchall()); conn.close()"
+```
+
+3) Confirm summary walk-forward fields:
+
+```bash
+python -c "import json, pathlib; p=pathlib.Path('runs/backtest_v25/summary.json'); d=json.loads(p.read_text(encoding='utf-8')); print('walk_forward', d.get('walk_forward')); print('adaptive_hold_used', d.get('adaptive_hold_used'))"
+```
+
+4) Confirm report artifacts exist (`exit_sweep.csv`, `equity.csv`, `summary.json`, `summary.md`):
+
+```bash
+python -c "import pathlib; r=pathlib.Path('runs/backtest_v25'); print({n:(r/n).exists() for n in ['exit_sweep.csv','equity.csv','summary.json','summary.md']})"
+```
+
 ---
 
 ## 2. Safety Invariants Now Enforced
@@ -334,7 +429,10 @@ This log records implemented changes only, current safety posture, known debt, a
 | `tests/mde/test_precision_filter.py` | 47 | ALL PASS |
 | `tests/integration/test_phase_f_validation.py` | 21 | ALL PASS |
 | `tests/v25/test_remaining_gaps.py` | 17 | ALL PASS |
-| Full suite (excl. 2 pre-existing failures) | 800/803 | PASS |
+| `tests/data/test_engine_observatory.py` | 10 | ALL PASS |
+| `tests/integration/test_live_data.py` | 5 | ALL PASS |
+| `tests/unit/test_orion.py` | 22 | ALL PASS |
+| Full suite (excl. 2 pre-existing failures) | 827/830 | PASS |
 
 Pre-existing failures (not caused by our changes):
 - `tests/unit/test_config.py::test_risk_config` — config value drift (`base_risk_pct` 0.015 vs test expectation 0.02)

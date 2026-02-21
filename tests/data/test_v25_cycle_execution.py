@@ -23,20 +23,20 @@ def test_v25_minimal_cycle_persists_decision_and_trade(monkeypatch, tmp_path) ->
         mode="paper",
         assets=["crypto"],
         v25_conn=conn,
-        ohlcv_limit=10,
+        ohlcv_limit=30,
     )
 
     def _fake_load_ohlcv(*, symbol: str, now: datetime):
         _ = symbol, now
-        ts = pd.date_range("2024-01-01T00:01:00Z", periods=10, freq="min", tz="UTC")
+        ts = pd.date_range("2024-01-01T00:01:00Z", periods=30, freq="min", tz="UTC")
         return pd.DataFrame(
             {
                 "timestamp": ts,
-                "open": [100.0 + i for i in range(10)],
-                "high": [101.0 + i for i in range(10)],
-                "low": [99.0 + i for i in range(10)],
-                "close": [100.5 + i for i in range(10)],
-                "volume": [1000.0 for _ in range(10)],
+                "open": [100.0 + i for i in range(30)],
+                "high": [101.0 + i for i in range(30)],
+                "low": [99.0 + i for i in range(30)],
+                "close": [100.5 + i for i in range(30)],
+                "volume": [1000.0 for _ in range(30)],
             }
         )
 
@@ -1069,3 +1069,338 @@ def test_backtest_adaptive_hold_from_sweep_by_regime(monkeypatch, tmp_path) -> N
     assert payload.get("adaptive_hold_used") is True
     assert isinstance(payload.get("best_hold_by_regime"), dict)
     assert payload.get("exit_sweep", {}).get("best_hold_by_regime")
+
+
+def test_backtest_adaptive_hold_split_uses_is_then_oos(monkeypatch, tmp_path) -> None:
+    db_path = tmp_path / "argus_v25_adaptive_split.db"
+    run_dir = tmp_path / "backtest_v25"
+    dryrun_log = tmp_path / "dryrun_events.jsonl"
+
+    anchor = datetime(2024, 2, 1, 12, 0, 0, tzinfo=timezone.utc)
+    split_ts = (anchor + timedelta(minutes=30)).isoformat()
+
+    def _fake_fetch_ohlcv(self, *, symbol: str, timeframe: str = "1m", limit: int = 500, now=None):
+        _ = self, symbol, timeframe
+        anchor_ts = pd.Timestamp(now if now is not None else "2024-02-01T12:00:00Z")
+        if anchor_ts.tzinfo is None:
+            anchor_ts = anchor_ts.tz_localize("UTC")
+        else:
+            anchor_ts = anchor_ts.tz_convert("UTC")
+
+        n = max(1, int(limit))
+        ts = pd.date_range(end=anchor_ts, periods=n, freq="min", tz="UTC")
+        minute_index = (ts.asi8 // 60_000_000_000).astype(float)
+        close = 100.0 + minute_index * 0.0002
+
+        rows: list[list[object]] = []
+        for i, t in enumerate(ts):
+            c = float(close[i])
+            rows.append([t.to_pydatetime(), c - 0.05, c + 0.10, c - 0.10, c, 1200.0])
+        return rows
+
+    def _route(self, *, regime, features, allow_crisis_override=False):
+        _ = self, regime, allow_crisis_override
+        return EngineSignal(
+            engine="TITAN",
+            sub_strategy="trend_follow",
+            asset_class=features.asset_class,
+            symbol=features.symbol,
+            bias="long",
+            confidence=0.8,
+            stop_distance=0.01,
+            expected_return=0.02,
+            atr=max(features.atr_14, 1e-6),
+        )
+
+    monkeypatch.setattr(main_mod.ArgusPipeline, "_init_exchange_client", staticmethod(lambda evolve: None))
+    monkeypatch.setattr(main_mod.DataFactory, "fetch_ohlcv", _fake_fetch_ohlcv)
+    monkeypatch.setattr(main_mod.ArgusPipeline, "_persist_validated_sizing", lambda self, pre, symbol: None)
+    monkeypatch.setattr(main_mod.SentinelValidator, "validate", lambda self, inp: SimpleNamespace(score=1.0))
+    monkeypatch.setattr(main_mod.RegimeRouter, "route", _route)
+    monkeypatch.setattr(main_mod, "evaluate_gates", lambda inp: SimpleNamespace(approved=True, reason="ok"))
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "main.py",
+            "--mode",
+            "backtest",
+            "--assets",
+            "crypto",
+            "--max-cycles",
+            "60",
+            "--run-dir",
+            str(run_dir),
+            "--v25",
+            "--v25-db",
+            str(db_path),
+            "--v25-dryrun-log",
+            str(dryrun_log),
+            "--replay-now",
+            "2024-02-01T12:00:00Z",
+            "--cycle-step-minutes",
+            "1",
+            "--risk-profile",
+            "relaxed",
+            "--allow-crisis",
+            "--hold-minutes",
+            "45",
+            "--hold-grid-minutes",
+            "10,30,60",
+            "--adaptive-hold-from-sweep",
+            "--adaptive-split-ratio",
+            "0.5",
+            "--hold-grid-by",
+            "regime",
+        ],
+    )
+
+    main_mod.main()
+
+    conn = sqlite3.connect(db_path)
+    try:
+        decision_count = conn.execute("SELECT COUNT(*) FROM decisions").fetchone()[0]
+        in_sample_holds = {
+            int(row[0])
+            for row in conn.execute(
+                """
+                SELECT DISTINCT hold_minutes FROM trades
+                WHERE exit_time IS NOT NULL AND hold_minutes IS NOT NULL AND entry_time < ?
+                """,
+                (split_ts,),
+            ).fetchall()
+        }
+        out_sample_holds = {
+            int(row[0])
+            for row in conn.execute(
+                """
+                SELECT DISTINCT hold_minutes FROM trades
+                WHERE exit_time IS NOT NULL AND hold_minutes IS NOT NULL AND entry_time >= ?
+                """,
+                (split_ts,),
+            ).fetchall()
+        }
+    finally:
+        conn.close()
+
+    assert decision_count == 60
+    assert in_sample_holds
+    assert in_sample_holds == {45}
+    assert out_sample_holds
+    assert out_sample_holds.issubset({10, 30, 60})
+
+    summary_json = run_dir / "summary.json"
+    payload = json.loads(summary_json.read_text(encoding="utf-8"))
+    assert payload.get("adaptive_hold_used") is True
+    assert float(payload.get("adaptive_split_ratio", 0.0)) == 0.5
+    assert int(payload.get("in_sample_cycles", 0)) == 30
+    assert int(payload.get("out_of_sample_cycles", 0)) == 30
+
+
+def test_backtest_walk_forward_adaptive_hold(monkeypatch, tmp_path) -> None:
+    db_path = tmp_path / "argus_v25_walk_forward.db"
+    run_dir = tmp_path / "backtest_v25"
+    dryrun_log = tmp_path / "dryrun_events.jsonl"
+
+    def _fake_fetch_ohlcv(self, *, symbol: str, timeframe: str = "1m", limit: int = 500, now=None):
+        _ = self, symbol, timeframe
+        anchor_ts = pd.Timestamp(now if now is not None else "2024-02-01T12:00:00Z")
+        if anchor_ts.tzinfo is None:
+            anchor_ts = anchor_ts.tz_localize("UTC")
+        else:
+            anchor_ts = anchor_ts.tz_convert("UTC")
+
+        n = max(1, int(limit))
+        ts = pd.date_range(end=anchor_ts, periods=n, freq="min", tz="UTC")
+        minute_index = (ts.asi8 // 60_000_000_000).astype(float)
+        close = 100.0 + minute_index * 0.0002
+
+        rows: list[list[object]] = []
+        for i, t in enumerate(ts):
+            c = float(close[i])
+            rows.append([t.to_pydatetime(), c - 0.05, c + 0.10, c - 0.10, c, 1200.0])
+        return rows
+
+    def _route(self, *, regime, features, allow_crisis_override=False):
+        _ = self, regime, allow_crisis_override
+        return EngineSignal(
+            engine="TITAN",
+            sub_strategy="trend_follow",
+            asset_class=features.asset_class,
+            symbol=features.symbol,
+            bias="long",
+            confidence=0.8,
+            stop_distance=0.01,
+            expected_return=0.02,
+            atr=max(features.atr_14, 1e-6),
+        )
+
+    monkeypatch.setattr(main_mod.ArgusPipeline, "_init_exchange_client", staticmethod(lambda evolve: None))
+    monkeypatch.setattr(main_mod.DataFactory, "fetch_ohlcv", _fake_fetch_ohlcv)
+    monkeypatch.setattr(main_mod.ArgusPipeline, "_persist_validated_sizing", lambda self, pre, symbol: None)
+    monkeypatch.setattr(main_mod.SentinelValidator, "validate", lambda self, inp: SimpleNamespace(score=1.0))
+    monkeypatch.setattr(main_mod.RegimeRouter, "route", _route)
+    monkeypatch.setattr(main_mod, "evaluate_gates", lambda inp: SimpleNamespace(approved=True, reason="ok"))
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "main.py",
+            "--mode",
+            "backtest",
+            "--assets",
+            "crypto",
+            "--max-cycles",
+            "60",
+            "--run-dir",
+            str(run_dir),
+            "--v25",
+            "--v25-db",
+            str(db_path),
+            "--v25-dryrun-log",
+            str(dryrun_log),
+            "--replay-now",
+            "2024-02-01T12:00:00Z",
+            "--cycle-step-minutes",
+            "1",
+            "--risk-profile",
+            "relaxed",
+            "--allow-crisis",
+            "--hold-minutes",
+            "45",
+            "--hold-grid-minutes",
+            "10,30,60",
+            "--adaptive-hold-from-sweep",
+            "--adaptive-walk-window",
+            "20",
+            "--adaptive-walk-step",
+            "10",
+            "--hold-grid-by",
+            "regime",
+        ],
+    )
+
+    main_mod.main()
+
+    conn = sqlite3.connect(db_path)
+    try:
+        decision_count = conn.execute("SELECT COUNT(*) FROM decisions").fetchone()[0]
+        hold_values = {
+            int(row[0])
+            for row in conn.execute(
+                "SELECT DISTINCT hold_minutes FROM trades WHERE exit_time IS NOT NULL AND hold_minutes IS NOT NULL"
+            ).fetchall()
+        }
+    finally:
+        conn.close()
+
+    assert decision_count == 60
+    assert hold_values
+    assert len(hold_values) >= 2
+
+    payload = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
+    walk = payload.get("walk_forward", {})
+    assert walk.get("enabled") is True
+
+
+def test_backtest_simulator_resolves_time_shifted_exit_prices(monkeypatch, tmp_path) -> None:
+    db_path = tmp_path / "argus_v25_time_shifted_exit.db"
+    run_dir = tmp_path / "backtest_v25"
+    dryrun_log = tmp_path / "dryrun_events.jsonl"
+
+    def _fake_fetch_ohlcv(self, *, symbol: str, timeframe: str = "1m", limit: int = 500, now=None):
+        _ = self, symbol, timeframe
+        if now is None:
+            # Prevent silent fallback from passing with static/latest price.
+            return []
+
+        assert isinstance(now, pd.Timestamp)
+        anchor = now
+        if anchor.tzinfo is None:
+            anchor = anchor.tz_localize("UTC")
+        else:
+            anchor = anchor.tz_convert("UTC")
+
+        n = max(2, int(limit))
+        ts = pd.date_range(end=anchor, periods=n, freq="min", tz="UTC")
+        minute_index = (ts.asi8 // 60_000_000_000).astype(float)
+        close = 100.0 + minute_index * 0.0001
+
+        rows: list[list[object]] = []
+        for i, t in enumerate(ts):
+            c = float(close[i])
+            rows.append([t.to_pydatetime(), c - 0.05, c + 0.10, c - 0.10, c, 1100.0])
+        return rows
+
+    def _route(self, *, regime, features, allow_crisis_override=False):
+        _ = self, regime, allow_crisis_override
+        return EngineSignal(
+            engine="TITAN",
+            sub_strategy="trend_follow",
+            asset_class=features.asset_class,
+            symbol=features.symbol,
+            bias="short",
+            confidence=0.8,
+            stop_distance=0.01,
+            expected_return=0.02,
+            atr=max(features.atr_14, 1e-6),
+        )
+
+    monkeypatch.setattr(main_mod.ArgusPipeline, "_init_exchange_client", staticmethod(lambda evolve: None))
+    monkeypatch.setattr(main_mod.DataFactory, "fetch_ohlcv", _fake_fetch_ohlcv)
+    monkeypatch.setattr(main_mod.ArgusPipeline, "_persist_validated_sizing", lambda self, pre, symbol: None)
+    monkeypatch.setattr(main_mod.SentinelValidator, "validate", lambda self, inp: SimpleNamespace(score=1.0))
+    monkeypatch.setattr(main_mod.RegimeRouter, "route", _route)
+    monkeypatch.setattr(main_mod, "evaluate_gates", lambda inp: SimpleNamespace(approved=True, reason="ok"))
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "main.py",
+            "--mode",
+            "backtest",
+            "--assets",
+            "crypto",
+            "--max-cycles",
+            "20",
+            "--run-dir",
+            str(run_dir),
+            "--v25",
+            "--v25-db",
+            str(db_path),
+            "--v25-dryrun-log",
+            str(dryrun_log),
+            "--replay-now",
+            "2024-02-01T12:00:00Z",
+            "--cycle-step-minutes",
+            "1",
+            "--risk-profile",
+            "relaxed",
+            "--allow-crisis",
+            "--hold-minutes",
+            "30",
+        ],
+    )
+
+    main_mod.main()
+
+    conn = sqlite3.connect(db_path)
+    try:
+        closed = conn.execute("SELECT COUNT(*) FROM trades WHERE exit_time IS NOT NULL").fetchone()[0]
+        same = conn.execute(
+            """
+            SELECT COUNT(*) FROM trades
+            WHERE exit_time IS NOT NULL
+              AND entry_price IS NOT NULL
+              AND exit_price IS NOT NULL
+              AND ABS(entry_price - exit_price) < 1e-12
+            """
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+    assert closed >= 1
+    assert same <= closed

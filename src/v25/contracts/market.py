@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
+from typing import Literal
 
 from pydantic import Field, model_validator
 
@@ -129,3 +130,101 @@ class FundingRate(TimestampedModel):
         if self.next_funding_time < self.timestamp:
             raise ValueError("next_funding_time must be >= timestamp")
         return self
+
+
+class MarketSnapshot(TimestampedModel):
+    """Backward-compatible market snapshot contract used by Package-0 tests."""
+
+    symbol: str = Field(min_length=1, max_length=64)
+    timeframe: str = Field(min_length=1, max_length=16)
+    open: float = Field(gt=0.0)
+    high: float = Field(gt=0.0)
+    low: float = Field(gt=0.0)
+    close: float = Field(gt=0.0)
+    volume: float = Field(ge=0.0)
+    quote_volume: float = Field(default=0.0, ge=0.0)
+    trades_count: int = Field(default=0, ge=0)
+    funding_rate: float | None = None
+    open_interest: float | None = Field(default=None, ge=0.0)
+    mark_price: float | None = Field(default=None, gt=0.0)
+    orderbook_bids_5: list[tuple[float, float]] = Field(default_factory=list)
+    orderbook_asks_5: list[tuple[float, float]] = Field(default_factory=list)
+    data_quality_score: float = Field(ge=0.0, le=1.0)
+    source: str = Field(min_length=1, max_length=64)
+
+    @model_validator(mode="after")
+    def _validate_prices(self) -> "MarketSnapshot":
+        if self.high < max(self.open, self.close, self.low):
+            raise ValueError("high must be >= open/close/low")
+        if self.low > min(self.open, self.close, self.high):
+            raise ValueError("low must be <= open/close/high")
+        return self
+
+
+class FeatureVector(TimestampedModel):
+    """Backward-compatible feature vector contract used by Package-0 tests."""
+
+    symbol: str = Field(min_length=1, max_length=64)
+    asset_class: str = Field(min_length=1, max_length=32)
+
+    atr_14: float = Field(gt=0.0)
+    atr_14_pct: float
+    atr_ratio_5_20: float
+    realized_vol_20d: float
+    parkinson_vol: float
+    bb_width: float
+    adx_14: float
+    price_vs_ma200: float
+    ema_21_vs_55: float
+    lr_slope_20: float
+    supertrend_dir: int = Field(ge=-1, le=1)
+    aroon_osc: float
+    rsi_14: float
+    bb_pct_b: float
+    roc_10: float
+    willr_14: float
+    cci_20: float
+
+    volume_ratio: float = Field(ge=0.0)
+    obv_slope_10: float
+    vwap_dev_pct: float
+    cmf_20: float
+    volume_delta: float
+
+    spread_pct: float = Field(ge=0.0)
+    orderbook_imbalance: float
+    trade_flow_imbalance: float
+    depth_ratio: float = Field(ge=0.0)
+    large_trade_ratio: float = Field(ge=0.0)
+
+    funding_rate: float | None = None
+    funding_pctile_30d: float | None = None
+    oi_change_4h_pct: float | None = None
+    oi_change_24h_pct: float | None = None
+    liquidation_est: float | None = None
+    long_short_ratio: float | None = None
+    basis_pct: float | None = None
+
+    btc_dominance_delta_24h: float | None = None
+    btc_eth_corr_30d: float | None = None
+    total_mcap_momentum: float | None = None
+    stablecoin_flow: float | None = None
+
+    return_autocorr_20: float | None = None
+    hurst_exponent: float | None = None
+    entropy_50: float | None = None
+    frac_diff_price: float | None = None
+
+    hermes_sentiment_score: float = Field(ge=-100.0, le=100.0)
+    hermes_sentiment_confidence: float = Field(ge=0.0, le=1.0)
+    hermes_urgency: Literal["LOW", "NORMAL", "HIGH", "CRITICAL"]
+
+    chronos_forecast_1h: float | None = None
+    chronos_confidence_width: float | None = None
+    lgbm_direction: int | None = Field(default=None, ge=-1, le=1)
+    lgbm_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    meta_label_score: float | None = Field(default=None, ge=0.0, le=1.0)
+
+    regime_prob_trending: float = Field(ge=0.0, le=1.0)
+    regime_prob_ranging: float = Field(ge=0.0, le=1.0)
+    regime_prob_volatile: float = Field(ge=0.0, le=1.0)

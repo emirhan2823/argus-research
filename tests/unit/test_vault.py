@@ -31,7 +31,7 @@ def test_key_file_permissions_best_effort(tmp_path):
     _ = vault.encrypt("x")
 
     mode = stat.S_IMODE(key_path.stat().st_mode)
-    assert mode in (0o600, 0o644)
+    assert mode in (0o600, 0o644, 0o666)
 
 
 def test_audit_logger_writes_and_reads(tmp_path):

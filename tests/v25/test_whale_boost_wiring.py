@@ -30,7 +30,7 @@ from src.v25.telemetry.log_writer import log_whale_momentum
 from src.v25.db.migrations import TABLE_DDL, INDEX_DDL
 
 
-_NOW = datetime(2026, 2, 17, 12, 0, 0, tzinfo=timezone.utc)
+_NOW = datetime.now(timezone.utc)
 
 
 def _apply_schema(conn: sqlite3.Connection) -> None:

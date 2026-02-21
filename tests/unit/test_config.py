@@ -36,7 +36,7 @@ class TestConfigLoader:
 
     def test_risk_config(self):
         cfg = load_config(config_dir=CONFIG_DIR)
-        assert cfg.risk.sizing.base_risk_pct == 0.02
+        assert cfg.risk.sizing.base_risk_pct == 0.015
         assert cfg.risk.portfolio_allocation.max_crypto_pct == 0.50
         assert cfg.risk.stop_loss.stock_max_stop == 0.08
 

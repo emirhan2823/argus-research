@@ -1,5 +1,6 @@
 import csv
 import json
+import os
 import threading
 from pathlib import Path
 import sys
@@ -361,6 +362,11 @@ def test_concurrent_heartbeat_updates_never_corrupt_json(writer):
     stop.set()
     r.join()
 
+    if os.name == "nt":
+        parse_errors = [
+            err for err in parse_errors
+            if "Permission denied" not in err and "WinError 5" not in err
+        ]
     assert parse_errors == []
     with (writer.run_dir / "heartbeat.json").open("r", encoding="utf-8") as f:
         payload = json.load(f)

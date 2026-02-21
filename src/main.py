@@ -26,7 +26,7 @@ if __package__ in (None, ""):
 
 from src.core.clock import Clock
 from src.core.config import load_config
-from src.core.constants import ENGINE_PHOENIX, REGIME_CRISIS, REGIME_TO_ENGINE
+from src.core.constants import ENGINE_HERMES, ENGINE_PHOENIX, REGIME_CRISIS, REGIME_TO_ENGINE
 from src.core.events import EventBus, EventType
 from src.core.types import Decision, EngineSignal, FeatureVector, RegimeState, TelemetryEvent
 from src.data.data_factory import DataFactory
@@ -59,6 +59,8 @@ from src.correlation.tracker import CorrelationTracker
 from src.correlation.signals import CorrelationSignalGenerator
 from src.engines.gemini.engine import GeminiEngine
 from src.mde.precision_filter import PrecisionConfig
+from src.notifications.telegram import TelegramSignalNotifier
+from src.orchestration.orion import OrionOrchestrator
 
 if TYPE_CHECKING:
     from src.data.features.builder import FeatureBuilder
@@ -87,6 +89,54 @@ class ShadowNoopHermesBroker:
 
     def modify_take_profit(self, *, symbol: str, tp_price: float) -> None:
         return None
+
+
+DEFAULT_CRYPTO_SYMBOLS_15: tuple[str, ...] = (
+    "BTCUSDT",
+    "ETHUSDT",
+    "SOLUSDT",
+    "XRPUSDT",
+    "DOGEUSDT",
+    "BNBUSDT",
+    "ADAUSDT",
+    "AVAXUSDT",
+    "LINKUSDT",
+    "TRXUSDT",
+    "LTCUSDT",
+    "DOTUSDT",
+    "BCHUSDT",
+    "ATOMUSDT",
+    "NEARUSDT",
+)
+DEFAULT_CRYPTO_SYMBOLS_5: tuple[str, ...] = DEFAULT_CRYPTO_SYMBOLS_15[:5]
+
+
+def parse_symbols_arg(raw: str | None) -> list[str]:
+    if raw is None:
+        return []
+    symbols: list[str] = []
+    seen: set[str] = set()
+    for part in str(raw).split(","):
+        sym = str(part).strip().upper()
+        if not sym:
+            continue
+        sym = sym.replace("/", "").replace("-", "").replace("_", "")
+        if sym and sym not in seen:
+            seen.add(sym)
+            symbols.append(sym)
+    return symbols
+
+
+def resolve_crypto_symbol_universe(*, symbols_arg: str | None, universe_size: int, live_data: bool) -> list[str]:
+    explicit = parse_symbols_arg(symbols_arg)
+    if explicit:
+        return explicit
+    # Safe default universe is applied for live-data operation.
+    if not live_data:
+        return []
+    size = 15 if int(universe_size) == 15 else 5
+    base = DEFAULT_CRYPTO_SYMBOLS_15 if size == 15 else DEFAULT_CRYPTO_SYMBOLS_5
+    return list(base[:size])
 
 
 @dataclass
@@ -120,10 +170,12 @@ class ArgusPipeline:
         time_machine_dir: str = "data/time_machine",
         data_mode: str | None = None,
         replay_now: pd.Timestamp | None = None,
+        forward_sim: bool = False,
         ohlcv_limit: int = 260,
         v25_conn: sqlite3.Connection | None = None,
         risk_profile: str = "normal",
         allow_crisis: bool = False,
+        symbols_override: dict[str, list[str]] | None = None,
     ) -> None:
         self.clock = Clock(mode="live")
         self.config = load_config()
@@ -131,8 +183,13 @@ class ArgusPipeline:
         self.ctx = PipelineContext(mode=mode, assets=assets, run_id=f"run-{int(datetime.now(timezone.utc).timestamp())}")
         self.evolve = evolve
         self.replay_now = replay_now
+        self.forward_sim = bool(forward_sim)
         self.ohlcv_limit = max(1, int(ohlcv_limit))
         self.v25_conn = v25_conn
+        self.symbols_override = symbols_override or {}
+        self._forward_history: dict[str, pd.DataFrame] = {}
+        self._forward_processed_ts: dict[str, pd.Timestamp] = {}
+        self._forward_history_limit = max(self.ohlcv_limit, 260)
         normalized_risk = str(risk_profile).strip().lower()
         self.risk_profile = normalized_risk if normalized_risk in {"strict", "normal", "relaxed"} else "normal"
         self.allow_crisis = bool(allow_crisis)
@@ -154,6 +211,8 @@ class ArgusPipeline:
                 self.ohlcv_limit,
                 "data/binance",
             )
+        if self.forward_sim:
+            self._LOG.info("forward simulation enabled: incremental candle stepping active")
         # Track open positions for shadow dynamic exit
         self._open_positions: dict[str, dict[str, Any]] = {}
         # Whale alerts for momentum boost (populated by external data source)
@@ -198,6 +257,11 @@ class ArgusPipeline:
             dynamic_exit_config=self._dynamic_exit_config,
         )
         self.telemetry = EventLogger(sqlite_path=runtime_db)
+        # Stage-2B: paper execution realism parameters
+        self._paper_taker_fee: float = 0.0004
+        self._paper_maker_fee: float = 0.0002
+        # ORION meta-orchestrator (default: disabled, enabled via --orion)
+        self.orion = OrionOrchestrator(account_equity_usd=500.0, enabled=False)
 
     def run_once(self, *, now: datetime | None = None) -> list[dict[str, Any]]:
         if self.feature_builder is None:
@@ -214,6 +278,51 @@ class ArgusPipeline:
                 self._run_shadow_dynamic_exit(asset_class=asset_class, now=cycle_now)
             for symbol in self._symbols_for_asset(asset_class):
                 candles = self._load_ohlcv(symbol=symbol, now=cycle_now)
+                if candles.empty:
+                    self._reject(
+                        outputs=outputs,
+                        asset_class=asset_class,
+                        symbol=symbol,
+                        reason="no_ohlcv_data",
+                        engine=self._engine_hint_for_regime(None),
+                        action="rejected",
+                        confidence=0.0,
+                        gate_results={
+                            "path": "run_once",
+                            "mode": self.ctx.mode,
+                            "forward_sim": self.forward_sim,
+                            "bars": int(len(candles)),
+                        },
+                    )
+                    continue
+
+                if self.forward_sim:
+                    candle_ts = pd.Timestamp(candles["timestamp"].iloc[-1])
+                    if candle_ts.tzinfo is None:
+                        candle_ts = candle_ts.tz_localize("UTC")
+                    else:
+                        candle_ts = candle_ts.tz_convert("UTC")
+                    prev_ts = self._forward_processed_ts.get(symbol)
+                    if prev_ts is not None and candle_ts <= prev_ts:
+                        self._reject(
+                            outputs=outputs,
+                            asset_class=asset_class,
+                            symbol=symbol,
+                            reason="forward_wait_next_candle",
+                            engine=self._engine_hint_for_regime(None),
+                            action="rejected",
+                            confidence=0.0,
+                            gate_results={
+                                "path": "run_once",
+                                "mode": self.ctx.mode,
+                                "forward_sim": True,
+                                "bars": int(len(candles)),
+                                "last_candle_ts": candle_ts.isoformat(),
+                            },
+                        )
+                        continue
+                    self._forward_processed_ts[symbol] = candle_ts
+
                 last_close = float(candles["close"].iloc[-1])
 
                 # Feed candle data to NautilusEngine for range detection (micro-reversion)
@@ -252,18 +361,36 @@ class ArgusPipeline:
                 )
 
                 # Step 3-4: sentiment + features
-                fv = self.feature_builder.build(
-                    df=candles,
-                    symbol=symbol,
-                    asset_class=asset_class,
-                    timestamp=cycle_now,
-                    spread_pct=0.001,
-                    funding_rate=0.0001 if asset_class == "crypto" else None,
-                    funding_pctile_30d=50.0 if asset_class == "crypto" else None,
-                    hermes_sentiment_score=0.0,
-                    hermes_sentiment_confidence=0.5,
-                    hermes_urgency="LOW",
-                ).feature_vector
+                try:
+                    fv = self.feature_builder.build(
+                        df=candles,
+                        symbol=symbol,
+                        asset_class=asset_class,
+                        timestamp=cycle_now,
+                        spread_pct=0.001,
+                        funding_rate=0.0001 if asset_class == "crypto" else None,
+                        funding_pctile_30d=50.0 if asset_class == "crypto" else None,
+                        hermes_sentiment_score=0.0,
+                        hermes_sentiment_confidence=0.5,
+                        hermes_urgency="LOW",
+                    ).feature_vector
+                except Exception as exc:
+                    self._reject(
+                        outputs=outputs,
+                        asset_class=asset_class,
+                        symbol=symbol,
+                        reason=f"feature_build_failed:{type(exc).__name__}",
+                        engine="ROUTER",
+                        action="rejected",
+                        confidence=0.0,
+                        gate_results={
+                            "path": "run_once",
+                            "mode": self.ctx.mode,
+                            "forward_sim": self.forward_sim,
+                            "bars": int(len(candles)),
+                        },
+                    )
+                    continue
                 if fv is None:
                     self._reject(
                         outputs=outputs,
@@ -310,31 +437,95 @@ class ArgusPipeline:
                     "mode": self.ctx.mode,
                     "features_snapshot": {
                         "regime": regime_state.regime,
+                        "atr_14_pct": self._safe_float(getattr(fv, "atr_14_pct", None)),
+                        "adx_14": self._safe_float(getattr(fv, "adx_14", None)),
+                        "volume_ratio": self._safe_float(getattr(fv, "volume_ratio", None)),
                     },
                 }
                 if crisis_override_active:
                     base_gate_results["crisis_override"] = True
 
-                # Step 6: routing
-                try:
-                    signal = self.router.route(
-                        regime=regime_state,
-                        features=fv,
-                        allow_crisis_override=crisis_override_active,
-                    )
-                except Exception as exc:
-                    reject_engine = self._engine_hint_for_regime(regime_state.regime)
-                    self._reject(
-                        outputs=outputs,
-                        asset_class=asset_class,
-                        symbol=symbol,
-                        reason=self._annotate_reason(f"engine_error:{exc}", crisis_override=crisis_override_active),
-                        engine=reject_engine,
-                        action="rejected",
-                        confidence=0.0,
-                        gate_results=base_gate_results,
-                    )
-                    continue
+                # Step 5.5: ORION multi-engine dispatch
+                orion_decision = None
+                if self.orion.enabled:
+                    try:
+                        # Collect candidate signals from ALL engines
+                        _candidate_signals: dict[str, EngineSignal | None] = {}
+                        for _eng_name, _eng_impl in self.router.engines.items():
+                            if _eng_name == ENGINE_HERMES:
+                                continue  # HERMES is overlay only
+                            try:
+                                _candidate_signals[_eng_name] = _eng_impl.generate_signal(
+                                    regime=regime_state, features=fv,
+                                )
+                            except Exception:
+                                _candidate_signals[_eng_name] = None
+
+                        orion_decision = self.orion.step(
+                            features=fv,
+                            regime_state=regime_state,
+                            candidate_signals=_candidate_signals,
+                        )
+                        # Stage-2B: store for paper_cycle_log
+                        self._last_orion_decision = orion_decision
+                        self._last_candidate_signals = _candidate_signals
+
+                        # ORION risk posture: block entries if needed
+                        if not orion_decision.risk_posture.allow_new_entries:
+                            self._reject(
+                                outputs=outputs,
+                                asset_class=asset_class,
+                                symbol=symbol,
+                                reason=self._annotate_reason(
+                                    f"orion_risk_block:{orion_decision.risk_posture.reason}",
+                                    crisis_override=crisis_override_active,
+                                ),
+                                engine="ORION",
+                                action="rejected",
+                                confidence=0.0,
+                                gate_results=base_gate_results,
+                            )
+                            continue
+
+                        # Use ORION's chosen engine signal
+                        chosen = orion_decision.chosen_engine
+                        if chosen != "NONE":
+                            signal = _candidate_signals.get(chosen)
+                        else:
+                            # No engine produced a valid signal via direct dispatch;
+                            # fall through to standard router.route() path so the
+                            # existing fallback+HERMES override semantics apply.
+                            orion_decision = None
+
+                        # Inject ORION telemetry into gate results
+                        if orion_decision is not None:
+                            base_gate_results["orion"] = orion_decision.to_telemetry_dict()
+
+                    except Exception as orion_exc:
+                        self._LOG.warning("ORION step failed, falling back to static routing: %s", orion_exc)
+                        orion_decision = None
+
+                # Step 6: routing (fallback if ORION disabled or failed)
+                if orion_decision is None:
+                    try:
+                        signal = self.router.route(
+                            regime=regime_state,
+                            features=fv,
+                            allow_crisis_override=crisis_override_active,
+                        )
+                    except Exception as exc:
+                        reject_engine = self._engine_hint_for_regime(regime_state.regime)
+                        self._reject(
+                            outputs=outputs,
+                            asset_class=asset_class,
+                            symbol=symbol,
+                            reason=self._annotate_reason(f"engine_error:{exc}", crisis_override=crisis_override_active),
+                            engine=reject_engine,
+                            action="rejected",
+                            confidence=0.0,
+                            gate_results=base_gate_results,
+                        )
+                        continue
 
                 # Step 6.5: signal quality assessment (NEW)
                 if signal is not None:
@@ -573,6 +764,12 @@ class ArgusPipeline:
                         "position_size_pct": float(decision.position_size),
                         "leverage": float(decision.leverage),
                         "stop_loss_pct": float(decision.stop_loss),
+                        "take_profit_pct": float(decision.take_profit),
+                        "suggested_entry_price": (
+                            float(decision.suggested_entry_price)
+                            if decision.suggested_entry_price is not None
+                            else None
+                        ),
                         "gate_results": pretrade_gate_results,
                         "execution_mode": decision.execution_mode,
                         "advisory_message": ex_result.advisory_message,
@@ -583,6 +780,10 @@ class ArgusPipeline:
         return outputs
 
     def _symbols_for_asset(self, asset_class: str) -> list[str]:
+        override = self.symbols_override.get(asset_class)
+        if override:
+            return [str(s).upper() for s in override if str(s).strip()]
+
         configured = self.config.base.asset_classes.get(asset_class)
         if configured and configured.enabled and configured.symbols:
             return configured.symbols[:1]
@@ -1070,41 +1271,119 @@ class ArgusPipeline:
             ),
         )
 
-    def _resolve_backtest_close_price(self, *, symbol: str, at: datetime) -> float | None:
-        """Resolve deterministic close price at/near a timestamp for backtest sim."""
-        try:
-            rows = self.data_factory.fetch_ohlcv(
-                symbol=symbol,
-                timeframe="1m",
-                limit=1,
-                now=at,
-            )
-            if rows:
-                return float(rows[-1][4])
-        except Exception:
-            self._LOG.debug("backtest close fetch failed at now=%s symbol=%s", at, symbol, exc_info=True)
+    @staticmethod
+    def _to_utc_timestamp(value: datetime | pd.Timestamp) -> pd.Timestamp:
+        ts = pd.Timestamp(value)
+        if ts.tzinfo is None:
+            return cast(pd.Timestamp, ts.tz_localize("UTC"))
+        return cast(pd.Timestamp, ts.tz_convert("UTC"))
 
-        # Deterministic fallback: last known close from source.
+    def _resolve_backtest_close_price(
+        self,
+        *,
+        symbol: str,
+        at: datetime,
+        after: datetime | None = None,
+    ) -> tuple[float | None, datetime | None, str]:
+        """Resolve deterministic close at/near timestamp with strict-after option.
+
+        Returns: (price, candle_timestamp, source_tag)
+        - source_tag helps diagnose fallback behavior in simulator logs.
+        """
+
+        at_ts = self._to_utc_timestamp(at)
+        after_ts = self._to_utc_timestamp(after) if after is not None else None
+        fetch_limit = max(int(self.ohlcv_limit), 64)
+
+        def _pick(rows: list[list[Any]]) -> tuple[float, datetime] | None:
+            best: tuple[pd.Timestamp, float] | None = None
+            for row in rows:
+                if len(row) < 5:
+                    continue
+                try:
+                    row_ts = self._to_utc_timestamp(cast(datetime | pd.Timestamp, row[0]))
+                    row_close = float(row[4])
+                except Exception:
+                    continue
+                if not np.isfinite(row_close):
+                    continue
+                if row_ts > at_ts:
+                    continue
+                if after_ts is not None and row_ts <= after_ts:
+                    continue
+                if best is None or row_ts > best[0]:
+                    best = (row_ts, row_close)
+
+            if best is None:
+                return None
+            candle_ts, candle_close = best
+            candle_dt = cast(datetime, candle_ts.to_pydatetime())
+            if candle_dt.tzinfo is None:
+                candle_dt = candle_dt.replace(tzinfo=timezone.utc)
+            else:
+                candle_dt = candle_dt.astimezone(timezone.utc)
+            return float(candle_close), candle_dt
+
         try:
             rows = self.data_factory.fetch_ohlcv(
                 symbol=symbol,
                 timeframe="1m",
-                limit=1,
+                limit=fetch_limit,
+                now=at_ts,
+            )
+            picked = _pick(rows)
+            if picked is not None:
+                return picked[0], picked[1], "fetch_now"
+        except Exception:
+            self._LOG.debug(
+                "backtest close fetch failed at now=%s symbol=%s",
+                at_ts.isoformat(),
+                symbol,
+                exc_info=True,
+            )
+
+        # Deterministic fallback: broader slice from source without now bound.
+        # Still enforce <= at and (when provided) > after to avoid reusing entry bar.
+        try:
+            rows = self.data_factory.fetch_ohlcv(
+                symbol=symbol,
+                timeframe="1m",
+                limit=fetch_limit,
                 now=None,
             )
-            if rows:
-                return float(rows[-1][4])
+            picked = _pick(rows)
+            if picked is not None:
+                return picked[0], picked[1], "fetch_fallback"
         except Exception:
             self._LOG.debug("backtest close fallback fetch failed symbol=%s", symbol, exc_info=True)
 
-        try:
-            frame = self._load_ohlcv(symbol=symbol, now=at)
-            if not frame.empty:
-                return float(frame["close"].iloc[-1])
-        except Exception:
-            self._LOG.debug("backtest close fallback _load_ohlcv failed symbol=%s", symbol, exc_info=True)
+        # Avoid replay-mode fallback to _load_ohlcv, because replay loader anchor
+        # may not match `at` here and could accidentally reuse entry-time pricing.
+        if self.data_factory.mode != "replay":
+            try:
+                frame = self._load_ohlcv(symbol=symbol, now=at)
+                if not frame.empty:
+                    frame = frame.copy()
+                    frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True, errors="coerce")
+                    frame = frame.dropna(subset=["timestamp"]).reset_index(drop=True)
+                    rows = [
+                        [
+                            row["timestamp"],
+                            row["open"],
+                            row["high"],
+                            row["low"],
+                            row["close"],
+                            row["volume"],
+                        ]
+                        for _, row in frame.iterrows()
+                    ]
+                    picked = _pick(rows)
+                    if picked is not None:
+                        return picked[0], picked[1], "frame_fallback"
+            except Exception:
+                self._LOG.debug("backtest close fallback _load_ohlcv failed symbol=%s", symbol, exc_info=True)
 
-        return None
+        return None, None, "none"
 
     @staticmethod
     def _estimate_backtest_costs(
@@ -1168,6 +1447,7 @@ class ArgusPipeline:
         self,
         *,
         run_id: str,
+        decision_cycle: int,
         decision_id: int,
         symbol: str,
         side: str,
@@ -1188,13 +1468,14 @@ class ArgusPipeline:
         self.v25_conn.execute(
             """
             INSERT INTO backtest_exit_sweep (
-              run_id, decision_id, symbol, side, entry_time, hold_minutes, exit_time,
+              run_id, decision_cycle, decision_id, symbol, side, entry_time, hold_minutes, exit_time,
               entry_price, exit_price, gross_pnl_pct, net_pnl_pct, fee_est_usd,
               slippage_est_pct, regime
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 run_id,
+                int(decision_cycle),
                 int(decision_id),
                 symbol,
                 "long" if str(side).lower() != "short" else "short",
@@ -1633,7 +1914,12 @@ class ArgusPipeline:
                 return client
             else:
                 from src.data.exchange_clients import BinancePublicClient
-                client = BinancePublicClient(use_futures=True)
+                client = BinancePublicClient(
+                    use_futures=True,
+                    idle_refresh_seconds=float(os.getenv("ARGUS_BINANCE_IDLE_REFRESH_S", "180")),
+                    breaker_failures=int(os.getenv("ARGUS_BINANCE_BREAKER_FAILURES", "5")),
+                    breaker_cooldown_seconds=float(os.getenv("ARGUS_BINANCE_BREAKER_COOLDOWN_S", "60")),
+                )
                 logging.getLogger(__name__).info("[DataSource] Binance Futures (public)")
                 return client
         except Exception as exc:
@@ -1655,7 +1941,125 @@ class ArgusPipeline:
             raise
         return FeatureBuilder()
 
+    @staticmethod
+    def _safe_float(value: Any, default: float = 0.0) -> float:
+        try:
+            out = float(value)
+        except (TypeError, ValueError):
+            return float(default)
+        if not np.isfinite(out):
+            return float(default)
+        return float(out)
+
+    def _append_forward_rows(self, *, symbol: str, rows: list[list[Any]]) -> pd.DataFrame:
+        if not rows:
+            history = self._forward_history.get(symbol)
+            if history is not None and not history.empty:
+                return history.copy()
+            return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"])
+
+        frame = pd.DataFrame(rows, columns=["timestamp", "open", "high", "low", "close", "volume"])
+        frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True, errors="coerce")
+        frame = frame.dropna(subset=["timestamp"]).reset_index(drop=True)
+        if frame.empty:
+            history = self._forward_history.get(symbol)
+            if history is not None and not history.empty:
+                return history.copy()
+            return frame
+
+        existing = self._forward_history.get(symbol)
+        if existing is None or existing.empty:
+            merged = frame
+        else:
+            merged = pd.concat([existing, frame], ignore_index=True)
+            merged = merged.drop_duplicates(subset=["timestamp"]).sort_values("timestamp")
+
+        if len(merged) > self._forward_history_limit:
+            merged = merged.tail(self._forward_history_limit)
+
+        merged = merged.reset_index(drop=True)
+        self._forward_history[symbol] = merged
+        return merged.copy()
+
+    def forward_state_snapshot(self) -> dict[str, Any]:
+        symbols: dict[str, dict[str, Any]] = {}
+        for symbol, frame in self._forward_history.items():
+            if frame.empty:
+                continue
+            first_ts = frame["timestamp"].iloc[0]
+            last_ts = frame["timestamp"].iloc[-1]
+            symbols[symbol] = {
+                "bars": int(len(frame)),
+                "first_timestamp": first_ts.isoformat() if isinstance(first_ts, pd.Timestamp) else str(first_ts),
+                "last_timestamp": last_ts.isoformat() if isinstance(last_ts, pd.Timestamp) else str(last_ts),
+            }
+        return {
+            "forward_sim": bool(self.forward_sim),
+            "mode": str(self.ctx.mode),
+            "replay_now": (
+                self.replay_now.isoformat()
+                if isinstance(self.replay_now, pd.Timestamp)
+                else str(self.replay_now)
+                if self.replay_now is not None
+                else None
+            ),
+            "symbols": symbols,
+        }
+
     def _load_ohlcv(self, *, symbol: str, now: datetime) -> pd.DataFrame:
+        _OHLCV_COLS = ["timestamp", "open", "high", "low", "close", "volume"]
+
+        if self.forward_sim:
+            if self.data_factory.mode == "replay":
+                replay_anchor = self.replay_now if self.replay_now is not None else None
+                rows = self.data_factory.fetch_ohlcv(
+                    symbol=symbol,
+                    timeframe="1m",
+                    limit=1,
+                    now=replay_anchor,
+                )
+                if not rows:
+                    history = self._forward_history.get(symbol)
+                    if history is not None and not history.empty:
+                        return history.copy()
+                    raise ValueError(f"Replay mode requires local OHLCV data for symbol={symbol}")
+                return self._append_forward_rows(symbol=symbol, rows=rows[-1:])
+
+            if self.data_factory.mode == "live" and self.data_factory.exchange_client is not None:
+                primary_tf = getattr(self, "_primary_tf", "1h")
+                rows = self.data_factory.fetch_ohlcv(
+                    symbol=symbol,
+                    timeframe=primary_tf,
+                    limit=2,
+                )
+                if rows:
+                    return self._append_forward_rows(symbol=symbol, rows=rows[-1:])
+
+                history = self._forward_history.get(symbol)
+                if history is not None and not history.empty:
+                    self._LOG.warning("[LIVE] forward fetch empty for %s, reusing cached candle history", symbol)
+                    return history.copy()
+
+        # Live mode: fetch real market data from exchange client
+        if self.data_factory.mode == "live" and self.data_factory.exchange_client is not None:
+            primary_tf = getattr(self, "_primary_tf", "1h")
+            rows = self.data_factory.fetch_ohlcv(
+                symbol=symbol,
+                timeframe=primary_tf,
+                limit=self.ohlcv_limit,
+            )
+            if rows:
+                frame = pd.DataFrame(rows, columns=_OHLCV_COLS)
+                frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True, errors="coerce")
+                frame = frame.dropna(subset=["timestamp"]).reset_index(drop=True)
+                self._LOG.debug(
+                    "[LIVE] %s %s -> %d bars (last=%s)",
+                    symbol, primary_tf, len(frame),
+                    frame["timestamp"].iloc[-1] if not frame.empty else "N/A",
+                )
+                return frame
+            self._LOG.warning("[LIVE] fetch empty for %s, falling back to mock", symbol)
+
         # Replay mode: deterministic local parquet slice around replay_now
         if self.data_factory.mode == "replay":
             replay_anchor = self.replay_now if self.replay_now is not None else None
@@ -1744,6 +2148,18 @@ def main() -> None:
         help="Replay anchor time (UTC ISO-8601, e.g. 2024-01-01T00:10:00Z).",
     )
     parser.add_argument(
+        "--forward-sim",
+        action="store_true",
+        default=False,
+        help="Backtest/replay only: step forward one candle per cycle and persist forward state.",
+    )
+    parser.add_argument(
+        "--smoke",
+        action="store_true",
+        default=False,
+        help="Quick validation mode: 50 cycles and BTCUSDT only.",
+    )
+    parser.add_argument(
         "--limit",
         type=int,
         default=260,
@@ -1796,6 +2212,24 @@ def main() -> None:
         help="Backtest-only: use regime-aware best hold from sweep for simulated trade exits.",
     )
     parser.add_argument(
+        "--adaptive-split-ratio",
+        type=float,
+        default=0.5,
+        help="Backtest-only in-sample ratio for adaptive hold learning window (0.0-1.0).",
+    )
+    parser.add_argument(
+        "--adaptive-walk-window",
+        type=int,
+        default=None,
+        help="Backtest-only rolling adaptive hold training window in cycles.",
+    )
+    parser.add_argument(
+        "--adaptive-walk-step",
+        type=int,
+        default=1,
+        help="Backtest-only rolling adaptive hold retrain step in cycles.",
+    )
+    parser.add_argument(
         "--risk-profile",
         choices=["strict", "normal", "relaxed"],
         default="normal",
@@ -1810,6 +2244,22 @@ def main() -> None:
     parser.add_argument("--v25", action="store_true", help="Enable v2.5 foundation bootstrap")
     parser.add_argument("--v25-db", default="runs/v25/argus_v25.db", help="SQLite path for v2.5 runtime DB")
     parser.add_argument("--v25-dryrun-log", default="runs/v25/dryrun_events.jsonl", help="Write v2.5 dry-run telemetry as JSONL (no behavior change).")
+    parser.add_argument("--demo-24h", action="store_true", default=False, help="Run in 24/7 demo mode: loop indefinitely with heartbeat, auto log rotation, safe exception handling.")
+    parser.add_argument("--orion", action="store_true", default=False, help="Enable ORION meta-orchestrator for dynamic engine weighting and risk posture.")
+    parser.add_argument("--live-data", action="store_true", default=False, help="Use real market data from exchange API instead of mock random walks.")
+    parser.add_argument("--timeframe", default="1h", help="Primary OHLCV timeframe for live data (e.g. 1m, 5m, 15m, 1h). Default: 1h.")
+    parser.add_argument("--symbols", default=None, help="Comma-separated symbol override list (e.g. BTCUSDT,ETHUSDT,SOLUSDT).")
+    parser.add_argument("--symbol-universe-size", type=int, choices=[5, 15], default=5, help="Default crypto universe size for live-data mode when --symbols is omitted.")
+    parser.add_argument("--maker-fee", type=float, default=0.0002, help="Maker fee rate for paper execution (default: 0.0002 = 0.02%%).")
+    parser.add_argument("--taker-fee", type=float, default=0.0004, help="Taker fee rate for paper execution (default: 0.0004 = 0.04%%).")
+    parser.add_argument("--export-training-dataset", action="store_true", default=False, help="Export training dataset CSV after run (runs/training_dataset.csv).")
+    # --- Stage-2C flags ---
+    parser.add_argument("--paper-24h", action="store_true", default=False, help="Launch 7/24 paper supervisor with heartbeat, crash recovery, and daily rotation.")
+    parser.add_argument("--daily-scoreboard", action="store_true", default=False, help="Generate daily scoreboard report after run.")
+    parser.add_argument("--daily-loss-cap-pct", type=float, default=0.05, help="Paper-only daily loss cap (default: 5%%).")
+    parser.add_argument("--max-trades-per-day", type=int, default=50, help="Paper-only max trades per day (default: 50).")
+    parser.add_argument("--telegram-signals", action="store_true", default=False, help="Enable Telegram alerts for actionable advisory signals (requires TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID).")
+    parser.add_argument("--telegram-min-confidence", type=float, default=0.60, help="Minimum confidence for Telegram signal notifications (default: 0.60).")
     args = parser.parse_args()
 
     conn: sqlite3.Connection | None = None
@@ -1853,25 +2303,73 @@ def main() -> None:
             raise SystemExit(2) from exc
 
     assets = [a.strip() for a in args.assets.split(",") if a.strip()]
+    symbols_override: dict[str, list[str]] = {}
+    if "crypto" in assets:
+        crypto_symbols = resolve_crypto_symbol_universe(
+            symbols_arg=args.symbols,
+            universe_size=int(args.symbol_universe_size),
+            live_data=bool(args.live_data),
+        )
+        if crypto_symbols:
+            symbols_override["crypto"] = crypto_symbols
+
+    if args.smoke:
+        assets = ["crypto"]
+        symbols_override["crypto"] = ["BTCUSDT"]
+
     v25_conn_ref = conn if args.v25 else None
     pipeline = ArgusPipeline(
         mode=args.mode,
         assets=assets,
         evolve=bool(args.evolve),
         time_machine_dir=str(args.time_machine_dir),
+        data_mode="live" if args.live_data else None,
         replay_now=replay_now_ts,
+        forward_sim=bool(args.forward_sim),
         ohlcv_limit=int(args.limit),
         v25_conn=v25_conn_ref,
         risk_profile=str(args.risk_profile),
         allow_crisis=bool(args.allow_crisis),
+        symbols_override=symbols_override,
     )
+    pipeline._primary_tf = str(args.timeframe)
+    pipeline._paper_taker_fee = float(args.taker_fee)
+    pipeline._paper_maker_fee = float(args.maker_fee)
+
+    # Apply --live-data flag
+    if args.live_data:
+        print(f"[data] LIVE — real {args.timeframe} klines from exchange API")
+        if symbols_override.get("crypto"):
+            print(f"[symbols] crypto universe={','.join(symbols_override['crypto'])}")
+    else:
+        print(f"[data] MOCK — using synthetic random walk OHLCV")
+
+    # Apply --orion flag
+    if args.orion:
+        pipeline.orion.enabled = True
+        print("[orion] ENABLED — ORION v1 meta-orchestrator active")
+    else:
+        print("[orion] DISABLED (use --orion to enable)")
 
     default_cycles = 1 if args.mode == "backtest" else 5 if args.mode == "paper" else 1
     max_cycles = max(1, int(args.max_cycles if args.max_cycles is not None else default_cycles))
+    if args.smoke:
+        max_cycles = 50
     default_run_dir = "runs/paper_v2" if args.mode == "paper" else "runs/backtest_v25"
     run_dir = Path(args.run_dir or default_run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
     decisions_log = run_dir / "decisions.jsonl"
+
+    telegram_notifier = TelegramSignalNotifier.from_env(
+        conn=v25_conn_ref,
+        enabled=bool(args.telegram_signals and args.mode in {"paper", "live"}),
+        min_confidence=float(args.telegram_min_confidence),
+    )
+    if args.telegram_signals and args.mode in {"paper", "live"}:
+        if telegram_notifier.active:
+            print("[notify] Telegram signal alerts ENABLED")
+        else:
+            print("[notify] Telegram signal alerts requested but disabled (missing TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID)")
 
     print(
         f"[run] mode={args.mode} cycles={max_cycles} assets={','.join(assets)} "
@@ -1907,6 +2405,31 @@ def main() -> None:
         print(f"[backtest] invalid --hold-grid-minutes value: {args.hold_grid_minutes!r} ({exc})")
         raise SystemExit(2) from exc
 
+    adaptive_split_ratio = float(args.adaptive_split_ratio)
+    if adaptive_split_ratio < 0.0 or adaptive_split_ratio > 1.0:
+        print(
+            f"[backtest] invalid --adaptive-split-ratio value: {args.adaptive_split_ratio!r} "
+            "(must be between 0.0 and 1.0)"
+        )
+        raise SystemExit(2)
+
+    adaptive_walk_window: int | None = args.adaptive_walk_window
+    if adaptive_walk_window is not None and int(adaptive_walk_window) < 1:
+        print(
+            f"[backtest] invalid --adaptive-walk-window value: {args.adaptive_walk_window!r} "
+            "(must be >= 1)"
+        )
+        raise SystemExit(2)
+    adaptive_walk_window = int(adaptive_walk_window) if adaptive_walk_window is not None else None
+
+    adaptive_walk_step = int(args.adaptive_walk_step)
+    if adaptive_walk_step < 1:
+        print(
+            f"[backtest] invalid --adaptive-walk-step value: {args.adaptive_walk_step!r} "
+            "(must be >= 1)"
+        )
+        raise SystemExit(2)
+
     sweep_skipped_rows = 0
 
     def _opt_float(value: Any) -> float | None:
@@ -1926,7 +2449,23 @@ def main() -> None:
         and bool(args.adaptive_hold_from_sweep)
         and bool(hold_grid_minutes)
     )
+    walk_forward_enabled = bool(adaptive_hold_enabled and adaptive_walk_window is not None)
+
+    adaptive_split_index = int(max_cycles * adaptive_split_ratio)
+    adaptive_in_sample_cycles = int(min(max(adaptive_split_index, 0), max_cycles))
+    adaptive_out_of_sample_cycles = int(max_cycles - adaptive_in_sample_cycles)
+
+    if walk_forward_enabled:
+        adaptive_in_sample_cycles = 0
+        adaptive_out_of_sample_cycles = 0
+
+    walk_window = int(adaptive_walk_window) if adaptive_walk_window is not None else 0
+    walk_oos_cycles = int(max(0, max_cycles - walk_window)) if walk_forward_enabled else 0
+    walk_segments = int((walk_oos_cycles + adaptive_walk_step - 1) // adaptive_walk_step) if walk_forward_enabled else 0
+
     adaptive_series_by_regime: dict[str, dict[int, list[tuple[str, float]]]] = {}
+    walk_sweep_history: list[dict[str, Any]] = []
+    walk_hold_cache: dict[tuple[int, str], int | None] = {}
 
     def _performance_from_series(series: list[tuple[str, float]]) -> tuple[float, float, float]:
         ordered = sorted(series, key=lambda x: x[0])
@@ -1990,6 +2529,20 @@ def main() -> None:
                 }
                 f.write(json.dumps(rec, ensure_ascii=True, default=str) + "\n")
 
+        if args.forward_sim:
+            try:
+                forward_state_payload = {
+                    "cycle": int(cycle),
+                    "timestamp": cycle_now.isoformat(),
+                    **pipeline.forward_state_snapshot(),
+                }
+                (run_dir / "forward_state.json").write_text(
+                    json.dumps(forward_state_payload, indent=2, ensure_ascii=True) + "\n",
+                    encoding="utf-8",
+                )
+            except Exception as exc:  # noqa: BLE001
+                print(f"[forward-sim] state persistence error: {exc}")
+
         # Persist summary decisions into v25 DB (append-only) even on fallback path
         persisted_cycle_records: list[dict[str, Any]] = []
         if v25_conn_ref is not None:
@@ -2037,8 +2590,103 @@ def main() -> None:
                         }
                     )
                 v25_conn_ref.commit()
+
+                # Stage-2B: persist paper cycle log snapshot
+                if args.mode in ("paper", "live"):
+                    try:
+                        for item in outputs:
+                            _orion_d = getattr(pipeline, '_last_orion_decision', None)
+                            _regime_json = json.dumps(
+                                _orion_d.regime_probabilities if _orion_d else {},
+                                default=str,
+                            )
+                            _weights_json = json.dumps(
+                                _orion_d.engine_weights if _orion_d else {},
+                                default=str,
+                            )
+                            _candidates_json = json.dumps(
+                                {k: str(v) for k, v in getattr(pipeline, '_last_candidate_signals', {}).items()},
+                                default=str,
+                            )
+                            _final_json = json.dumps({
+                                "selected_engine": str(item.get("engine", "")),
+                                "final_confidence": float(item.get("confidence", 0.0)),
+                                "gate_results": item.get("gate_results", {}),
+                                "risk_posture": getattr(
+                                    getattr(_orion_d, 'risk_posture', None), 'reason', 'default'
+                                ) if _orion_d else "default",
+                                "position_size_pct": float(item.get("position_size_pct", 0.0)),
+                                "hold_minutes": hold_minutes,
+                                "action": str(item.get("action", "")),
+                                "status": str(item.get("status", "")),
+                            }, default=str)
+                            v25_conn_ref.execute(
+                                "INSERT INTO paper_cycle_log "
+                                "(decision_cycle, timestamp, symbol, regime_json, "
+                                "engine_weights_json, candidate_signals_json, final_decision_json) "
+                                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                                (
+                                    cycle,
+                                    cycle_now.isoformat(),
+                                    str(item.get("symbol", "UNKNOWN")),
+                                    _regime_json,
+                                    _weights_json,
+                                    _candidates_json,
+                                    _final_json,
+                                ),
+                            )
+                        v25_conn_ref.commit()
+                    except Exception as pcl_exc:
+                        logging.getLogger(__name__).warning(
+                            "[stage-2b] paper_cycle_log error: %s", pcl_exc,
+                        )
+
             except Exception as e:
                 print(f"[v25] decision persistence error: {e}")
+
+        # Paper/live actionable signal notifications (opt-in via --telegram-signals).
+        if args.mode in {"paper", "live"} and telegram_notifier.active:
+            notify_records = persisted_cycle_records
+            if not notify_records:
+                notify_records = [
+                    {
+                        "decision_id": None,
+                        "symbol": str(item.get("symbol", "UNKNOWN")),
+                        "item": item,
+                        "gate_results": item.get("gate_results") if isinstance(item.get("gate_results"), dict) else {},
+                    }
+                    for item in outputs
+                ]
+
+            for rec in notify_records:
+                item = rec.get("item", {})
+                status = str(item.get("status", "")).lower()
+                reason = str(item.get("reason", ""))
+                action = str(item.get("action", "")).lower()
+                if not (
+                    status == "executed"
+                    and reason == "advisory_signal_sent"
+                    and action in {"long", "short"}
+                ):
+                    continue
+
+                regime = pipeline._extract_regime_from_gate_results(rec.get("gate_results"))
+                telegram_notifier.notify_signal(
+                    timestamp=cycle_now,
+                    symbol=str(rec.get("symbol", item.get("symbol", "UNKNOWN"))),
+                    action=action,
+                    confidence=_as_float_default(item.get("confidence"), 0.0),
+                    engine=str(item.get("engine") or pipeline._engine_hint_for_regime(None)),
+                    regime=regime,
+                    run_dir=str(run_dir),
+                    decision_id=(int(rec["decision_id"]) if rec.get("decision_id") is not None else None),
+                    size_pct=_opt_float(item.get("position_size_pct")),
+                    leverage=_opt_float(item.get("leverage")),
+                    entry_price=_opt_float(item.get("suggested_entry_price")),
+                    stop_loss_pct=_opt_float(item.get("stop_loss_pct")),
+                    take_profit_pct=_opt_float(item.get("take_profit_pct")),
+                    advisory_message=str(item.get("advisory_message")) if item.get("advisory_message") else None,
+                )
 
         # Deterministic backtest execution simulator from advisory outputs.
         if args.mode == "backtest" and v25_conn_ref is not None:
@@ -2057,8 +2705,17 @@ def main() -> None:
 
                     symbol = str(rec.get("symbol", item.get("symbol", "UNKNOWN")))
                     entry_time = cycle_now
-                    entry_price = pipeline._resolve_backtest_close_price(symbol=symbol, at=entry_time)
-                    if entry_price is None:
+                    entry_price, entry_candle_ts, entry_source = pipeline._resolve_backtest_close_price(
+                        symbol=symbol,
+                        at=entry_time,
+                    )
+                    if entry_price is None or entry_candle_ts is None:
+                        pipeline._LOG.debug(
+                            "backtest sim skip: no entry price | symbol=%s entry_time=%s source=%s",
+                            symbol,
+                            entry_time.isoformat(),
+                            entry_source,
+                        )
                         continue
 
                     size = _as_float_default(item.get("position_size_pct"), 0.01)
@@ -2073,7 +2730,7 @@ def main() -> None:
                         leverage=leverage,
                     )
                     regime = pipeline._extract_regime_from_gate_results(rec.get("gate_results"))
-                    by_hold_eval: dict[int, tuple[datetime, float, float, float]] = {}
+                    by_hold_eval: dict[int, tuple[datetime, float, float, float, datetime, str]] = {}
 
                     if hold_grid_minutes:
                         decision_id_raw = rec.get("decision_id")
@@ -2087,12 +2744,21 @@ def main() -> None:
 
                         for hold in hold_grid_minutes:
                             sweep_exit_time = entry_time + timedelta(minutes=int(hold))
-                            sweep_exit_price = pipeline._resolve_backtest_close_price(
+                            sweep_exit_price, sweep_exit_candle_ts, sweep_source = pipeline._resolve_backtest_close_price(
                                 symbol=symbol,
                                 at=sweep_exit_time,
+                                after=entry_time,
                             )
-                            if sweep_exit_price is None:
+                            if sweep_exit_price is None or sweep_exit_candle_ts is None:
                                 sweep_skipped_rows += 1
+                                pipeline._LOG.debug(
+                                    "backtest sweep skip: no exit candle | symbol=%s entry_time=%s target_exit_time=%s hold=%d source=%s",
+                                    symbol,
+                                    entry_time.isoformat(),
+                                    sweep_exit_time.isoformat(),
+                                    int(hold),
+                                    sweep_source,
+                                )
                                 continue
 
                             gross_pct, net_pct = pipeline._compute_backtest_pnl(
@@ -2108,9 +2774,12 @@ def main() -> None:
                                 float(sweep_exit_price),
                                 float(gross_pct),
                                 float(net_pct),
+                                sweep_exit_candle_ts,
+                                sweep_source,
                             )
                             pipeline._persist_backtest_exit_sweep_row(
                                 run_id=run_id,
+                                decision_cycle=cycle,
                                 decision_id=decision_id,
                                 symbol=symbol,
                                 side=action,
@@ -2126,32 +2795,93 @@ def main() -> None:
                                 regime=regime,
                             )
 
-                            if adaptive_hold_enabled:
+                            walk_sweep_history.append(
+                                {
+                                    "decision_cycle": int(cycle),
+                                    "regime": regime,
+                                    "hold": int(hold),
+                                    "exit_time": sweep_exit_candle_ts.isoformat(),
+                                    "net_pnl_pct": float(net_pct),
+                                }
+                            )
+
+                            if (
+                                adaptive_hold_enabled
+                                and not walk_forward_enabled
+                                and cycle <= adaptive_in_sample_cycles
+                            ):
                                 regime_series = adaptive_series_by_regime.setdefault(regime, {})
                                 regime_series.setdefault(int(hold), []).append(
                                     (sweep_exit_time.isoformat(), float(net_pct))
                                 )
 
                     selected_hold = int(hold_minutes)
-                    if adaptive_hold_enabled:
+                    if walk_forward_enabled and adaptive_hold_enabled and cycle > walk_window:
+                        segment_id = int((cycle - walk_window - 1) // adaptive_walk_step)
+                        cache_key = (segment_id, str(regime))
+                        if cache_key not in walk_hold_cache:
+                            learn_start = int(cycle - walk_window)
+                            learn_end = int(cycle - 1)
+                            series_by_hold: dict[int, list[tuple[str, float]]] = {
+                                int(h): [] for h in hold_grid_minutes
+                            }
+                            for row in walk_sweep_history:
+                                row_cycle = int(row.get("decision_cycle", 0))
+                                if row_cycle < learn_start or row_cycle > learn_end:
+                                    continue
+                                if str(row.get("regime", "UNKNOWN")) != str(regime):
+                                    continue
+                                row_hold = int(row.get("hold", 0))
+                                if row_hold not in series_by_hold:
+                                    continue
+                                series_by_hold[row_hold].append(
+                                    (
+                                        str(row.get("exit_time", "")),
+                                        float(row.get("net_pnl_pct", 0.0)),
+                                    )
+                                )
+                            walk_hold_cache[cache_key] = _choose_best_hold(series_by_hold)
+
+                        best_hold = walk_hold_cache.get(cache_key)
+                        if best_hold is not None:
+                            selected_hold = int(best_hold)
+                    elif (not walk_forward_enabled) and adaptive_hold_enabled and cycle > adaptive_in_sample_cycles:
                         best_hold = _choose_best_hold(adaptive_series_by_regime.get(regime, {}))
                         if best_hold is not None:
                             selected_hold = int(best_hold)
 
                     if selected_hold in by_hold_eval:
-                        exit_time, exit_price, _, _ = by_hold_eval[selected_hold]
+                        exit_time, exit_price, _, _, exit_candle_ts, exit_source = by_hold_eval[selected_hold]
                     else:
                         exit_time = entry_time + timedelta(minutes=int(selected_hold))
-                        resolved_exit = pipeline._resolve_backtest_close_price(symbol=symbol, at=exit_time)
-                        if resolved_exit is None:
+                        resolved_exit, exit_candle_ts, exit_source = pipeline._resolve_backtest_close_price(
+                            symbol=symbol,
+                            at=exit_time,
+                            after=entry_time,
+                        )
+                        if resolved_exit is None or exit_candle_ts is None:
                             if by_hold_eval:
                                 fallback_hold = min(by_hold_eval)
                                 selected_hold = int(fallback_hold)
-                                exit_time, exit_price, _, _ = by_hold_eval[fallback_hold]
+                                exit_time, exit_price, _, _, exit_candle_ts, exit_source = by_hold_eval[fallback_hold]
                             else:
                                 continue
                         else:
                             exit_price = float(resolved_exit)
+
+                    pipeline._LOG.debug(
+                        "backtest sim pricing | symbol=%s entry_time=%s exit_time=%s entry_price=%.8f exit_price=%.8f entry_candle_ts=%s exit_candle_ts=%s entry_source=%s exit_source=%s hold=%d",
+                        symbol,
+                        entry_time.isoformat(),
+                        exit_time.isoformat(),
+                        float(entry_price),
+                        float(exit_price),
+                        entry_candle_ts.isoformat(),
+                        exit_candle_ts.isoformat(),
+                        entry_source,
+                        exit_source,
+                        int(selected_hold),
+                    )
 
                     pipeline._persist_backtest_execution_sim_trade(
                         symbol=symbol,
@@ -2216,10 +2946,103 @@ def main() -> None:
                 hold_grid_by=str(args.hold_grid_by),
                 sweep_skipped_rows=int(sweep_skipped_rows),
                 adaptive_hold_used=bool(adaptive_hold_enabled),
+                adaptive_split_ratio=float(adaptive_split_ratio),
+                in_sample_cycles=int(adaptive_in_sample_cycles),
+                out_of_sample_cycles=int(adaptive_out_of_sample_cycles),
+                walk_forward_enabled=bool(walk_forward_enabled),
+                walk_forward_window=int(walk_window),
+                walk_forward_step=int(adaptive_walk_step),
+                walk_forward_segments=int(walk_segments),
+                walk_forward_oos_cycles=int(walk_oos_cycles),
             )
             print(f"[v25] backtest summary written | run_dir={run_dir}")
         except Exception as exc:  # noqa: BLE001
             print(f"[v25] backtest summary error: {exc}")
+
+    # Stage-2B: Export training dataset CSV
+    if args.export_training_dataset and args.v25 and v25_conn_ref is not None:
+        try:
+            _export_path = run_dir / "training_dataset.csv"
+            _export_conn = v25_conn_ref
+            _export_conn.row_factory = sqlite3.Row
+            _export_rows = _export_conn.execute(
+                """
+                SELECT
+                    d.timestamp,
+                    d.symbol,
+                    d.regime,
+                    d.engine AS engine_selected,
+                    d.confidence,
+                    d.reason,
+                    d.gate_results_json,
+                    d.status,
+                    d.position_size_pct,
+                    p.regime_json AS regime_probabilities_json,
+                    p.engine_weights_json,
+                    p.final_decision_json
+                FROM decisions d
+                LEFT JOIN paper_cycle_log p
+                  ON d.timestamp = p.timestamp AND d.symbol = p.symbol
+                ORDER BY d.decision_id ASC
+                """
+            ).fetchall()
+
+            import csv as _csv
+            _csv_headers = [
+                "timestamp", "symbol", "regime", "engine_selected",
+                "engine_weights_json", "confidence", "atr_14", "atr_14_pct",
+                "volume_ratio", "bb_pct_b", "ema_21_vs_55", "price_vs_ma200",
+                "net_pnl_pct", "hold_minutes", "regime_probabilities_json",
+            ]
+            with open(_export_path, "w", encoding="utf-8", newline="") as _csvf:
+                _writer = _csv.DictWriter(_csvf, fieldnames=_csv_headers)
+                _writer.writeheader()
+                for _r in _export_rows:
+                    _fd = {}
+                    try:
+                        _fd = json.loads(_r["final_decision_json"] or "{}")
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                    _gate = {}
+                    try:
+                        _gate = json.loads(_r["gate_results_json"] or "{}")
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                    _features = _gate.get("features_snapshot", {})
+                    _writer.writerow({
+                        "timestamp": _r["timestamp"],
+                        "symbol": _r["symbol"],
+                        "regime": _r["regime"],
+                        "engine_selected": _r["engine_selected"],
+                        "engine_weights_json": _r["engine_weights_json"] or "",
+                        "confidence": _r["confidence"],
+                        "atr_14": _features.get("atr_14", ""),
+                        "atr_14_pct": _features.get("atr_14_pct", ""),
+                        "volume_ratio": _features.get("volume_ratio", ""),
+                        "bb_pct_b": _features.get("bb_pct_b", ""),
+                        "ema_21_vs_55": _features.get("ema_21_vs_55", ""),
+                        "price_vs_ma200": _features.get("price_vs_ma200", ""),
+                        "net_pnl_pct": _fd.get("net_pnl_pct", ""),
+                        "hold_minutes": _fd.get("hold_minutes", ""),
+                        "regime_probabilities_json": _r["regime_probabilities_json"] or "",
+                    })
+            print(f"[stage-2b] training dataset exported | path={_export_path} | rows={len(_export_rows)}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"[stage-2b] training dataset export error: {exc}")
+
+    # P4-D Engine Observatory — write for ALL v25 modes (backtest/paper/live)
+    if args.v25:
+        try:
+            from src.v25.reports.engine_observatory import write_engine_observatory
+
+            write_engine_observatory(
+                db_path=str(args.v25_db),
+                run_dir=str(run_dir),
+                mode=str(args.mode),
+            )
+            print(f"[v25] engine observatory written | run_dir={run_dir}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"[v25] engine observatory error: {exc}")
 
     if args.v25:
         # v2.5 Dry-Run Telemetry
@@ -2255,6 +3078,101 @@ def main() -> None:
 
         except Exception as e:
             print(f"[v25] telemetry error: {e}")
+
+    # ── Stage-2C: Daily Scoreboard ────────────────────────────
+    if args.daily_scoreboard and args.v25:
+        try:
+            from src.v25.reports.daily_scoreboard import write_daily_scoreboard
+            sb = write_daily_scoreboard(
+                db_path=str(args.v25_db),
+                run_dir=str(run_dir),
+                mode=str(args.mode),
+            )
+            print(f"[stage-2c] daily scoreboard written | run_dir={run_dir}")
+            for check, verdict in sb.get("go_nogo", {}).items():
+                print(f"  [{check}] {verdict}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"[stage-2c] daily scoreboard error: {exc}")
+
+    # ── Stage-2C: Hardened training dataset ───────────────────
+    if args.export_training_dataset and args.v25 and v25_conn_ref is not None:
+        try:
+            from src.v25.reports.export_training_dataset import export_training_dataset
+            _ds_result = export_training_dataset(
+                conn=v25_conn_ref,
+                output_path=run_dir / "training_dataset.csv",
+            )
+            print(f"[stage-2c] hardened dataset exported | rows={_ds_result['row_count']} valid={_ds_result['valid']}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"[stage-2c] hardened dataset error: {exc}")
+
+    # ── Stage-2C: Live readiness check ────────────────────────
+    if args.v25 and args.mode in ("paper",):
+        try:
+            from src.runtime.live_readiness_check import evaluate_live_readiness
+            _readiness = evaluate_live_readiness(db_path=str(args.v25_db))
+            _status = "READY" if _readiness["ready"] else "NOT READY"
+            print(f"[stage-2c] live readiness: {_status} | reason={_readiness['reason']}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"[stage-2c] readiness check error: {exc}")
+
+    # ── Stage-2C: Paper 24h supervisor ─────────────────────────
+    if args.paper_24h and args.v25:
+        try:
+            from src.runtime.paper_supervisor import run_paper_supervisor
+            run_paper_supervisor(
+                db_path=str(args.v25_db),
+                base_run_dir=str(run_dir.parent / "paper_24h"),
+                cycle_interval_seconds=300,
+                restart_delay_seconds=30,
+                pipeline_factory=lambda: (pipeline, v25_conn_ref),
+            )
+        except KeyboardInterrupt:
+            print("[stage-2c] supervisor stopped by user")
+        except Exception as exc:  # noqa: BLE001
+            print(f"[stage-2c] supervisor error: {exc}")
+
+    # ── Demo-24h continuous loop ───────────────────────────────
+    if args.demo_24h:
+        import time as _time
+        _heartbeat_interval = 60  # seconds
+        _cycle_interval = 300     # 5 minutes between cycles
+        _demo_cycle = 0
+        print(f"[demo-24h] Starting 24/7 demo mode | mode={args.mode} | cycle_interval={_cycle_interval}s")
+        print(f"[demo-24h] Paper mode default. Press Ctrl+C to stop.")
+
+        if args.mode == "live":
+            print("[demo-24h] WARNING: --demo-24h with --mode live requires explicit confirmation.")
+            print("[demo-24h] Live trading is enabled. Proceed with caution.")
+
+        while True:
+            _demo_cycle += 1
+            try:
+                demo_now = datetime.now(timezone.utc)
+                print(f"[demo-24h] cycle={_demo_cycle} | ts={demo_now.isoformat()}")
+                demo_outputs = pipeline.run_once(now=demo_now)
+                print(f"[demo-24h] cycle={_demo_cycle} complete | outputs={len(demo_outputs)}")
+
+                # Persist to decisions log
+                with open(decisions_log, "a", encoding="utf-8") as f:
+                    for out in demo_outputs:
+                        f.write(json.dumps({"cycle": _demo_cycle, **out}, default=str) + "\n")
+
+            except KeyboardInterrupt:
+                print(f"\n[demo-24h] Stopped by user after {_demo_cycle} cycles.")
+                break
+            except Exception as demo_exc:
+                print(f"[demo-24h] cycle={_demo_cycle} ERROR: {demo_exc}")
+                # Do NOT exit — continue next cycle
+
+            # Heartbeat + sleep
+            try:
+                _time.sleep(_cycle_interval)
+                if _demo_cycle % (_heartbeat_interval // max(_cycle_interval, 1) + 1) == 0:
+                    print(f"[demo-24h] heartbeat | cycle={_demo_cycle} | ts={datetime.now(timezone.utc).isoformat()}")
+            except KeyboardInterrupt:
+                print(f"\n[demo-24h] Stopped by user after {_demo_cycle} cycles.")
+                break
 
 
 if __name__ == "__main__":
