@@ -210,7 +210,7 @@ class RuntimeRiskConfigReloader:
 
         self._last_check_utc = now
         payload, mtime_ns = load_runtime_risk_payload(self._path)
-        changed = mtime_ns != self._mtime_ns
+        changed = (mtime_ns != self._mtime_ns) or force
 
         # File removed after prior successful load.
         if mtime_ns is None and self._mtime_ns is not None:

@@ -35,6 +35,12 @@ def test_runtime_risk_reloader_detects_modified_config(tmp_path) -> None:
         '{"risk_parameters": {"atr_multiplier": 1.8, "rr_ratio": 2.5, "leverage_cap": 3.0, "volatility_threshold": 0.04}}',
         encoding="utf-8",
     )
+
+    # Ensure mtime is bumped for the test
+    import os, time
+    time.sleep(0.01)
+    os.utime(path, (time.time(), time.time()))
+
     second = reloader.maybe_reload(now_utc=t0 + timedelta(minutes=11))
     assert second.changed is True
     assert second.payload is not None

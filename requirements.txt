@@ -11,6 +11,7 @@ feedparser>=6.0.0
 pydantic>=2.0.0
 pyyaml>=6.0
 pyarrow>=16.0.0
+scipy>=1.14.0
 
 # Optional technical-analysis acceleration
 # pandas_ta may be unavailable in some environments (notably certain Python 3.12 builds).

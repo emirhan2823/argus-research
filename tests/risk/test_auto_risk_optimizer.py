@@ -117,7 +117,10 @@ def test_risk_config_reloader_detects_changes(tmp_path: Path) -> None:
     # No changes => no reload
     assert reloader.maybe_reload() is None
 
+    import time, os
+    time.sleep(0.01)
     save_risk_config(path, config=RiskConfig(atr_multiplier=2.0), engine="Titan")
+    os.utime(path, (time.time(), time.time()))
     second = reloader.maybe_reload()
     assert second is not None
     assert second.config.atr_multiplier == pytest.approx(2.0)
