@@ -549,6 +549,30 @@ def run_v25_migrations(db_path: str) -> sqlite3.Connection:
         if "slippage_pct" not in trades_cols:
             conn.execute("ALTER TABLE trades ADD COLUMN slippage_pct REAL DEFAULT 0")
 
+        # Scale-In (DCA): Add tracking columns to pyramid_layers
+        pyramid_cols = {
+            str(row[1]).lower()
+            for row in conn.execute("PRAGMA table_info(pyramid_layers)").fetchall()
+        }
+        if pyramid_cols:  # table exists
+            if "risk_budget" not in pyramid_cols:
+                conn.execute("ALTER TABLE pyramid_layers ADD COLUMN risk_budget REAL DEFAULT 0")
+            if "risk_used" not in pyramid_cols:
+                conn.execute("ALTER TABLE pyramid_layers ADD COLUMN risk_used REAL DEFAULT 0")
+            if "avg_entry_after" not in pyramid_cols:
+                conn.execute("ALTER TABLE pyramid_layers ADD COLUMN avg_entry_after REAL DEFAULT 0")
+            if "signal_strength" not in pyramid_cols:
+                conn.execute("ALTER TABLE pyramid_layers ADD COLUMN signal_strength TEXT DEFAULT 'NORMAL'")
+
+        # v2.6 migration: add leverage column to trades and backtest_trades
+        trades_cols = {r[1] for r in conn.execute("PRAGMA table_info(trades)").fetchall()}
+        if "leverage" not in trades_cols:
+            conn.execute("ALTER TABLE trades ADD COLUMN leverage REAL DEFAULT 1.0")
+
+        bt_trades_cols = {r[1] for r in conn.execute("PRAGMA table_info(backtest_trades)").fetchall()}
+        if "leverage" not in bt_trades_cols:
+            conn.execute("ALTER TABLE backtest_trades ADD COLUMN leverage REAL DEFAULT 1.0")
+
         conn.commit()
         return conn
     except Exception as exc:

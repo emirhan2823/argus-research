@@ -17,8 +17,11 @@ def _clamp(value: float, low: float, high: float) -> float:
 
 @dataclass
 class NautilusEngine:
-    max_adx: float = 22.0
+    max_adx: float = 25.0
     min_confidence: float = 0.55
+    bb_entry_threshold: float = 0.15
+    rsi_oversold: float = 35.0
+    rsi_overbought: float = 65.0
 
     # Candle history for range detection (symbol -> (highs, lows, closes))
     _candle_history: dict[str, tuple[list[float], list[float], list[float]]] = field(
@@ -88,16 +91,22 @@ class NautilusEngine:
         )
 
     def _bb_reversion_signal(self, features: FeatureVector) -> Optional[EngineSignal]:
-        if features.bb_pct_b <= 0.05 and features.rsi_14 <= 30:
+        lower_threshold = self.bb_entry_threshold
+        upper_threshold = 1.0 - self.bb_entry_threshold
+
+        # BB position is the primary trigger; RSI is a confidence bonus
+        if features.bb_pct_b <= lower_threshold:
             bias = "long"
-            stretch = 0.05 - features.bb_pct_b
-        elif features.bb_pct_b >= 0.95 and features.rsi_14 >= 70:
+            stretch = lower_threshold - features.bb_pct_b
+            rsi_bonus = max(0.0, (self.rsi_oversold - features.rsi_14) / 100.0)
+        elif features.bb_pct_b >= upper_threshold:
             bias = "short"
-            stretch = features.bb_pct_b - 0.95
+            stretch = features.bb_pct_b - upper_threshold
+            rsi_bonus = max(0.0, (features.rsi_14 - self.rsi_overbought) / 100.0)
         else:
             return None
 
-        conf = _clamp(0.55 + stretch * 3.0 + abs(features.rsi_14 - 50.0) / 200.0, 0.0, 1.0)
+        conf = _clamp(0.52 + stretch * 2.5 + rsi_bonus * 2.0, 0.0, 1.0)
         stop = _stop_distance(features, atr_mult=1.0)
         return EngineSignal(
             engine=ENGINE_NAUTILUS,
@@ -136,7 +145,7 @@ class NautilusEngine:
             bias=bias,
             confidence=conf,
             stop_distance=stop,
-            expected_return=stop * 1.6,
+            expected_return=stop * 2.0,
             atr=features.atr_14,
         )
 

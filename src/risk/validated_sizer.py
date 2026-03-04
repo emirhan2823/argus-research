@@ -9,7 +9,7 @@ from src.v25.contracts.validated_sizing import ValidatedSizing
 
 
 _BPS_DENOMINATOR = Decimal("10000")
-_GATE9_MAX_FEE_RISK_RATIO = Decimal("0.30")
+_GATE9_MAX_FEE_RISK_RATIO = Decimal("0.40")
 _GATE9_HYSTERESIS_EPSILON = Decimal("0.000001")
 
 

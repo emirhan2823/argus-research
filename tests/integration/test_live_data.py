@@ -244,8 +244,9 @@ def test_live_data_path_uses_exchange_client_and_cache_for_multiple_symbols(tmp_
             out1 = pipeline.run_once(now=datetime.now(timezone.utc))
             out2 = pipeline.run_once(now=datetime.now(timezone.utc) + timedelta(minutes=1))
 
-    # 5 symbols x first cycle requests; second cycle should hit cache
-    assert mock_get.call_count == 5
+    # 5 symbols x first cycle requests (primary TF) + 5 (HTF for Aegean MTF filter);
+    # second cycle should hit cache for both
+    assert mock_get.call_count == 10
     assert len(out1) == 5
     assert len(out2) == 5
     conn.close()

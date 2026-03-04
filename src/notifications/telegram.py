@@ -84,28 +84,11 @@ class TelegramSignalNotifier:
         take_profit_pct: float | None = None,
         advisory_message: str | None = None,
     ) -> bool:
-        if not self.active:
-            self._log_disabled_once()
-            return False
-
-        act = str(action).lower()
-        conf = float(confidence)
-        if act not in {"long", "short"}:
-            return False
-        if conf < float(self.min_confidence):
-            return False
-
-        now_utc = _to_utc(timestamp)
-        if self._is_daily_cap_reached(now_utc):
-            return False
-        if self._is_duplicate(now_utc, symbol=symbol, action=act):
-            return False
-
-        message = self._format_message(
-            timestamp=now_utc,
+        return self.notify_trade_executed(
+            timestamp=timestamp,
             symbol=symbol,
-            action=act,
-            confidence=conf,
+            side=action,
+            confidence=confidence,
             engine=engine,
             regime=regime,
             run_dir=run_dir,
@@ -114,10 +97,124 @@ class TelegramSignalNotifier:
             size_pct=size_pct,
             leverage=leverage,
             entry_price=entry_price,
-            stop_loss_pct=stop_loss_pct,
-            take_profit_pct=take_profit_pct,
+            stop_loss=stop_loss_pct,
+            take_profit=take_profit_pct,
             advisory_message=advisory_message,
         )
+
+    def notify_trade_executed(
+        self,
+        *,
+        timestamp: datetime,
+        symbol: str,
+        side: str,
+        confidence: float,
+        engine: str,
+        regime: str,
+        run_dir: str,
+        decision_id: int | None = None,
+        trade_id: str | None = None,
+        size_pct: float | None = None,
+        leverage: float | None = None,
+        entry_price: float | None = None,
+        stop_loss: float | None = None,
+        take_profit: float | None = None,
+        advisory_message: str | None = None,
+    ) -> bool:
+        act = str(side).lower()
+        if act not in {"long", "short"}:
+            return False
+        conf = float(confidence)
+        if conf < float(self.min_confidence):
+            return False
+        message = self._format_executed_message(
+            symbol=symbol,
+            side=act,
+            engine=engine,
+            leverage=leverage,
+            size_pct=size_pct,
+            entry_price=entry_price,
+            stop_loss=stop_loss,
+            take_profit=take_profit,
+            confidence=conf,
+            regime=regime,
+            advisory_message=advisory_message,
+        )
+        return self._notify_event(
+            timestamp=timestamp,
+            symbol=symbol,
+            action=act,
+            confidence=conf,
+            engine=engine,
+            regime=regime,
+            message=message,
+            decision_id=decision_id,
+            trade_id=trade_id,
+            run_dir=run_dir,
+        )
+
+    def notify_trade_closed(
+        self,
+        *,
+        timestamp: datetime,
+        symbol: str,
+        side: str,
+        pnl_pct: float,
+        engine: str,
+        max_drawdown_pct: float,
+        duration_minutes: int | None,
+        trailing_activated: bool,
+        regime: str = "UNKNOWN",
+        run_dir: str = "",
+        trade_id: str | None = None,
+    ) -> bool:
+        act = f"close_{str(side).lower()}"
+        conf = float(self.min_confidence)
+        message = self._format_closed_message(
+            symbol=symbol,
+            pnl_pct=pnl_pct,
+            engine=engine,
+            max_drawdown_pct=max_drawdown_pct,
+            duration_minutes=duration_minutes,
+            trailing_activated=trailing_activated,
+        )
+        return self._notify_event(
+            timestamp=timestamp,
+            symbol=symbol,
+            action=act,
+            confidence=conf,
+            engine=engine,
+            regime=regime,
+            message=message,
+            decision_id=None,
+            trade_id=trade_id,
+            run_dir=run_dir,
+        )
+
+    def _notify_event(
+        self,
+        *,
+        timestamp: datetime,
+        symbol: str,
+        action: str,
+        confidence: float,
+        engine: str,
+        regime: str,
+        message: str,
+        decision_id: int | None,
+        trade_id: str | None,
+        run_dir: str,
+    ) -> bool:
+        _ = run_dir
+        if not self.active:
+            self._log_disabled_once()
+            return False
+
+        now_utc = _to_utc(timestamp)
+        if self._is_daily_cap_reached(now_utc):
+            return False
+        if self._is_duplicate(now_utc, symbol=symbol, action=action):
+            return False
 
         if not self._send_message(message):
             return False
@@ -125,8 +222,8 @@ class TelegramSignalNotifier:
         self._record_sent(
             now_utc,
             symbol=str(symbol).upper(),
-            action=act,
-            confidence=conf,
+            action=action,
+            confidence=float(confidence),
             engine=str(engine),
             regime=str(regime),
             decision_id=decision_id,
@@ -266,40 +363,66 @@ class TelegramSignalNotifier:
             return "n/a"
         return format(float(value), fmt)
 
-    def _format_message(
+    @staticmethod
+    def _fmt_pct(value: float | None) -> str:
+        if value is None:
+            return "n/a"
+        return f"{float(value) * 100.0:.2f}%"
+
+    def _format_executed_message(
         self,
         *,
-        timestamp: datetime,
         symbol: str,
-        action: str,
-        confidence: float,
+        side: str,
         engine: str,
-        regime: str,
-        run_dir: str,
-        decision_id: int | None,
-        trade_id: str | None,
-        size_pct: float | None,
         leverage: float | None,
+        size_pct: float | None,
         entry_price: float | None,
-        stop_loss_pct: float | None,
-        take_profit_pct: float | None,
+        stop_loss: float | None,
+        take_profit: float | None,
+        confidence: float,
+        regime: str,
         advisory_message: str | None,
     ) -> str:
         parts = [
-            "ARGUS Actionable Signal",
-            f"Entry Time: {timestamp.isoformat()}",
+            "🟢 EXECUTED TRADE",
             f"Symbol: {str(symbol).upper()}",
-            f"Action: {str(action).upper()}",
-            f"Confidence: {confidence:.2f}",
+            f"Side: {str(side).upper()}",
             f"Engine: {engine}",
+            f"Leverage: {self._fmt_opt(leverage, '.2f')}x",
+            f"Size: {self._fmt_pct(size_pct)}",
+            f"Entry: {self._fmt_opt(entry_price)}",
+            f"SL: {self._fmt_opt(stop_loss)}",
+            f"TP: {self._fmt_opt(take_profit)}",
+            f"Confidence: {confidence:.2f}",
             f"Regime: {regime}",
-            f"Size: {self._fmt_opt(size_pct)}  Leverage: {self._fmt_opt(leverage, '.2f')}",
-            f"Entry: {self._fmt_opt(entry_price)}  Stop: {self._fmt_opt(stop_loss_pct)}  Target: {self._fmt_opt(take_profit_pct)}",
-            f"Decision ID: {decision_id if decision_id is not None else 'n/a'}",
-            f"Trade ID: {trade_id if trade_id else 'n/a'}",
-            f"Run Dir: {run_dir}",
             "Disclaimer: paper signal only.",
         ]
         if advisory_message:
             parts.append(f"Advisory: {advisory_message}")
         return "\n".join(parts)
+
+    def _format_closed_message(
+        self,
+        *,
+        symbol: str,
+        pnl_pct: float,
+        engine: str,
+        max_drawdown_pct: float,
+        duration_minutes: int | None,
+        trailing_activated: bool,
+    ) -> str:
+        duration = f"{int(duration_minutes)}m" if duration_minutes is not None else "n/a"
+        trailing_text = "Activated" if trailing_activated else "Not activated"
+        return "\n".join(
+            [
+                "📊 CLOSED TRADE",
+                f"Symbol: {str(symbol).upper()}",
+                f"PnL: {float(pnl_pct) * 100.0:+.2f}%",
+                f"Engine: {engine}",
+                f"Max Drawdown: {float(max_drawdown_pct) * 100.0:+.2f}%",
+                f"Duration: {duration}",
+                f"Trailing: {trailing_text}",
+                "Disclaimer: paper signal only.",
+            ]
+        )

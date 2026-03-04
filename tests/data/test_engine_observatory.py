@@ -183,6 +183,10 @@ def test_observatory_csv_has_expected_headers(tmp_path: Path) -> None:
         reader = csv.DictReader(fh)
         assert "engine" in reader.fieldnames
         assert "win_rate" in reader.fieldnames
+        assert "long_total_return" in reader.fieldnames
+        assert "short_total_return" in reader.fieldnames
+        assert "long_trade_count" in reader.fieldnames
+        assert "short_trade_count" in reader.fieldnames
         rows = list(reader)
         assert len(rows) >= 1
 

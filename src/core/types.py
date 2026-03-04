@@ -71,6 +71,9 @@ class FeatureVector(ArgusModel):
     cmf_20: float
     volume_delta: float
 
+    # --- Derived Volatility (Optional) ---
+    atr_pctl: Optional[float] = None  # ATR percentile rank over 100 bars [0.0, 1.0]
+
     # --- Microstructure (5) — Some Optional for non-crypto ---
     spread_pct: float
     orderbook_imbalance: Optional[float] = None
@@ -152,7 +155,7 @@ class Decision(ArgusModel):
     symbol: str
     execution_mode: str  # "auto" | "advisory"
     position_size: float = Field(ge=0.0, le=0.15)
-    leverage: float = Field(ge=1.0, le=3.0)
+    leverage: float = Field(ge=1.0, le=20.0)
     stop_loss: float = Field(ge=0.0, le=0.10)  # Wider for stocks
     take_profit: float = Field(ge=0.0)
     confidence: float = Field(ge=0.0, le=1.0)

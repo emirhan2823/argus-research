@@ -90,6 +90,21 @@ class RegimeConfig(BaseModel):
 # ── Engine Configs ────────────────────────────────────────────────
 
 
+class TitanExitConfig(BaseModel):
+    """TITAN multi-tier exit system configuration."""
+
+    tp1_r: float = 1.0
+    tp1_close_fraction: float = 0.33
+    tp2_r: float = 2.0
+    tp2_close_fraction: float = 0.33
+    be_after_tp1: bool = True
+    be_buffer_pct: float = 0.002
+    runner_trail_mode: str = "structure"
+    runner_trail_atr_mult: float = 2.0
+    runner_atr_buffer: float = 0.3
+    min_edge: float = 0.15
+
+
 class TitanConfig(BaseModel):
     active_regimes: list[str] = Field(default_factory=lambda: ["TRENDING"])
     min_adx: float = 25.0
@@ -97,6 +112,7 @@ class TitanConfig(BaseModel):
     max_concurrent: int = 2
     trend_follow: dict[str, Any] = Field(default_factory=dict)
     breakout: dict[str, Any] = Field(default_factory=dict)
+    exit_system: TitanExitConfig = Field(default_factory=TitanExitConfig)
 
 
 class NautilusConfig(BaseModel):
@@ -260,6 +276,27 @@ class TelemetryConfig(BaseModel):
     advisory: AdvisoryConfig = Field(default_factory=AdvisoryConfig)
 
 
+# ── Crypto Fee Mode ──────────────────────────────────────────────
+
+
+class CryptoFeeConfig(BaseModel):
+    """Config-driven overlay for crypto fee-aware execution."""
+
+    enabled: bool = False
+    taker_fee_bps: float = 3.0
+    min_rr: float = 2.0
+    min_tp_pct: float = 0.01
+    min_edge: float = 0.0
+    titan_min_edge: float = 0.15  # TITAN-specific: higher edge for trend trades
+    tq_min_grade: str = "B"
+    grade_a_size_mult: float = 1.25
+    grade_b_size_mult: float = 1.10
+    mr_max_adx: float = 22.0
+    mr_max_atr_pctl: float = 0.60
+    ranging_engines: list[str] = Field(default_factory=lambda: ["NAUTILUS", "HYDRA"])
+    tp_adx_rising_mult: float = 1.15
+
+
 # ── Root Config ───────────────────────────────────────────────────
 
 
@@ -271,6 +308,7 @@ class ArgusConfig(BaseModel):
     engines: EnginesConfig = Field(default_factory=EnginesConfig)
     risk: RiskConfig = Field(default_factory=RiskConfig)
     telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
+    crypto_fee: CryptoFeeConfig = Field(default_factory=CryptoFeeConfig)
 
 
 # ── Loader ────────────────────────────────────────────────────────
@@ -337,6 +375,7 @@ def load_config(
         "engines": engines_data.get("engines", {}),
         "risk": risk_data.get("risk", {}),
         "telemetry": telemetry_data.get("telemetry", {}),
+        "crypto_fee": engines_data.get("crypto_fee", {}),
     }
 
     # Apply mode overrides

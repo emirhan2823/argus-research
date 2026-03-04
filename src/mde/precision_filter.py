@@ -26,8 +26,8 @@ DEFAULT_GRADE_THRESHOLDS = {
     # Below D threshold → Grade F (reject)
 }
 
-# Minimum grade to pass: D or above
-MIN_PASSING_GRADE = "D"
+# Minimum grade to pass: C or above (D and F rejected)
+MIN_PASSING_GRADE = "C"
 _GRADE_ORDER = {"A": 4, "B": 3, "C": 2, "D": 1, "F": 0}
 
 
@@ -39,7 +39,7 @@ class PrecisionConfig:
     grade_b_threshold: float = 0.65
     grade_c_threshold: float = 0.50
     grade_d_threshold: float = 0.35
-    min_passing_grade: str = "D"
+    min_passing_grade: str = "C"
     # Confidence adjustments per grade
     conf_boost_a: float = 0.05
     conf_boost_b: float = 0.02

@@ -144,7 +144,7 @@ class TestGradeC:
 
 
 class TestGradeD:
-    """Grade D: adverse OBI or wide spread, still passes."""
+    """Grade D: adverse OBI or wide spread, now rejected (min grade = C)."""
 
     def test_grade_d_adverse_conditions(self) -> None:
         result = _assess(
@@ -157,7 +157,7 @@ class TestGradeD:
             atr_pct=0.03,
         )
         assert result.grade == "D"
-        assert result.passed is True
+        assert result.passed is False  # Grade D is now rejected (min_passing_grade="C")
         assert result.confidence_adjustment < 0
 
 

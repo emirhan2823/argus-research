@@ -18,7 +18,7 @@ OBI_SHORT_THRESHOLD = -0.55
 RSI_OVERSOLD = 35
 RSI_OVERBOUGHT = 65
 BOUNDARY_PROXIMITY_ATR = 0.5  # Must be within 0.5 ATR of boundary
-STOP_ATR_MULT = 0.5  # Stop outside range by 0.5 ATR
+STOP_ATR_MULT = 1.0  # Stop outside range by 1.0 ATR
 
 
 def detect_micro_reversion(
@@ -96,8 +96,8 @@ def detect_micro_reversion(
     stop_distance = abs(approx_price - sl_price) / approx_price
     stop_distance = _clamp(stop_distance, 0.001, 0.10)
 
-    # Target: midpoint → compute expected return
-    expected_return = abs(range_midpoint - approx_price) / approx_price
+    # Target: beyond midpoint (1.3x stretch) to improve win/loss ratio
+    expected_return = abs(range_midpoint - approx_price) / approx_price * 1.3
     expected_return = max(expected_return, 0.001)
 
     return EngineSignal(

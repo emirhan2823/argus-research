@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from src.core.constants import ENGINE_HERMES, ENGINE_NAUTILUS, ENGINE_PHOENIX, ENGINE_TITAN, REGIME_RANGING, REGIME_TRENDING
+from src.core.constants import ENGINE_AEGEAN, ENGINE_HERMES, ENGINE_NAUTILUS, ENGINE_PHOENIX, ENGINE_TITAN, REGIME_RANGING, REGIME_TRENDING
 from src.core.types import EngineSignal
 from src.mde.execution_router import get_execution_mode
 from src.mde.gates import GateInput, evaluate_gates
@@ -34,7 +34,7 @@ def _sig(engine: str, bias: str = "long", confidence: float = 0.7, expected_retu
 def test_router_lead_engine_signal() -> None:
     router = RegimeRouter(
         engines={
-            ENGINE_TITAN: _DummyEngine(_sig(ENGINE_TITAN)),
+            ENGINE_AEGEAN: _DummyEngine(_sig(ENGINE_AEGEAN)),
             ENGINE_PHOENIX: _DummyEngine(_sig(ENGINE_PHOENIX)),
             ENGINE_HERMES: _DummyEngine(None),
         }
@@ -44,13 +44,13 @@ def test_router_lead_engine_signal() -> None:
         features=make_feature_vector(),
     )
     assert signal is not None
-    assert signal.engine == ENGINE_TITAN
+    assert signal.engine == ENGINE_AEGEAN
 
 
-def test_router_fallback_to_phoenix() -> None:
+def test_router_returns_none_when_primary_has_no_signal() -> None:
     router = RegimeRouter(
         engines={
-            ENGINE_NAUTILUS: _DummyEngine(None),
+            ENGINE_AEGEAN: _DummyEngine(None),
             ENGINE_PHOENIX: _DummyEngine(_sig(ENGINE_PHOENIX)),
             ENGINE_HERMES: _DummyEngine(None),
         }
@@ -59,14 +59,14 @@ def test_router_fallback_to_phoenix() -> None:
         regime=make_regime_state(REGIME_RANGING),
         features=make_feature_vector(),
     )
-    assert signal is not None
-    assert signal.engine == ENGINE_PHOENIX
+    # No fallback — returns None when primary (AEGEAN) has no signal
+    assert signal is None
 
 
 def test_router_hermes_override_on_opposite_stronger_signal() -> None:
     router = RegimeRouter(
         engines={
-            ENGINE_TITAN: _DummyEngine(_sig(ENGINE_TITAN, bias="long", confidence=0.60)),
+            ENGINE_AEGEAN: _DummyEngine(_sig(ENGINE_AEGEAN, bias="long", confidence=0.60)),
             ENGINE_PHOENIX: _DummyEngine(None),
             ENGINE_HERMES: _DummyEngine(_sig(ENGINE_HERMES, bias="short", confidence=0.85)),
         }

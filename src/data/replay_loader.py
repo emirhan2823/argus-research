@@ -276,9 +276,12 @@ class ReplayLoader:
 
         needed = []
         for m in available:
-            # Parse month string to a period
+            # Parse month or year string to a period
             try:
-                period = pd.Period(m, freq="M")
+                if len(m) == 4 and m.isdigit():
+                    period = pd.Period(m, freq="Y")
+                else:
+                    period = pd.Period(m, freq="M")
             except Exception:
                 needed.append(m)  # Can't parse, include it
                 continue

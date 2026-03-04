@@ -42,6 +42,23 @@ def test_rule_based_trending() -> None:
     classifier = RuleBasedRegimeClassifier()
     regime = classifier.classify(
         RuleBasedInput(
+            adx_14=35.0,
+            price_vs_ma200=0.03,
+            ema_21_vs_55=0.02,
+            hurst_exponent=0.60,
+            atr_ratio_5_20=1.1,
+            vol_multiple_60d=1.1,
+            directional_alignment_candles=24,
+        )
+    )
+    assert regime == REGIME_TRENDING
+
+
+def test_rule_based_weak_trend_is_ranging() -> None:
+    """ADX 25-32 with non-persistent Hurst should classify as RANGING."""
+    classifier = RuleBasedRegimeClassifier()
+    regime = classifier.classify(
+        RuleBasedInput(
             adx_14=28.0,
             price_vs_ma200=0.03,
             ema_21_vs_55=0.02,
@@ -51,7 +68,7 @@ def test_rule_based_trending() -> None:
             directional_alignment_candles=24,
         )
     )
-    assert regime == REGIME_TRENDING
+    assert regime == REGIME_RANGING
 
 
 def test_rule_based_ranging_default() -> None:

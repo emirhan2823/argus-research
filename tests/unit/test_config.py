@@ -30,7 +30,7 @@ class TestConfigLoader:
 
     def test_engines_config(self):
         cfg = load_config(config_dir=CONFIG_DIR)
-        assert cfg.engines.titan.min_adx == 25
+        assert cfg.engines.titan.min_adx == 35
         assert cfg.engines.hermes.llm_backend == "ollama"
         assert cfg.engines.hermes.position_management.critical_news_close_immediately is True
 

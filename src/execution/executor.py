@@ -102,6 +102,33 @@ class Executor:
             f"entry_zone={zone} conf={decision.confidence:.2f} reason={decision.reason}"
         )
 
+    def set_trailing_stop(
+        self,
+        *,
+        symbol: str,
+        side: str,
+        stop_price: float,
+    ) -> dict[str, Any]:
+        """Update trailing stop on the broker (best-effort).
+
+        Not all brokers support native trailing stops; this is a convenience
+        wrapper that places a stop-loss order modification.
+        """
+        order_type = "limit"
+        try:
+            result = self.broker.place_order(
+                symbol=symbol,
+                side="sell" if side.lower() in ("long", "buy") else "buy",
+                size=0.0,  # Modification; broker interprets as SL update
+                order_type=order_type,
+                urgency="NORMAL",
+            )
+            _LOG.debug("set_trailing_stop: %s %s @ %s -> %s", symbol, side, stop_price, result)
+            return result
+        except Exception as exc:
+            _LOG.warning("set_trailing_stop failed: %s -> %s", symbol, exc)
+            return {"success": False, "error": str(exc)}
+
     # ------------------------------------------------------------------
     # PR-J02: Hyper-precision entry integration
     # ------------------------------------------------------------------

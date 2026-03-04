@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import pytest
 
 from src.core.constants import (
+    ENGINE_AEGEAN,
     ENGINE_HERMES,
     ENGINE_NAUTILUS,
     ENGINE_PHOENIX,
@@ -64,6 +65,7 @@ def _decision(mode: str = "auto") -> Decision:
 def test_stress_router_handles_regime_flapping() -> None:
     router = RegimeRouter(
         engines={
+            ENGINE_AEGEAN: _Engine(_sig(ENGINE_AEGEAN)),
             ENGINE_TITAN: _Engine(_sig(ENGINE_TITAN)),
             ENGINE_NAUTILUS: _Engine(_sig(ENGINE_NAUTILUS)),
             ENGINE_PHOENIX: _Engine(_sig(ENGINE_PHOENIX)),

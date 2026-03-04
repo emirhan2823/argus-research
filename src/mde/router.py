@@ -1,4 +1,7 @@
-"""Regime-to-engine router with PHOENIX fallback and HERMES override support."""
+"""Regime-to-engine router with PHOENIX fallback and HERMES override support.
+
+v6: Accepts optional OrchestratorDecision to dynamically enable/disable engines.
+"""
 
 from __future__ import annotations
 
@@ -35,10 +38,24 @@ class RegimeRouter:
         regime: RegimeState,
         features: FeatureVector,
         allow_crisis_override: bool = False,
+        orchestrator_decision: Optional[object] = None,
     ) -> Optional[EngineSignal]:
         if regime.regime == REGIME_CRISIS and not allow_crisis_override:
             return None
 
+        # ── v6 Orchestrated routing ──
+        if orchestrator_decision is not None:
+            return self._route_orchestrated(regime, features, orchestrator_decision)
+
+        # ── Legacy static routing (backward compatible) ──
+        return self._route_static(regime, features)
+
+    def _route_static(
+        self,
+        regime: RegimeState,
+        features: FeatureVector,
+    ) -> Optional[EngineSignal]:
+        """Original static routing via REGIME_TO_ENGINE map."""
         # Run primary engine
         lead_name = REGIME_TO_ENGINE.get(regime.regime)
         lead_signal = self._run_engine(lead_name, regime, features) if lead_name else None
@@ -57,11 +74,30 @@ class RegimeRouter:
             best = max(all_candidates, key=lambda s: s.confidence)
             return self._apply_hermes_override(regime, features, best)
 
-        # Fallback to PHOENIX when no engine has a signal.
-        fallback_signal = self._run_engine(ENGINE_PHOENIX, regime, features)
-        if fallback_signal is None:
+        return None
+
+    def _route_orchestrated(
+        self,
+        regime: RegimeState,
+        features: FeatureVector,
+        decision: object,
+    ) -> Optional[EngineSignal]:
+        """v6 orchestrated routing: only run enabled engines."""
+        enabled = getattr(decision, "enabled_engines", [])
+        if not enabled:
             return None
-        return self._apply_hermes_override(regime, features, fallback_signal)
+
+        signals: list[EngineSignal] = []
+        for engine_name in enabled:
+            sig = self._run_engine(engine_name, regime, features)
+            if sig is not None:
+                signals.append(sig)
+
+        if not signals:
+            return None
+
+        best = max(signals, key=lambda s: s.confidence)
+        return self._apply_hermes_override(regime, features, best)
 
     def _run_engine(
         self,
@@ -98,3 +134,4 @@ class RegimeRouter:
 
         boosted_conf = min(1.0, base_signal.confidence + 0.05)
         return base_signal.model_copy(update={"confidence": boosted_conf})
+

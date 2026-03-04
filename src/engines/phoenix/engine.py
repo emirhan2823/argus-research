@@ -43,12 +43,12 @@ class PhoenixEngine:
         if features.asset_class != AC_CRYPTO or features.funding_pctile_30d is None:
             return None
         pct = features.funding_pctile_30d
-        if pct >= 95:
+        if pct >= 90:
             bias = "short"
-            edge = (pct - 95) / 5
-        elif pct <= 5:
+            edge = (pct - 90) / 10
+        elif pct <= 10:
             bias = "long"
-            edge = (5 - pct) / 5
+            edge = (10 - pct) / 10
         else:
             return None
         conf = _clamp(0.60 + edge * 0.25, 0.0, 1.0)
@@ -97,6 +97,6 @@ class PhoenixEngine:
             bias=bias,
             confidence=confidence,
             stop_distance=stop,
-            expected_return=stop * 1.7,
+            expected_return=stop * 2.0,
             atr=features.atr_14,
         )

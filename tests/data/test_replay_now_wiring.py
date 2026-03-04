@@ -34,7 +34,7 @@ def test_replay_mode_forwards_replay_now_to_data_factory(monkeypatch) -> None:
     frame = pipeline._load_ohlcv(symbol="BTCUSDT", now=datetime.now(timezone.utc))
 
     assert captured["symbol"] == "BTCUSDT"
-    assert captured["timeframe"] == "1m"
+    assert captured["timeframe"] == getattr(pipeline, "_primary_tf", "1h")
     assert captured["limit"] == 10
     assert captured["now"] == replay_now
     assert not frame.empty

@@ -251,9 +251,9 @@ class TestDecision:
         d = self._make_decision()
         assert d.action == "long"
 
-    def test_rejects_leverage_above_3(self):
+    def test_rejects_leverage_above_20(self):
         with pytest.raises(Exception):
-            self._make_decision(leverage=3.5)
+            self._make_decision(leverage=21.0)
 
     def test_rejects_position_size_above_015(self):
         with pytest.raises(Exception):

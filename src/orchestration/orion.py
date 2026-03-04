@@ -22,10 +22,11 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from src.core.constants import (
+    ENGINE_AEGEAN,
     ENGINE_GEMINI,
     ENGINE_HYDRA,
     ENGINE_NAUTILUS,
-    ENGINE_PHOENIX,
+    ENGINE_POSEIDON,
     ENGINE_TITAN,
     REGIME_CRISIS,
     REGIME_RANGING,
@@ -40,15 +41,15 @@ _LOG = logging.getLogger("argus.orion")
 # Constants
 # ─────────────────────────────────────────────────────────────────
 
-ALL_ENGINES = (ENGINE_TITAN, ENGINE_NAUTILUS, ENGINE_HYDRA, ENGINE_PHOENIX, ENGINE_GEMINI)
+ALL_ENGINES = (ENGINE_TITAN, ENGINE_NAUTILUS, ENGINE_HYDRA, ENGINE_GEMINI, ENGINE_AEGEAN, ENGINE_POSEIDON)
 
 # Engine regime affinity matrix — soft compatibility scores [0.0, 1.0]
 # These are v1 starting values; Phase 2 learns them from data.
 ENGINE_AFFINITY: dict[str, dict[str, float]] = {
     ENGINE_TITAN: {
         REGIME_TRENDING: 1.0,
-        REGIME_RANGING: 0.10,
-        REGIME_VOLATILE: 0.40,
+        REGIME_RANGING: 0.0,   # TITAN v2: fully disabled in ranging
+        REGIME_VOLATILE: 0.30,
         REGIME_CRISIS: 0.0,
     },
     ENGINE_NAUTILUS: {
@@ -63,16 +64,22 @@ ENGINE_AFFINITY: dict[str, dict[str, float]] = {
         REGIME_VOLATILE: 0.70,
         REGIME_CRISIS: 0.0,
     },
-    ENGINE_PHOENIX: {
-        REGIME_TRENDING: 0.40,
-        REGIME_RANGING: 0.30,
-        REGIME_VOLATILE: 1.0,
-        REGIME_CRISIS: 0.0,
-    },
     ENGINE_GEMINI: {
         REGIME_TRENDING: 0.20,
         REGIME_RANGING: 0.90,
         REGIME_VOLATILE: 0.50,
+        REGIME_CRISIS: 0.0,
+    },
+    ENGINE_AEGEAN: {
+        REGIME_TRENDING: 0.40,  # Confirmation-only in TRENDING (TITAN is primary)
+        REGIME_RANGING: 0.95,
+        REGIME_VOLATILE: 0.70,
+        REGIME_CRISIS: 0.0,
+    },
+    ENGINE_POSEIDON: {
+        REGIME_TRENDING: 0.50,
+        REGIME_RANGING: 1.0,
+        REGIME_VOLATILE: 0.80,
         REGIME_CRISIS: 0.0,
     },
 }

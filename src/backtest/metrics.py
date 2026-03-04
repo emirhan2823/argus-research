@@ -57,3 +57,41 @@ def calmar_ratio(returns: Iterable[float], equity_curve: Iterable[float], period
     if dd <= 1e-12:
         return 0.0
     return annualized / dd
+
+
+def profit_factor(pnls: Iterable[float]) -> float:
+    """Compute profit factor: gross profit / gross loss."""
+    values = list(pnls)
+    gains = sum(p for p in values if p > 0)
+    losses = abs(sum(p for p in values if p < 0))
+    if losses < 1e-9:
+        return float("inf") if gains > 0 else 0.0
+    return gains / losses
+
+
+def win_rate_by_group(
+    pnls: Iterable[float],
+    groups: Iterable[str],
+) -> dict[str, float]:
+    """Compute win rate grouped by a categorical key.
+
+    Parameters
+    ----------
+    pnls : PnL values per trade.
+    groups : Group label per trade (must be same length as pnls).
+
+    Returns
+    -------
+    dict mapping group label to win rate (0-1).
+    """
+    from collections import defaultdict
+
+    buckets: dict[str, list[float]] = defaultdict(list)
+    for pnl, grp in zip(pnls, groups):
+        buckets[grp].append(pnl)
+
+    result = {}
+    for grp, vals in buckets.items():
+        wins = sum(1 for v in vals if v > 0)
+        result[grp] = wins / len(vals) if vals else 0.0
+    return result

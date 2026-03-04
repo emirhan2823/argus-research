@@ -16,6 +16,7 @@ def make_feature_vector(**overrides) -> FeatureVector:
         atr_14=200.0,
         atr_14_pct=0.01,
         atr_ratio_5_20=1.1,
+        atr_pctl=0.5,
         realized_vol_20d=0.25,
         parkinson_vol=0.2,
         bb_width=0.03,

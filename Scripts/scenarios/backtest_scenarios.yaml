@@ -1,0 +1,42 @@
+defaults:
+  assets:
+    - BTCUSDT
+    - ETHUSDT
+    - SOLUSDT
+    - XRPUSDT
+    - DOGEUSDT
+  timeframe: 1h
+  risk_profile: normal
+  orion: matrix
+
+scenarios:
+  bull_2024:
+    start: 2024-01-01
+    end: 2024-12-31
+    risk_profile: relaxed
+    orion: matrix
+  luna_crash_2022:
+    start: 2022-05-01
+    end: 2022-07-31
+    risk_profile: normal
+    orion: matrix
+  bear_2022:
+    start: 2022-01-01
+    end: 2022-12-31
+    risk_profile: normal
+    orion: matrix
+  bear_crash_2022:
+    start: 2022-04-01
+    end: 2022-12-31
+    risk_profile: normal
+    orion: matrix
+  covid_crash_2020:
+    start: 2020-02-15
+    end: 2020-05-31
+    risk_profile: normal
+    orion: matrix
+  full_2018_to_now:
+    start: 2018-01-01
+    end: latest
+    risk_profile: normal
+    orion: matrix

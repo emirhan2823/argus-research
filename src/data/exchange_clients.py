@@ -1,14 +1,19 @@
-"""Exchange API clients for live OHLCV data.
+"""Exchange API clients for live OHLCV data and order execution.
 
-Provides BinancePublicClient (no API key needed, read-only klines)
-and BingXClient (authenticated, for future trading).
+Provides:
+  - BinancePublicClient (no API key needed, read-only klines)
+  - BingXClient (read-only klines, public endpoint)
+  - BingXPublicClient (ticker, depth, funding rate via public endpoints)
+  - BingXPrivateClient (HMAC-SHA256 authenticated order placement, implements BrokerAdapter)
 
-Both satisfy the ExchangeClient protocol in data_factory.py:
-    fetch_ohlcv(symbol, timeframe, limit) -> list[list[Any]]
+ExchangeClient protocol: fetch_ohlcv(symbol, timeframe, limit) -> list[list[Any]]
+BrokerAdapter protocol: place_order(*, symbol, side, size, order_type, urgency) -> dict
 """
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 from http.client import RemoteDisconnected
 import logging
 import os
@@ -16,6 +21,7 @@ import random
 import time
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlencode
 
 import requests
 
@@ -348,6 +354,64 @@ class BinancePublicClient:
             LOG.debug("Funding rate fetch failed for %s", symbol, exc_info=True)
         return None
 
+    def fetch_exchange_info(self) -> list[dict[str, Any]]:
+        """Fetch all USDT-margined perpetual symbols with status=TRADING.
+
+        Single call to /fapi/v1/exchangeInfo (public, no API key).
+        Returns list of {symbol, base_asset, quote_asset}.
+        """
+        try:
+            resp = self._session.get(
+                "https://fapi.binance.com/fapi/v1/exchangeInfo",
+                timeout=self.timeout,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            symbols: list[dict[str, Any]] = []
+            for s in data.get("symbols", []):
+                if (
+                    s.get("status") == "TRADING"
+                    and s.get("quoteAsset") == "USDT"
+                    and s.get("contractType") == "PERPETUAL"
+                ):
+                    symbols.append({
+                        "symbol": str(s["symbol"]),
+                        "base_asset": str(s["baseAsset"]),
+                        "quote_asset": str(s["quoteAsset"]),
+                    })
+            return symbols
+        except Exception as exc:
+            LOG.warning("Binance exchangeInfo failed: %s", exc)
+            return []
+
+    def fetch_24h_tickers(self) -> list[dict[str, Any]]:
+        """Fetch 24h ticker stats for ALL futures symbols in one call.
+
+        Single call to /fapi/v1/ticker/24hr (public, no API key).
+        Returns list of {symbol, volume_usdt, last_price, price_change_pct}.
+        """
+        try:
+            resp = self._session.get(
+                "https://fapi.binance.com/fapi/v1/ticker/24hr",
+                timeout=self.timeout,
+            )
+            resp.raise_for_status()
+            raw = resp.json()
+            tickers: list[dict[str, Any]] = []
+            for t in raw:
+                if not isinstance(t, dict):
+                    continue
+                tickers.append({
+                    "symbol": str(t.get("symbol", "")),
+                    "volume_usdt": float(t.get("quoteVolume", 0)),
+                    "last_price": float(t.get("lastPrice", 0)),
+                    "price_change_pct": float(t.get("priceChangePercent", 0)),
+                })
+            return tickers
+        except Exception as exc:
+            LOG.warning("Binance 24h tickers failed: %s", exc)
+            return []
+
 
 # ---------------------------------------------------------------------------
 # BingX Client (authenticated, for future live trading)
@@ -429,6 +493,417 @@ class BingXClient:
         except Exception as exc:
             LOG.warning("BingX klines failed: %s", exc)
             return []
+
+
+# ---------------------------------------------------------------------------
+# BingX Public Client (extended: ticker, depth, funding)
+# ---------------------------------------------------------------------------
+
+class BingXPublicClient:
+    """Extended BingX public client with ticker, depth, and funding rate.
+
+    Satisfies ExchangeClient protocol (fetch_ohlcv) and adds market data methods.
+    """
+
+    BASE_URL = "https://open-api.bingx.com"
+
+    def __init__(self, timeout: float = 10.0) -> None:
+        self.timeout = timeout
+        self._session = requests.Session()
+        self._session.headers.update({"User-Agent": "ARGUS/2.5"})
+
+    def fetch_ohlcv(
+        self, *, symbol: str, timeframe: str = "1m", limit: int = 500,
+    ) -> list[list[Any]]:
+        """Fetch klines from BingX (public endpoint)."""
+        bingx_symbol = _to_bingx_symbol(symbol)
+        interval = _BINGX_TF_MAP.get(timeframe, timeframe)
+        try:
+            resp = self._session.get(
+                f"{self.BASE_URL}/openApi/swap/v2/quote/klines",
+                params={"symbol": bingx_symbol, "interval": interval, "limit": min(limit, 1440)},
+                timeout=self.timeout,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("code") != 0:
+                LOG.warning("BingX klines error: %s", data.get("msg", "unknown"))
+                return []
+            klines = data.get("data", [])
+            rows: list[list[Any]] = []
+            for k in klines:
+                ts = datetime.fromtimestamp(int(k["time"]) / 1000, tz=timezone.utc)
+                rows.append([ts, float(k["open"]), float(k["high"]), float(k["low"]), float(k["close"]), float(k["volume"])])
+            return rows
+        except Exception as exc:
+            LOG.warning("BingX klines failed: %s", exc)
+            return []
+
+    def fetch_ticker(self, *, symbol: str) -> dict[str, Any] | None:
+        """Fetch 24h ticker stats for a symbol."""
+        bingx_symbol = _to_bingx_symbol(symbol)
+        try:
+            resp = self._session.get(
+                f"{self.BASE_URL}/openApi/swap/v2/quote/ticker",
+                params={"symbol": bingx_symbol},
+                timeout=self.timeout,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("code") != 0:
+                return None
+            ticker = data.get("data", {})
+            return {
+                "symbol": symbol,
+                "last_price": float(ticker.get("lastPrice", 0)),
+                "bid": float(ticker.get("bidPrice", 0)),
+                "ask": float(ticker.get("askPrice", 0)),
+                "high_24h": float(ticker.get("highPrice", 0)),
+                "low_24h": float(ticker.get("lowPrice", 0)),
+                "volume_24h": float(ticker.get("volume", 0)),
+                "price_change_pct": float(ticker.get("priceChangePercent", 0)),
+            }
+        except Exception as exc:
+            LOG.warning("BingX ticker failed for %s: %s", symbol, exc)
+            return None
+
+    def fetch_depth(self, *, symbol: str, limit: int = 20) -> dict[str, Any] | None:
+        """Fetch order book snapshot."""
+        bingx_symbol = _to_bingx_symbol(symbol)
+        try:
+            resp = self._session.get(
+                f"{self.BASE_URL}/openApi/swap/v2/quote/depth",
+                params={"symbol": bingx_symbol, "limit": min(limit, 100)},
+                timeout=self.timeout,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("code") != 0:
+                return None
+            book = data.get("data", {})
+            return {
+                "bids": [[float(p), float(q)] for p, q in (book.get("bids") or [])],
+                "asks": [[float(p), float(q)] for p, q in (book.get("asks") or [])],
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        except Exception as exc:
+            LOG.warning("BingX depth failed for %s: %s", symbol, exc)
+            return None
+
+    def fetch_funding_rate(self, *, symbol: str) -> float | None:
+        """Fetch current funding rate for perpetual swap."""
+        bingx_symbol = _to_bingx_symbol(symbol)
+        try:
+            resp = self._session.get(
+                f"{self.BASE_URL}/openApi/swap/v2/quote/premiumIndex",
+                params={"symbol": bingx_symbol},
+                timeout=self.timeout,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("code") != 0:
+                return None
+            info = data.get("data", {})
+            return float(info.get("lastFundingRate", 0))
+        except Exception as exc:
+            LOG.warning("BingX funding rate failed for %s: %s", symbol, exc)
+            return None
+
+    def fetch_all_symbols(self) -> list[dict[str, Any]]:
+        """Fetch all USDT-M perpetual swap contracts from BingX.
+
+        Single call to /openApi/swap/v2/quote/contracts (public).
+        Returns list of {symbol, base_asset, quote_asset}.
+        """
+        try:
+            resp = self._session.get(
+                f"{self.BASE_URL}/openApi/swap/v2/quote/contracts",
+                timeout=self.timeout,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("code") != 0:
+                LOG.warning("BingX contracts error: %s", data.get("msg", "unknown"))
+                return []
+            contracts = data.get("data", [])
+            symbols: list[dict[str, Any]] = []
+            for c in contracts:
+                if not isinstance(c, dict):
+                    continue
+                raw_symbol = str(c.get("symbol", ""))
+                # BingX uses BTC-USDT format; normalize to BTCUSDT
+                normalized = raw_symbol.replace("-", "")
+                if normalized.endswith("USDT"):
+                    symbols.append({
+                        "symbol": normalized,
+                        "base_asset": normalized.replace("USDT", ""),
+                        "quote_asset": "USDT",
+                    })
+            return symbols
+        except Exception as exc:
+            LOG.warning("BingX contracts fetch failed: %s", exc)
+            return []
+
+    def fetch_all_tickers(self) -> list[dict[str, Any]]:
+        """Fetch 24h ticker stats for ALL BingX swap symbols in one call.
+
+        Single call to /openApi/swap/v2/quote/ticker (public).
+        Returns list of {symbol, volume_usdt, last_price}.
+        """
+        try:
+            resp = self._session.get(
+                f"{self.BASE_URL}/openApi/swap/v2/quote/ticker",
+                timeout=self.timeout,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("code") != 0:
+                LOG.warning("BingX tickers error: %s", data.get("msg", "unknown"))
+                return []
+            tickers_raw = data.get("data", [])
+            tickers: list[dict[str, Any]] = []
+            for t in tickers_raw:
+                if not isinstance(t, dict):
+                    continue
+                raw_symbol = str(t.get("symbol", ""))
+                normalized = raw_symbol.replace("-", "")
+                tickers.append({
+                    "symbol": normalized,
+                    "volume_usdt": float(t.get("quoteVolume", t.get("volume", 0))),
+                    "last_price": float(t.get("lastPrice", 0)),
+                })
+            return tickers
+        except Exception as exc:
+            LOG.warning("BingX all tickers failed: %s", exc)
+            return []
+
+
+# ---------------------------------------------------------------------------
+# BingX Private Client (authenticated, implements BrokerAdapter protocol)
+# ---------------------------------------------------------------------------
+
+# Order type mapping: ARGUS → BingX
+_BINGX_ORDER_TYPE_MAP: dict[str, str] = {
+    "market": "MARKET",
+    "limit": "LIMIT",
+    "aggressive_limit": "LIMIT",
+    "passive_limit": "LIMIT",
+    "EMERGENCY": "MARKET",
+}
+
+# BingX trade side mapping
+_BINGX_SIDE_MAP: dict[str, str] = {
+    "long": "BUY",
+    "short": "SELL",
+    "buy": "BUY",
+    "sell": "SELL",
+    "BUY": "BUY",
+    "SELL": "SELL",
+}
+
+
+class BingXPrivateClient:
+    """Authenticated BingX perpetual swap client.
+
+    Implements the BrokerAdapter protocol for order placement.
+    Uses HMAC-SHA256 request signing per BingX API spec:
+        sign = HMAC-SHA256(secret, sorted_param_string)
+    """
+
+    BASE_URL = "https://open-api.bingx.com"
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        api_secret: str | None = None,
+        timeout: float = 10.0,
+    ) -> None:
+        self.api_key = api_key or os.getenv("BINGX_API_KEY", "")
+        self.api_secret = api_secret or os.getenv("BINGX_API_SECRET", "")
+        self.timeout = timeout
+        self._session = requests.Session()
+        self._session.headers.update({
+            "User-Agent": "ARGUS/2.5",
+            "X-BX-APIKEY": self.api_key,
+        })
+
+    @property
+    def is_authenticated(self) -> bool:
+        return bool(self.api_key and self.api_secret)
+
+    def _sign(self, params: dict[str, Any]) -> str:
+        """Generate HMAC-SHA256 signature for BingX API.
+
+        BingX signing: sort params alphabetically, build query string,
+        HMAC-SHA256 with secret key.
+        """
+        sorted_params = sorted(params.items(), key=lambda x: x[0])
+        param_string = urlencode(sorted_params)
+        signature = hmac.new(
+            self.api_secret.encode("utf-8"),
+            param_string.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        return signature
+
+    def _signed_request(
+        self,
+        method: str,
+        path: str,
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Execute a signed request to BingX API."""
+        if not self.is_authenticated:
+            raise RuntimeError("BingXPrivateClient requires API key and secret")
+
+        params = params or {}
+        params["timestamp"] = str(int(time.time() * 1000))
+        params["signature"] = self._sign(params)
+
+        url = f"{self.BASE_URL}{path}"
+        headers = {
+            "X-BX-APIKEY": self.api_key,
+            "X-BX-SIGN": params.pop("signature"),
+            "X-BX-TIMESTAMP": params.pop("timestamp"),
+        }
+        # Re-add timestamp to params since BingX expects it there too
+        params["timestamp"] = headers["X-BX-TIMESTAMP"]
+
+        try:
+            if method.upper() == "GET":
+                resp = self._session.get(url, params=params, headers=headers, timeout=self.timeout)
+            else:
+                resp = self._session.post(url, params=params, headers=headers, timeout=self.timeout)
+            resp.raise_for_status()
+            data = resp.json()
+            if data.get("code") != 0:
+                LOG.error("BingX API error: code=%s msg=%s", data.get("code"), data.get("msg"))
+            return data
+        except requests.exceptions.RequestException as exc:
+            LOG.error("BingX request failed: %s %s -> %s", method, path, exc)
+            return {"code": -1, "msg": str(exc)}
+
+    def place_order(
+        self,
+        *,
+        symbol: str,
+        side: str,
+        size: float,
+        order_type: str = "market",
+        urgency: str = "NORMAL",
+        price: float | None = None,
+        leverage: int | None = None,
+    ) -> dict[str, Any]:
+        """Place a perpetual swap order on BingX.
+
+        Satisfies BrokerAdapter protocol.
+        Maps ARGUS order types to BingX: market/EMERGENCY → MARKET, limit variants → LIMIT.
+        """
+        bingx_symbol = _to_bingx_symbol(symbol)
+        bingx_side = _BINGX_SIDE_MAP.get(side, "BUY")
+        bingx_type = _BINGX_ORDER_TYPE_MAP.get(order_type, "MARKET")
+
+        # Set leverage if specified
+        if leverage is not None:
+            self._set_leverage(symbol=bingx_symbol, leverage=leverage)
+
+        params: dict[str, Any] = {
+            "symbol": bingx_symbol,
+            "side": bingx_side,
+            "type": bingx_type,
+            "quantity": str(round(size, 8)),
+            "positionSide": "LONG" if bingx_side == "BUY" else "SHORT",
+        }
+        if bingx_type == "LIMIT" and price is not None:
+            params["price"] = str(round(price, 8))
+
+        LOG.info(
+            "BingX order: %s %s %s qty=%s type=%s urgency=%s",
+            bingx_side, bingx_symbol, side, size, bingx_type, urgency,
+        )
+
+        data = self._signed_request("POST", "/openApi/swap/v3/trade/order", params)
+
+        if data.get("code") == 0:
+            order_info = data.get("data", {})
+            return {
+                "success": True,
+                "order_id": str(order_info.get("orderId", "")),
+                "symbol": symbol,
+                "side": side,
+                "size": size,
+                "type": bingx_type,
+                "status": order_info.get("status", "NEW"),
+            }
+        return {
+            "success": False,
+            "error": data.get("msg", "unknown"),
+            "code": data.get("code"),
+        }
+
+    def cancel_order(self, *, symbol: str, order_id: str) -> dict[str, Any]:
+        """Cancel an open order."""
+        params = {
+            "symbol": _to_bingx_symbol(symbol),
+            "orderId": order_id,
+        }
+        data = self._signed_request("POST", "/openApi/swap/v3/trade/cancel", params)
+        return {
+            "success": data.get("code") == 0,
+            "order_id": order_id,
+            "msg": data.get("msg", ""),
+        }
+
+    def get_position(self, *, symbol: str) -> dict[str, Any] | None:
+        """Get current position for a symbol."""
+        params = {"symbol": _to_bingx_symbol(symbol)}
+        data = self._signed_request("GET", "/openApi/swap/v2/user/positions", params)
+        if data.get("code") != 0:
+            return None
+        positions = data.get("data", [])
+        if not positions:
+            return None
+        # Return first non-zero position
+        for pos in positions:
+            size = float(pos.get("positionAmt", 0))
+            if abs(size) > 0:
+                return {
+                    "symbol": symbol,
+                    "side": "long" if size > 0 else "short",
+                    "size": abs(size),
+                    "entry_price": float(pos.get("avgPrice", 0)),
+                    "unrealized_pnl": float(pos.get("unrealizedProfit", 0)),
+                    "leverage": int(pos.get("leverage", 1)),
+                    "margin_type": pos.get("marginType", "cross"),
+                }
+        return None
+
+    def get_balance(self) -> dict[str, Any] | None:
+        """Get account balance."""
+        data = self._signed_request("GET", "/openApi/swap/v2/user/balance", {})
+        if data.get("code") != 0:
+            return None
+        balance = data.get("data", {}).get("balance", {})
+        return {
+            "total": float(balance.get("balance", 0)),
+            "available": float(balance.get("availableMargin", 0)),
+            "unrealized_pnl": float(balance.get("unrealizedProfit", 0)),
+            "used_margin": float(balance.get("usedMargin", 0)),
+        }
+
+    def _set_leverage(self, *, symbol: str, leverage: int) -> None:
+        """Set leverage for a symbol (capped 1-125)."""
+        leverage = max(1, min(125, leverage))
+        params = {
+            "symbol": symbol,
+            "side": "BOTH",
+            "leverage": str(leverage),
+        }
+        data = self._signed_request("POST", "/openApi/swap/v2/trade/leverage", params)
+        if data.get("code") == 0:
+            LOG.info("BingX leverage set: %s -> %dx", symbol, leverage)
+        else:
+            LOG.warning("BingX leverage set failed: %s -> %s", symbol, data.get("msg"))
 
 
 # ---------------------------------------------------------------------------

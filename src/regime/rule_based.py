@@ -50,12 +50,13 @@ class RuleBasedRegimeClassifier:
         crisis_vol_multiple: float = 3.0,
         crisis_liquidation_pctile: float = 99.0,
         crisis_depth_ratio: float = 0.30,
-        volatile_atr_ratio: float = 1.8,
-        volatile_vol_multiple: float = 2.0,
-        trending_min_adx: float = 25.0,
+        volatile_atr_ratio: float = 1.4,
+        volatile_vol_multiple: float = 1.5,
+        trending_min_adx: float = 32.0,
+        trending_min_hurst: float = 0.58,
         trending_alignment_candles: int = 20,
-        ranging_max_adx: float = 20.0,
-        ranging_max_hurst: float = 0.45,
+        ranging_max_adx: float = 32.0,
+        ranging_max_hurst: float = 0.50,
     ) -> None:
         self.crisis_price_drop_24h = crisis_price_drop_24h
         self.crisis_vol_multiple = crisis_vol_multiple
@@ -64,6 +65,7 @@ class RuleBasedRegimeClassifier:
         self.volatile_atr_ratio = volatile_atr_ratio
         self.volatile_vol_multiple = volatile_vol_multiple
         self.trending_min_adx = trending_min_adx
+        self.trending_min_hurst = trending_min_hurst
         self.trending_alignment_candles = trending_alignment_candles
         self.ranging_max_adx = ranging_max_adx
         self.ranging_max_hurst = ranging_max_hurst
@@ -101,21 +103,37 @@ class RuleBasedRegimeClassifier:
         return False
 
     def _is_volatile(self, inp: RuleBasedInput) -> bool:
-        return (
-            inp.atr_ratio_5_20 >= self.volatile_atr_ratio
-            or inp.vol_multiple_60d >= self.volatile_vol_multiple
-        )
+        # Single strong signal
+        if inp.atr_ratio_5_20 >= self.volatile_atr_ratio:
+            return True
+        if inp.vol_multiple_60d >= self.volatile_vol_multiple:
+            return True
+        # Combined moderate signals
+        if inp.atr_ratio_5_20 >= 1.2 and inp.vol_multiple_60d >= 1.3:
+            return True
+        return False
 
     def _is_trending(self, inp: RuleBasedInput) -> bool:
         # Directional alignment requires price and EMA slope to agree.
         aligned = (inp.price_vs_ma200 >= 0 and inp.ema_21_vs_55 >= 0) or (
             inp.price_vs_ma200 < 0 and inp.ema_21_vs_55 < 0
         )
+        # Hurst must show persistent (trending) behavior, not mean-reverting
+        persistent = inp.hurst_exponent >= self.trending_min_hurst
         return (
             inp.adx_14 >= self.trending_min_adx
             and aligned
-            and inp.directional_alignment_candles >= self.trending_alignment_candles
+            and persistent
         )
 
     def _is_ranging(self, inp: RuleBasedInput) -> bool:
-        return inp.adx_14 <= self.ranging_max_adx and inp.hurst_exponent <= self.ranging_max_hurst
+        # Standard range: low ADX + mean-reverting/random Hurst
+        if inp.adx_14 <= self.ranging_max_adx and inp.hurst_exponent <= self.ranging_max_hurst:
+            return True
+        # Strongly mean-reverting Hurst overrides moderate ADX
+        if inp.hurst_exponent <= 0.40 and inp.adx_14 <= 30:
+            return True
+        # Weak trend zone (ADX 25-32 + non-persistent Hurst) → RANGING
+        if 25 <= inp.adx_14 < 32 and inp.hurst_exponent < 0.58:
+            return True
+        return False

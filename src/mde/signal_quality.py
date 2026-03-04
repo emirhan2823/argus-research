@@ -29,7 +29,7 @@ class SignalQualityResult:
     pass_quality: bool  # True if quality meets minimum threshold
 
 
-MIN_QUALITY_SCORE = 0.40  # Below this, signal is too risky
+MIN_QUALITY_SCORE = 0.55  # Below this, signal is too risky
 
 
 def _clamp(value: float, low: float, high: float) -> float:
@@ -155,6 +155,7 @@ def assess_signal_quality(
         ema_21_vs_55=ema_21_vs_55,
         price_vs_ma200=price_vs_ma200,
         adx_14=adx_14,
+        engine=engine,
     )
     adjustments["trend_alignment"] = round(trend_alignment, 4)
     quality_factors.append(trend_alignment)
@@ -163,6 +164,19 @@ def assess_signal_quality(
         conf_adj += 0.05
     elif trend_alignment < 0.30:
         conf_adj -= 0.07
+
+    # ── Factor 7: Toxic Pattern Detection (backtest-proven) ──────
+    toxic_penalty = _toxic_pattern_penalty(
+        bias=bias,
+        volume_ratio=volume_ratio,
+        adx_14=adx_14,
+    )
+    if toxic_penalty < 0:
+        conf_adj += toxic_penalty
+        adjustments["toxic_pattern_penalty"] = round(toxic_penalty, 4)
+        quality_factors.append(0.15)
+    else:
+        quality_factors.append(0.70)
 
     # ── Compute Final Quality Score ──────────────────────────────
     quality_score = sum(quality_factors) / max(len(quality_factors), 1)
@@ -247,14 +261,20 @@ def _volume_quality(
     """Score volume confirmation (0-1).
 
     Good signals have:
-    - Above average volume (ratio > 1.0)
+    - Moderate above-average volume (ratio 1.0-2.0)
     - Volume delta agreeing with direction
+
+    Backtest finding: volume_ratio > 2.0 is toxic for MR engines
+    (OOS-confirmed, r=-0.15 Bonferroni-significant).
+    Volume spikes signal momentum — bad for mean-reversion entries.
     """
     score = 0.50
 
-    # Volume above average is good
-    if volume_ratio > 1.5:
-        score += 0.25
+    # Volume spike = toxic for MR (backtest-proven)
+    if volume_ratio > 2.0:
+        score -= 0.30  # Heavy penalty — momentum spike
+    elif volume_ratio > 1.5:
+        score += 0.10  # Mild positive — was +0.25, reduced
     elif volume_ratio > 1.0:
         score += 0.15
     elif volume_ratio < 0.5:
@@ -311,17 +331,25 @@ def _orderbook_quality(
         return _clamp(0.5 - orderbook_imbalance * 2.0, 0.0, 1.0)
 
 
+_MR_ENGINES = {"POSEIDON", "NAUTILUS", "HYDRA"}
+
+
 def _trend_alignment_quality(
     *,
     bias: str,
     ema_21_vs_55: float,
     price_vs_ma200: float,
     adx_14: float,
+    engine: str = "",
 ) -> float:
     """Score how well the signal aligns with the higher-TF trend.
 
     Trading WITH the trend is higher quality than counter-trend.
+    MR engines are exempt — they trade against the trend by design.
     """
+    if engine in _MR_ENGINES:
+        return 0.50  # Neutral — trend alignment is irrelevant for MR
+
     score = 0.50
 
     if bias == "long":
@@ -350,3 +378,45 @@ def _trend_alignment_quality(
         score *= 1.15
 
     return _clamp(score, 0.0, 1.0)
+
+
+def _toxic_pattern_penalty(
+    *,
+    bias: str,
+    volume_ratio: float,
+    adx_14: float,
+) -> float:
+    """Apply confidence penalty for backtest-proven toxic conditions.
+
+    Wave 1 (OOS-confirmed from luna_crash analysis):
+    1. short + volume_ratio > 2.0 -> WR 21.5%, avg -0.83%
+    2. ADX < 15 + volume_ratio > 2.0 -> WR 14.3%
+    3. short + ADX > 40 + volume > 2.0 -> WR 0%
+
+    Wave 2 (OOS-confirmed from tuned BT analysis):
+    4. ADX > 40 + volume 0.5-0.8 -> WR 25% (strong trend + low vol = MR trap)
+    5. short + ADX 25-40 -> WR 28.6% (medium trend, MR shorts fail)
+    """
+    penalty = 0.0
+
+    # Pattern 1: short + extreme volume = disaster
+    if bias == "short" and volume_ratio > 2.0:
+        penalty -= 0.15
+
+    # Pattern 2: ADX < 15 + extreme volume = trap (no trend, random spike)
+    if adx_14 < 15 and volume_ratio > 2.0:
+        penalty -= 0.12
+
+    # Pattern 3: short + ADX > 40 + extreme volume = momentum crash
+    if bias == "short" and adx_14 > 40 and volume_ratio > 2.0:
+        penalty -= 0.10  # Additional on top of Pattern 1
+
+    # Pattern 4: ADX > 40 + low volume = strong trend, MR will revert wrong
+    if adx_14 > 40 and volume_ratio < 0.8:
+        penalty -= 0.10
+
+    # Pattern 5: short + ADX 25-40 = medium trend, MR short fails
+    if bias == "short" and 25 <= adx_14 <= 40:
+        penalty -= 0.08
+
+    return penalty

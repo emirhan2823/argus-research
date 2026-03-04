@@ -26,16 +26,18 @@ if __package__ in (None, ""):
 
 from src.core.clock import Clock
 from src.core.config import load_config
-from src.core.constants import ENGINE_HERMES, ENGINE_PHOENIX, REGIME_CRISIS, REGIME_TO_ENGINE
+from src.core.constants import ENGINE_AEGEAN, ENGINE_HERMES, ENGINE_HYDRA, ENGINE_NAUTILUS, ENGINE_PHOENIX, ENGINE_POSEIDON, ENGINE_TITAN, REGIME_CRISIS, REGIME_TO_ENGINE
 from src.core.events import EventBus, EventType
 from src.core.types import Decision, EngineSignal, FeatureVector, RegimeState, TelemetryEvent
 from src.data.data_factory import DataFactory
 from src.data.sentinel.validator import SentinelInput, SentinelValidator
 from src.engines.atlas.risk_overlay import AtlasRiskOverlay
 from src.engines.hermes.engine import HermesEngine
+from src.engines.aegean.engine import AegeanEngine
 from src.engines.hydra.engine import HydraEngine
 from src.engines.nautilus.engine import NautilusEngine
 from src.engines.phoenix.engine import PhoenixEngine
+from src.engines.poseidon.engine import PoseidonEngine
 from src.engines.titan.engine import TitanEngine
 from src.execution.executor import Executor
 from src.execution.hermes_position_manager import HermesPositionManager
@@ -45,8 +47,17 @@ from src.mde.sizing import SizingInput, compute_size
 from src.regime.consensus import RegimeConsensus
 from src.regime.rule_based import RuleBasedInput, RuleBasedRegimeClassifier
 from src.regime.state_machine import RegimeStateMachine
+from src.regime.regime_validator import RegimeValidator
+from src.regime.trend_gate import check_trend_gate
+from src.regime.engine_orchestrator import EngineOrchestrator
 from src.risk.kill_switch import KillSwitch
 from src.risk.pre_trade import PreTradeChecker, PreTradeInput
+from src.risk.risk_runtime_adapter import (
+    DEFAULT_RUNTIME_RISK_PATH,
+    RuntimeRiskConfigReloader,
+    apply_runtime_risk_overrides,
+    mode_supports_runtime_risk_overrides,
+)
 from src.telemetry.event_logger import EventLogger
 from src.v25.config.loader import DynamicExitConfig
 from src.v25.telemetry.log_writer import log_decision, log_dynamic_exit, log_validated_sizing, log_whale_momentum
@@ -61,6 +72,30 @@ from src.engines.gemini.engine import GeminiEngine
 from src.mde.precision_filter import PrecisionConfig
 from src.notifications.telegram import TelegramSignalNotifier
 from src.orchestration.orion import OrionOrchestrator
+from src.scanner.sonar import SonarScanner, SonarWatchlist
+from src.features.market_structure import (
+    MarketStructureConfig,
+    adjust_sl_tp_for_structure,
+    build_market_structure,
+)
+from src.risk.breakeven_lock import BreakevenConfig, check_breakeven_trigger
+from src.risk.dynamic_risk_manager import (
+    RiskConfig as DRMConfig,
+    RiskDecision as DRMDecision,
+    apply_trailing_stop as drm_apply_trailing,
+    compute_risk_decision as drm_compute,
+)
+from src.risk.leverage_calibrator import (
+    LeverageCalibrationConfig,
+    calibrate_leverage,
+)
+from src.risk.scale_in_orchestrator import (
+    ScaleInConfig,
+    ScaleInPosition,
+    add_layer as scale_in_add_layer,
+    initial_position_size_pct,
+    should_scale_in,
+)
 
 if TYPE_CHECKING:
     from src.data.features.builder import FeatureBuilder
@@ -158,6 +193,22 @@ class V25RoutedDecision:
     sub_strategy: str | None = None
 
 
+def _detect_asset_profile(symbol: str, asset_class: str) -> str:
+    """Map symbol/asset_class to an asset_profiles key for engines.yaml lookup."""
+    if asset_class == "crypto":
+        return "crypto"
+    if asset_class in ("us_equity", "bist"):
+        return "equities"
+    if asset_class == "index":
+        return "indices"
+    if asset_class == "commodity":
+        sym = str(symbol).upper()
+        if any(sym.startswith(m) for m in ("XAU", "XAG", "XPT", "XPD")):
+            return "metals"
+        return "metals"  # default commodity → metals profile
+    return "crypto"
+
+
 class ArgusPipeline:
     _LOG = logging.getLogger("argus.pipeline")
 
@@ -176,6 +227,8 @@ class ArgusPipeline:
         risk_profile: str = "normal",
         allow_crisis: bool = False,
         symbols_override: dict[str, list[str]] | None = None,
+        use_runtime_risk_config: bool = False,
+        runtime_risk_config_path: str | Path | None = None,
     ) -> None:
         self.clock = Clock(mode="live")
         self.config = load_config()
@@ -219,6 +272,8 @@ class ArgusPipeline:
         self._whale_alerts: list[WhaleAlert] = []
         # PR-J02: When True, dynamic exit intents are executed live via broker
         self._live_exit_enabled: bool = False
+        # Adaptive confidence floor: track recent trade outcomes (True=win, False=loss)
+        self._recent_trade_outcomes: list[bool] = []
 
         self.sentinel = SentinelValidator()
         self.feature_builder = self._init_feature_builder()
@@ -226,17 +281,44 @@ class ArgusPipeline:
         self.consensus = RegimeConsensus()
         self.state_machines: dict[str, RegimeStateMachine] = {}
 
+        # v6 Multi-Regime Orchestration
+        self._regime_validator = RegimeValidator(min_hold=4, cooldown=4)
+        self._crypto_fee_cfg = self.config.crypto_fee
+        self._engine_orchestrator = EngineOrchestrator(
+            crypto_fee_mode=self._crypto_fee_cfg.enabled,
+            crypto_mr_max_adx=self._crypto_fee_cfg.mr_max_adx,
+            crypto_mr_max_atr_pctl=self._crypto_fee_cfg.mr_max_atr_pctl,
+        )
+
         self.hermes_engine = HermesEngine()
         self.nautilus_engine = NautilusEngine()
+        self.aegean_engine = AegeanEngine()
+        self.poseidon_engine = PoseidonEngine()
+        self.titan_engine = TitanEngine()
+
+        # SONAR universe scanner (crypto only, paper/live modes)
+        self._sonar_scanner: SonarScanner | None = None
+        self._sonar_watchlist: SonarWatchlist | None = None
+        self._sonar_last_scan: datetime | None = None
+        if mode in ("paper", "live") and "crypto" in assets:
+            try:
+                from src.data.exchange_clients import BinancePublicClient, BingXPublicClient
+                self._sonar_scanner = SonarScanner(
+                    binance_client=BinancePublicClient(),
+                    bingx_client=BingXPublicClient(),
+                )
+            except Exception:
+                self._LOG.warning("SONAR scanner init failed, using static symbol list")
         # Initialize Gemini (correlation pairs engine) from config
         self._gemini_engine, self._correlation_tracker = self._init_gemini_engine()
         self.router = RegimeRouter(
             engines={
-                "TITAN": TitanEngine(),
+                "TITAN": self.titan_engine,
                 "NAUTILUS": self.nautilus_engine,
-                "PHOENIX": PhoenixEngine(),
                 "HYDRA": HydraEngine(),
                 "HERMES": self.hermes_engine,
+                "AEGEAN": self.aegean_engine,
+                "POSEIDON": self.poseidon_engine,
                 **({"GEMINI": self._gemini_engine} if self._gemini_engine else {}),
             }
         )
@@ -247,6 +329,39 @@ class ArgusPipeline:
         self.executor = Executor(broker=DemoBroker())
         self._dynamic_exit_config = self._load_dynamic_exit_config()
         self._precision_config = self._load_precision_config()
+        # Dynamic Risk Manager config (active in paper/live modes)
+        self._drm_config = DRMConfig(
+            atr_multiplier=1.5,
+            rr_ratio=2.0,
+            leverage_cap=20.0,
+            leverage_cap_short=15.0,
+            volatility_threshold=0.03,
+            low_volatility_threshold=0.01,
+            vol_k=15.0,
+            drawdown_sensitivity=1.0,
+            confidence_floor=0.55,
+        )
+        self._drm_active = mode in ("paper", "live", "backtest")
+        self._account_equity = 10000.0  # Default; overridden from config or live balance
+        self._rolling_drawdown_pct = 0.0
+        # Scale-In (DCA) + Dynamic Leverage Calibration + Break-Even Lock
+        self._scale_in_config = ScaleInConfig(enabled=True)
+        self._leverage_cal_config = LeverageCalibrationConfig(enabled=True, risk_pct=0.02, max_leverage=20.0)
+        self._breakeven_config = BreakevenConfig(enabled=True, trigger_atr_multiple=1.0)
+        self._market_structure_config = MarketStructureConfig(
+            enabled=True,
+            swing_window=5,        # 5 bars left + 5 bars right
+            max_levels=5,          # Top 5 nearest levels per side
+            min_age_bars=3,        # Ignore pivots < 3 bars old
+        )
+        self._scale_in_positions: dict[str, ScaleInPosition] = {}  # symbol -> ScaleInPosition
+        self._runtime_risk_reloader: RuntimeRiskConfigReloader | None = None
+        self._runtime_risk_config_payload: dict[str, Any] | None = None
+        if mode_supports_runtime_risk_overrides(mode) and bool(use_runtime_risk_config):
+            reloader_path = Path(runtime_risk_config_path) if runtime_risk_config_path is not None else None
+            self._runtime_risk_reloader = RuntimeRiskConfigReloader(path=reloader_path or DEFAULT_RUNTIME_RISK_PATH)
+            initial = self._runtime_risk_reloader.maybe_reload(force=True)
+            self._runtime_risk_config_payload = initial.payload
         self.shadow_position_manager = HermesPositionManager(
             broker=ShadowNoopHermesBroker(),
             shadow_enabled=bool(self.config.engines.hermes.position_management.dynamic_exit_shadow_enabled),
@@ -269,6 +384,19 @@ class ArgusPipeline:
 
         outputs: list[dict[str, Any]] = []
         cycle_now = now or datetime.now(timezone.utc)
+
+        # SONAR universe scan (every 15 min in paper/live)
+        self._maybe_run_sonar_scan(cycle_now)
+        if self.ctx.mode == "paper" and self._runtime_risk_reloader is not None:
+            reload_result = self._runtime_risk_reloader.maybe_reload(now_utc=cycle_now)
+            if reload_result.changed:
+                self._runtime_risk_config_payload = reload_result.payload
+                print(f"[risk] config reloaded at {cycle_now.isoformat()}")
+        elif self.ctx.mode == "backtest" and self._runtime_risk_reloader is not None:
+            # Backtest load is static unless caller updates file before next cycle.
+            if self._runtime_risk_config_payload is None:
+                reload_result = self._runtime_risk_reloader.maybe_reload(now_utc=cycle_now, force=True)
+                self._runtime_risk_config_payload = reload_result.payload
         gate9_threshold = self._active_gate9_threshold()
 
         for asset_class in self.ctx.assets:
@@ -332,6 +460,40 @@ class ArgusPipeline:
                     lows=list(candles["low"].astype(float)),
                     closes=list(candles["close"].astype(float)),
                 )
+                # Feed candle data to AegeanEngine for MOM-LRC channel computation
+                self.aegean_engine.feed_candles(
+                    symbol=symbol,
+                    highs=list(candles["high"].astype(float)),
+                    lows=list(candles["low"].astype(float)),
+                    closes=list(candles["close"].astype(float)),
+                )
+                # Feed candle data to PoseidonEngine for Wave Trend computation
+                self.poseidon_engine.feed_candles(
+                    symbol=symbol,
+                    highs=list(candles["high"].astype(float)),
+                    lows=list(candles["low"].astype(float)),
+                    closes=list(candles["close"].astype(float)),
+                )
+                # Feed candle data to TitanEngine for structure + ADX analysis
+                self.titan_engine.feed_candles(
+                    symbol=symbol,
+                    highs=list(candles["high"].astype(float)),
+                    lows=list(candles["low"].astype(float)),
+                    closes=list(candles["close"].astype(float)),
+                )
+                # Feed HTF (4H) candles to AegeanEngine for MTF trend filter
+                try:
+                    htf_rows = self.data_factory.fetch_ohlcv(
+                        symbol=symbol, timeframe="4h", limit=250,
+                        now=cycle_now if self.data_factory.mode == "replay" else None,
+                    )
+                    if htf_rows and len(htf_rows) >= 50:
+                        self.aegean_engine.feed_htf_candles(
+                            symbol=symbol,
+                            closes=[float(r[4]) for r in htf_rows],  # col 4 = close
+                        )
+                except Exception:
+                    pass  # HTF data unavailable → Aegean MTF filter stays permissive
 
                 # Update correlation tracker with latest prices for Gemini + chop_corr_gap
                 if self._correlation_tracker is not None:
@@ -361,6 +523,26 @@ class ArgusPipeline:
                 )
 
                 # Step 3-4: sentiment + features
+                # Compute funding_pctile and basis proxies from price data
+                _funding_pctile: float | None = None
+                _basis_pct: float | None = None
+                if asset_class == "crypto" and len(candles) >= 30:
+                    _close = candles["close"]
+                    _rets = _close.pct_change().tail(30).dropna()
+                    if len(_rets) >= 10:
+                        _mu = float(_rets.mean())
+                        _sigma = float(_rets.std())
+                        _zscore = _mu / max(_sigma, 1e-9)
+                        _funding_pctile = max(1.0, min(99.0, 50.0 + _zscore * 25.0))
+                    else:
+                        _funding_pctile = 50.0
+                    # Basis proxy: price vs EMA-20 spread (futures premium proxy)
+                    _ema20 = _close.ewm(span=20, adjust=False).mean()
+                    if len(_ema20) > 0 and float(_ema20.iloc[-1]) > 0:
+                        _basis_pct = (float(_close.iloc[-1]) - float(_ema20.iloc[-1])) / float(_ema20.iloc[-1])
+                elif asset_class == "crypto":
+                    _funding_pctile = 50.0
+
                 try:
                     fv = self.feature_builder.build(
                         df=candles,
@@ -369,7 +551,8 @@ class ArgusPipeline:
                         timestamp=cycle_now,
                         spread_pct=0.001,
                         funding_rate=0.0001 if asset_class == "crypto" else None,
-                        funding_pctile_30d=50.0 if asset_class == "crypto" else None,
+                        funding_pctile_30d=_funding_pctile,
+                        basis_pct=_basis_pct,
                         hermes_sentiment_score=0.0,
                         hermes_sentiment_confidence=0.5,
                         hermes_urgency="LOW",
@@ -431,16 +614,80 @@ class ArgusPipeline:
                     hermes_override=consensus.regime if consensus.reason == "hermes_critical_override" else None,
                 )
 
+                # ── v6: Regime Validation + Trend Gate + Engine Orchestrator ──
+                _v6_validation = None
+                _v6_trend_gate = None
+                _v6_orch_decision = None
+                try:
+                    # Swing levels for structure score (reuse market structure if available)
+                    _v6_swing_highs = None
+                    _v6_swing_lows = None
+                    if hasattr(candles, 'columns') and 'high' in candles.columns and 'low' in candles.columns:
+                        _highs_list = candles['high'].tolist()
+                        _lows_list = candles['low'].tolist()
+                        # Extract last few swing high/low prices from price action
+                        # Simple approach: use local maxima/minima from last 20 bars
+                        _recent_h = _highs_list[-20:] if len(_highs_list) >= 20 else _highs_list
+                        _recent_l = _lows_list[-20:] if len(_lows_list) >= 20 else _lows_list
+                        # Find swing highs (local maxima) and swing lows (local minima)
+                        _v6_swing_highs = []
+                        _v6_swing_lows = []
+                        for _i in range(2, len(_recent_h) - 2):
+                            if _recent_h[_i] > _recent_h[_i-1] and _recent_h[_i] > _recent_h[_i-2] and _recent_h[_i] > _recent_h[_i+1] and _recent_h[_i] > _recent_h[_i+2]:
+                                _v6_swing_highs.append(float(_recent_h[_i]))
+                            if _recent_l[_i] < _recent_l[_i-1] and _recent_l[_i] < _recent_l[_i-2] and _recent_l[_i] < _recent_l[_i+1] and _recent_l[_i] < _recent_l[_i+2]:
+                                _v6_swing_lows.append(float(_recent_l[_i]))
+
+                    # Compute ATR percentile (from v5 if available, else use atr_ratio_5_20 as proxy)
+                    _v6_atr_pctl = getattr(fv, 'atr_pctl', None) or min(1.0, max(0.0, fv.atr_ratio_5_20 / 2.0))
+
+                    _v6_validation = self._regime_validator.validate(
+                        symbol=symbol,
+                        declared_regime=regime_state.regime,
+                        adx_14=fv.adx_14,
+                        ema_21_vs_55=fv.ema_21_vs_55,
+                        price_vs_ma200=fv.price_vs_ma200,
+                        lr_slope_20=fv.lr_slope_20,
+                        atr_pctl=_v6_atr_pctl,
+                        hurst_exponent=fv.hurst_exponent,
+                        swing_highs=_v6_swing_highs,
+                        swing_lows=_v6_swing_lows,
+                    )
+
+                    _v6_trend_gate = check_trend_gate(
+                        adx_14=fv.adx_14,
+                        lr_slope_20=fv.lr_slope_20,
+                        ema_21_vs_55=fv.ema_21_vs_55,
+                        price_vs_ma200=fv.price_vs_ma200,
+                        atr_pctl=_v6_atr_pctl,
+                        swing_highs=_v6_swing_highs,
+                        swing_lows=_v6_swing_lows,
+                    )
+
+                    _v6_adx_rising = self._regime_validator.get_adx_rising(symbol, bars=3)
+                    # SONAR trend score for this symbol (0-100 scale)
+                    _sonar_trend_score = 0.0
+                    if self._sonar_watchlist is not None:
+                        for _ss in self._sonar_watchlist.watchlist:
+                            if _ss.symbol == symbol:
+                                _sonar_trend_score = _ss.trend_score
+                                break
+                    _v6_orch_decision = self._engine_orchestrator.decide(
+                        validation=_v6_validation,
+                        trend_gate=_v6_trend_gate,
+                        atr_pctl=_v6_atr_pctl,
+                        adx_rising_3=_v6_adx_rising,
+                        adx=float(fv.adx_14),
+                        trend_score=_sonar_trend_score,
+                    )
+                except Exception as _v6_exc:
+                    self._LOG.warning("v6 orchestrator failed, falling back to v5 routing: %s", _v6_exc)
+
                 crisis_override_active = self._is_crisis_override_active(regime_state.regime)
                 base_gate_results: dict[str, Any] = {
                     "path": "run_once",
                     "mode": self.ctx.mode,
-                    "features_snapshot": {
-                        "regime": regime_state.regime,
-                        "atr_14_pct": self._safe_float(getattr(fv, "atr_14_pct", None)),
-                        "adx_14": self._safe_float(getattr(fv, "adx_14", None)),
-                        "volume_ratio": self._safe_float(getattr(fv, "volume_ratio", None)),
-                    },
+                    "features_snapshot": self._full_features_snapshot(fv, regime_state.regime, candles=candles),
                 }
                 if crisis_override_active:
                     base_gate_results["crisis_override"] = True
@@ -512,6 +759,7 @@ class ArgusPipeline:
                             regime=regime_state,
                             features=fv,
                             allow_crisis_override=crisis_override_active,
+                            orchestrator_decision=_v6_orch_decision,
                         )
                     except Exception as exc:
                         reject_engine = self._engine_hint_for_regime(regime_state.regime)
@@ -526,6 +774,130 @@ class ArgusPipeline:
                             gate_results=base_gate_results,
                         )
                         continue
+
+                # Step 6.1: AEGEAN confirmation boost for TITAN in TRENDING
+                # When AEGEAN is confirmation-only, its signal boosts TITAN confidence
+                # (+0.03 to +0.05) but doesn't fire standalone.
+                if (
+                    signal is not None
+                    and signal.engine == ENGINE_TITAN
+                    and _v6_orch_decision is not None
+                    and ENGINE_AEGEAN in _v6_orch_decision.confirmation_only_engines
+                ):
+                    try:
+                        _aegean_sig = self.aegean_engine.generate_signal(
+                            regime=regime_state, features=fv,
+                        )
+                        if _aegean_sig is not None and _aegean_sig.bias == signal.bias:
+                            _boost = 0.03 + min(_aegean_sig.confidence * 0.03, 0.02)
+                            _new_conf = min(1.0, signal.confidence + _boost)
+                            signal = EngineSignal(
+                                engine=signal.engine,
+                                sub_strategy=signal.sub_strategy,
+                                asset_class=signal.asset_class,
+                                symbol=signal.symbol,
+                                bias=signal.bias,
+                                confidence=_new_conf,
+                                stop_distance=signal.stop_distance,
+                                expected_return=signal.expected_return,
+                                atr=signal.atr,
+                            )
+                    except Exception:
+                        pass  # AEGEAN confirmation unavailable — proceed without boost
+
+                # Step 6.45: regime-aware directional bias
+                # Suppress counter-trend trades: no longs in heavy downtrends,
+                # no shorts in strong uptrends. Uses EMA crossover + MA200 as
+                # macro direction filter.
+                # MR engines (POSEIDON, NAUTILUS, HYDRA) are exempt — they
+                # trade against the trend by design.
+                _MR_ENGINES_DB = {ENGINE_POSEIDON, ENGINE_NAUTILUS, ENGINE_HYDRA}
+                if signal is not None and getattr(self, '_enable_directional_bias', True) and signal.engine not in _MR_ENGINES_DB:
+                    _macro_bullish = fv.ema_21_vs_55 > 0 and fv.price_vs_ma200 > 0
+                    _macro_bearish = fv.ema_21_vs_55 < 0 and fv.price_vs_ma200 < 0
+                    # Also detect moderate trends (only one condition met)
+                    _lean_bullish = fv.ema_21_vs_55 > 0 or fv.price_vs_ma200 > 0.02
+                    _lean_bearish = fv.ema_21_vs_55 < 0 or fv.price_vs_ma200 < -0.02
+                    _suppress = False
+                    _suppress_strength = 0.60  # default penalty multiplier
+
+                    _hard_reject = False
+                    if signal.bias == "long" and _macro_bearish and fv.adx_14 > 30:
+                        # Very strong downtrend — hard reject longs
+                        _hard_reject = True
+                        _suppress_reason = "directional_bias_long_in_strong_downtrend"
+                    elif signal.bias == "short" and _macro_bullish and fv.adx_14 > 30:
+                        # Very strong uptrend — hard reject shorts
+                        _hard_reject = True
+                        _suppress_reason = "directional_bias_short_in_strong_uptrend"
+                    elif signal.bias == "long" and _macro_bearish and fv.adx_14 > 20:
+                        # Moderate downtrend — heavy penalty on longs
+                        _suppress = True
+                        _suppress_strength = 0.45
+                        _suppress_reason = "directional_bias_long_in_downtrend"
+                    elif signal.bias == "short" and _macro_bullish and fv.adx_14 > 20:
+                        # Moderate uptrend — heavy penalty on shorts
+                        _suppress = True
+                        _suppress_strength = 0.45
+                        _suppress_reason = "directional_bias_short_in_uptrend"
+                    elif signal.bias == "long" and _lean_bearish and not _lean_bullish and fv.adx_14 > 20:
+                        # Lean downtrend — moderate penalty on longs
+                        _suppress = True
+                        _suppress_strength = 0.65
+                        _suppress_reason = "directional_bias_long_in_lean_downtrend"
+                    elif signal.bias == "short" and _lean_bullish and not _lean_bearish and fv.adx_14 > 20:
+                        # Lean uptrend — moderate penalty on shorts
+                        _suppress = True
+                        _suppress_strength = 0.65
+                        _suppress_reason = "directional_bias_short_in_lean_uptrend"
+
+                    if _hard_reject:
+                        self._reject(
+                            outputs=outputs, asset_class=asset_class,
+                            symbol=symbol,
+                            reason=self._annotate_reason(
+                                _suppress_reason,
+                                crisis_override=crisis_override_active,
+                            ),
+                            engine=str(signal.engine),
+                            action="rejected",
+                            confidence=float(signal.confidence),
+                            gate_results=base_gate_results,
+                        )
+                        continue
+
+                    if _suppress:
+                        # Apply confidence penalty proportional to trend strength
+                        _penalized_conf = signal.confidence * _suppress_strength
+                        base_gate_results["directional_bias"] = {
+                            "macro_bullish": _macro_bullish,
+                            "macro_bearish": _macro_bearish,
+                            "bias": signal.bias,
+                            "adx": fv.adx_14,
+                            "penalty_applied": True,
+                            "original_conf": signal.confidence,
+                            "penalized_conf": _penalized_conf,
+                        }
+                        signal = signal.model_copy(update={"confidence": _penalized_conf})
+                    else:
+                        # Trend-aligned bonus: boost confidence
+                        _trend_bonus = 0.0
+                        if signal.bias == "long" and _macro_bullish:
+                            _trend_bonus = 0.08 if fv.adx_14 > 30 else 0.05
+                        elif signal.bias == "short" and _macro_bearish:
+                            _trend_bonus = 0.08 if fv.adx_14 > 30 else 0.05
+                        if _trend_bonus > 0:
+                            signal = signal.model_copy(
+                                update={"confidence": min(1.0, signal.confidence + _trend_bonus)}
+                            )
+                        base_gate_results["directional_bias"] = {
+                            "macro_bullish": _macro_bullish,
+                            "macro_bearish": _macro_bearish,
+                            "bias": signal.bias,
+                            "adx": fv.adx_14,
+                            "penalty_applied": False,
+                            "trend_bonus": _trend_bonus,
+                        }
 
                 # Step 6.5: signal quality assessment (NEW)
                 if signal is not None:
@@ -554,6 +926,13 @@ class ArgusPipeline:
                         candles_in_regime=regime_state.candles_in_regime,
                         regime_confidence=regime_state.confidence,
                     )
+                    base_gate_results["signal_quality"] = {
+                        "score": sq.quality_score,
+                        "original_confidence": sq.original_confidence,
+                        "adjusted_confidence": sq.adjusted_confidence,
+                        "passed": sq.pass_quality,
+                        "adjustments": sq.adjustments,
+                    }
                     if not sq.pass_quality:
                         self._reject(
                             outputs=outputs, asset_class=asset_class,
@@ -594,12 +973,19 @@ class ArgusPipeline:
                         atr_pct=fv.atr_14_pct,
                         config=self._precision_config,
                     )
+                    base_gate_results["precision_filter"] = {
+                        "grade": _prec.grade,
+                        "score": _prec.score,
+                        "passed": _prec.passed,
+                        "spread_ratio": _prec.spread_ratio,
+                        "confidence_adjustment": _prec.confidence_adjustment,
+                    }
                     if not _prec.passed:
                         self._reject(
                             outputs=outputs, asset_class=asset_class,
                             symbol=symbol,
                             reason=self._annotate_reason(
-                                f"precision_grade_F ({_prec.score:.2f})",
+                                f"precision_grade_{_prec.grade} ({_prec.score:.2f})",
                                 crisis_override=crisis_override_active,
                             ),
                             engine=str(signal.engine),
@@ -612,7 +998,163 @@ class ArgusPipeline:
                     _adj_conf = max(0.0, min(1.0, signal.confidence + _prec.confidence_adjustment))
                     signal = signal.model_copy(update={"confidence": _adj_conf})
 
-                # Step 7: gates
+                # Step 6.55: regime-strategy alignment scoring
+                _regime_alignment_score = 0.50
+                if signal is not None:
+                    from src.mde.regime_alignment import score_regime_alignment
+                    _ra = score_regime_alignment(
+                        engine=signal.engine,
+                        regime=regime_state.regime,
+                        regime_confidence=regime_state.confidence,
+                        candles_in_regime=regime_state.candles_in_regime,
+                        adx_14=fv.adx_14,
+                        hurst_exponent=fv.hurst_exponent,
+                        atr_ratio_5_20=fv.atr_ratio_5_20,
+                    )
+                    _regime_alignment_score = _ra.alignment_score
+                    base_gate_results["regime_alignment"] = {
+                        "score": _ra.alignment_score,
+                        "multiplier": _ra.confidence_multiplier,
+                        "aligned": _ra.aligned,
+                        "reason": _ra.reason,
+                    }
+                    if not _ra.aligned:
+                        self._reject(
+                            outputs=outputs, asset_class=asset_class,
+                            symbol=symbol,
+                            reason=self._annotate_reason(
+                                f"regime_alignment_fail ({_ra.reason})",
+                                crisis_override=crisis_override_active,
+                            ),
+                            engine=str(signal.engine),
+                            action="rejected",
+                            confidence=float(signal.confidence),
+                            gate_results=base_gate_results,
+                        )
+                        continue
+                    _adj_conf = max(0.0, min(1.0, signal.confidence * _ra.confidence_multiplier))
+                    signal = signal.model_copy(update={"confidence": _adj_conf})
+
+                # Step 6.8: confluence filter (multi-factor independent confirmation)
+                _confluence_score = 0.0
+                if signal is not None:
+                    from src.mde.confluence_filter import ConfluenceConfig, evaluate_confluence
+                    # Mean-reversion engines (NAUTILUS, HYDRA, PHOENIX) get relaxed
+                    # confluence since trend-based factors conflict with their strategies
+                    if signal.engine in (ENGINE_NAUTILUS, ENGINE_HYDRA, ENGINE_PHOENIX, ENGINE_AEGEAN, ENGINE_POSEIDON):
+                        _cf_config = ConfluenceConfig(
+                            min_factors_required=2,
+                            min_confluence_score=0.35,
+                            counter_trend_penalty=0.05,
+                        )
+                    else:
+                        _cf_config = None  # use defaults from engines.yaml
+                    _cf = evaluate_confluence(
+                        bias=signal.bias,
+                        engine=signal.engine,
+                        ema_21_vs_55=fv.ema_21_vs_55,
+                        price_vs_ma200=fv.price_vs_ma200,
+                        supertrend_dir=fv.supertrend_dir,
+                        lr_slope_20=fv.lr_slope_20,
+                        volume_ratio=fv.volume_ratio,
+                        volume_delta=fv.volume_delta,
+                        obv_slope_10=fv.obv_slope_10,
+                        cmf_20=fv.cmf_20,
+                        rsi_14=fv.rsi_14,
+                        cci_20=fv.cci_20,
+                        willr_14=fv.willr_14,
+                        roc_10=fv.roc_10,
+                        atr_ratio_5_20=fv.atr_ratio_5_20,
+                        bb_width=fv.bb_width,
+                        realized_vol_20d=fv.realized_vol_20d,
+                        orderbook_imbalance=fv.orderbook_imbalance,
+                        trade_flow_imbalance=fv.trade_flow_imbalance,
+                        spread_pct=fv.spread_pct,
+                        hurst_exponent=fv.hurst_exponent,
+                        return_autocorr_20=fv.return_autocorr_20,
+                        entropy_50=fv.entropy_50,
+                        bb_pct_b=fv.bb_pct_b,
+                        vwap_dev_pct=fv.vwap_dev_pct,
+                        config=_cf_config,
+                    )
+                    _confluence_score = _cf.score
+                    _cf_factor_summary = {
+                        name: {"passed": f.passed, "score": f.score}
+                        for name, f in _cf.factor_details.items()
+                    }
+                    base_gate_results["confluence"] = {
+                        "score": _cf.score,
+                        "factors_passed": _cf.factors_passed,
+                        "factors_total": _cf.factors_total,
+                        "passed": _cf.passed,
+                        "reason": _cf.reason,
+                        "factors": _cf_factor_summary,
+                    }
+                    if not _cf.passed:
+                        self._reject(
+                            outputs=outputs, asset_class=asset_class,
+                            symbol=symbol,
+                            reason=self._annotate_reason(
+                                f"confluence_filter_fail ({_cf.reason})",
+                                crisis_override=crisis_override_active,
+                            ),
+                            engine=str(signal.engine),
+                            action="rejected",
+                            confidence=float(signal.confidence),
+                            gate_results=base_gate_results,
+                        )
+                        continue
+
+                # Step 6.9: trade quality classifier (meta-grade A/B/C/D)
+                if signal is not None:
+                    from src.mde.trade_quality import TradeQualityInput, classify_trade_quality
+                    _rr = signal.expected_return / max(signal.stop_distance, 1e-9)
+                    _sqs = sq.quality_score if signal is not None and 'sq' in dir() else 0.50
+                    _prec_s = _prec.score if '_prec' in dir() else 0.50
+                    _tq = classify_trade_quality(TradeQualityInput(
+                        signal_quality_score=_sqs,
+                        precision_grade_score=_prec_s,
+                        confluence_score=_confluence_score,
+                        regime_alignment_score=_regime_alignment_score,
+                        final_confidence=signal.confidence,
+                        reward_risk_ratio=_rr,
+                    ), engine=signal.engine, crypto_fee_mode=self._is_crypto_fee_mode(asset_class))
+                    base_gate_results["trade_quality"] = {
+                        "grade": _tq.grade,
+                        "composite_score": _tq.composite_score,
+                        "passed": _tq.passed,
+                        "inputs": {
+                            "sqs": _sqs,
+                            "precision": _prec_s,
+                            "confluence": _confluence_score,
+                            "regime_alignment": _regime_alignment_score,
+                            "confidence": signal.confidence,
+                            "reward_risk": _rr,
+                        },
+                    }
+                    if not _tq.passed:
+                        self._reject(
+                            outputs=outputs, asset_class=asset_class,
+                            symbol=symbol,
+                            reason=self._annotate_reason(
+                                f"trade_quality_{_tq.grade}_reject (composite={_tq.composite_score:.3f})",
+                                crisis_override=crisis_override_active,
+                            ),
+                            engine=str(signal.engine),
+                            action="rejected",
+                            confidence=float(signal.confidence),
+                            gate_results=base_gate_results,
+                        )
+                        continue
+
+                # Step 7: gates (with adaptive confidence floor)
+                from src.mde.adaptive_confidence import compute_adaptive_floor
+                from src.core.constants import MIN_CONFIDENCE as _BASE_MIN_CONF
+                _adaptive = compute_adaptive_floor(
+                    base_min_confidence=_BASE_MIN_CONF,
+                    recent_trade_outcomes=getattr(self, '_recent_trade_outcomes', []),
+                    engine=signal.engine if signal is not None else None,
+                )
                 gate_result = evaluate_gates(
                     GateInput(
                         sentinel_score=sentinel_report.score,
@@ -624,7 +1166,13 @@ class ArgusPipeline:
                             sentiment_score=fv.hermes_sentiment_score,
                             urgency=fv.hermes_urgency,
                         ),
+                        min_confidence=_adaptive.effective_min_confidence,
                         allow_crisis_override=crisis_override_active,
+                        crypto_fee_mode=self._is_crypto_fee_mode(asset_class),
+                        crypto_taker_fee_bps=self._crypto_fee_cfg.taker_fee_bps,
+                        crypto_min_rr=self._crypto_fee_cfg.min_rr,
+                        crypto_min_tp_pct=self._crypto_fee_cfg.min_tp_pct,
+                        crypto_titan_min_edge=self._crypto_fee_cfg.titan_min_edge,
                     )
                 )
                 if not gate_result.approved or signal is None:
@@ -651,6 +1199,16 @@ class ArgusPipeline:
                     continue
 
                 # Step 8: risk + sizing
+                runtime_risk = None
+                if self._runtime_risk_reloader is not None and signal is not None:
+                    adapted = apply_runtime_risk_overrides(
+                        signal=signal,
+                        market_features=fv,
+                        risk_config=self._runtime_risk_config_payload,
+                    )
+                    signal = adapted.signal
+                    runtime_risk = adapted.runtime_risk
+
                 atlas_mult = self.atlas.compute_multiplier(
                     regime=regime_state.regime,
                     asset_class=asset_class,
@@ -675,6 +1233,25 @@ class ArgusPipeline:
                 if crisis_override_active:
                     position_size_pct = min(position_size_pct, 0.02)
 
+                # Crypto fee mode: size boost for high-grade trades
+                if self._is_crypto_fee_mode(asset_class) and _tq.passed:
+                    if _tq.grade == "A":
+                        _size_boost = self._crypto_fee_cfg.grade_a_size_mult
+                    elif _tq.grade == "B":
+                        _size_boost = self._crypto_fee_cfg.grade_b_size_mult
+                    else:
+                        _size_boost = 1.0
+                    position_size_pct = min(position_size_pct * _size_boost, 0.15)
+
+                # Scale-In: adjust initial position size if DCA is active
+                if self._scale_in_config.enabled:
+                    _sig_strength = "STRONG" if signal.confidence >= 0.80 else "NORMAL"
+                    position_size_pct = initial_position_size_pct(
+                        full_position_size=position_size_pct,
+                        signal_strength=_sig_strength,
+                        config=self._scale_in_config,
+                    )
+
                 pre = self.pre_trade.check(
                     PreTradeInput(
                         asset_class=asset_class,
@@ -684,6 +1261,7 @@ class ArgusPipeline:
                         stop_loss=signal.stop_distance,
                         correlation_with_book=0.1,
                         allocation_ok=True,
+                        max_leverage=float(runtime_risk.leverage_cap) if runtime_risk is not None else 2.0,
                         gate9_threshold=gate9_threshold,
                     )
                 )
@@ -692,6 +1270,8 @@ class ArgusPipeline:
 
                 gate9_diag = self._gate9_diagnostics(pre=pre, threshold=gate9_threshold)
                 pretrade_gate_results = dict(base_gate_results)
+                if runtime_risk is not None:
+                    pretrade_gate_results["runtime_risk"] = runtime_risk.as_dict()
                 if gate9_diag is not None:
                     pretrade_gate_results.update(gate9_diag)
 
@@ -709,6 +1289,83 @@ class ArgusPipeline:
                     )
                     continue
 
+                # Step 8.1: Dynamic Risk Manager (paper/live only)
+                drm_decision: DRMDecision | None = None
+                drm_leverage = 1.0
+                drm_sl = signal.stop_distance
+                drm_tp = signal.expected_return
+                if self._drm_active:
+                    try:
+                        drm_decision = drm_compute(
+                            asset=symbol,
+                            asset_class=asset_class,
+                            regime=regime_state.regime,
+                            regime_probability_vector=getattr(regime_state, "probability_vector", None),
+                            engine_name=signal.engine,
+                            engine_confidence=signal.confidence,
+                            atr_pct=float(getattr(fv, "atr_14_pct", 0.01) or 0.01),
+                            adx=float(fv.adx_14),
+                            rolling_drawdown_pct=self._rolling_drawdown_pct,
+                            account_equity=self._account_equity,
+                            risk_mode="normal",
+                            entry_price=last_close,
+                            side=signal.bias,
+                            config=self._drm_config,
+                        )
+                        drm_leverage = min(drm_decision.leverage, float(runtime_risk.leverage_cap) if runtime_risk else 20.0)
+                        drm_sl = abs(drm_decision.sl_price - last_close) / last_close
+                        drm_tp = abs(drm_decision.tp_price - last_close) / last_close
+                    except Exception as exc:
+                        self._LOG.warning("DRM compute failed: %s — using engine defaults", exc)
+
+                # Step 8.2: Dynamic Leverage Calibration
+                if self._leverage_cal_config.enabled and drm_sl > 0:
+                    _cal = calibrate_leverage(
+                        equity=self._account_equity,
+                        risk_pct=self._leverage_cal_config.risk_pct,
+                        stop_distance_pct=drm_sl,
+                        entry_price=last_close,
+                        config=self._leverage_cal_config,
+                    )
+                    drm_leverage = _cal.leverage
+                    self._LOG.debug(
+                        "LevCal: %s stop=%.3f%% → lev=%.1fx risk=$%.2f",
+                        symbol, drm_sl * 100, _cal.leverage, _cal.risk_usd,
+                    )
+
+                # Step 8.3: Market Structure SL Shield + TP Magnet
+                if self._market_structure_config.enabled and drm_decision is not None:
+                    try:
+                        _highs = candles["high"].tolist() if "high" in candles.columns else []
+                        _lows = candles["low"].tolist() if "low" in candles.columns else []
+                        if len(_highs) >= 2 * self._market_structure_config.swing_window + 1:
+                            _ms = build_market_structure(
+                                highs=_highs, lows=_lows,
+                                current_price=last_close,
+                                config=self._market_structure_config,
+                            )
+                            _adj = adjust_sl_tp_for_structure(
+                                side=signal.bias,
+                                sl_price=drm_decision.sl_price,
+                                tp_price=drm_decision.tp_price,
+                                entry_price=last_close,
+                                structure=_ms,
+                            )
+                            if _adj.sl_adjusted or _adj.tp_adjusted:
+                                # Re-derive pct-based SL/TP from adjusted prices
+                                drm_sl = abs(_adj.sl_price - last_close) / last_close
+                                drm_tp = abs(_adj.tp_price - last_close) / last_close
+                                self._LOG.debug(
+                                    "MktStruct: %s %s → %s",
+                                    symbol, signal.bias, _adj.reason,
+                                )
+                    except Exception as exc:
+                        self._LOG.warning("Market structure adjustment failed: %s", exc)
+
+                # Crypto TP boost: widen TP when trend is strengthening
+                if self._is_crypto_fee_mode(asset_class) and _v6_adx_rising:
+                    drm_tp *= self._crypto_fee_cfg.tp_adx_rising_mult
+
                 # Step 9: execution
                 execution_mode = self._execution_mode(asset_class)
                 advisory_fields: dict[str, Any] = {}
@@ -724,9 +1381,9 @@ class ArgusPipeline:
                     symbol=symbol,
                     execution_mode=execution_mode,
                     position_size=pre.adjusted_position_size,
-                    leverage=1.0,
-                    stop_loss=signal.stop_distance,
-                    take_profit=signal.expected_return,
+                    leverage=drm_leverage,
+                    stop_loss=drm_sl,
+                    take_profit=drm_tp,
                     confidence=signal.confidence,
                     engine=signal.engine,
                     reason=self._annotate_reason("pipeline_entry", crisis_override=crisis_override_active),
@@ -735,19 +1392,25 @@ class ArgusPipeline:
                 )
                 ex_result = self.executor.execute(decision=decision)
 
-                # Track open position for shadow dynamic exit
+                # Track open position for shadow dynamic exit + DRM trailing
                 if ex_result.success:
                     pos_id = f"pos-{symbol}-{int(cycle_now.timestamp())}"
-                    self._open_positions[pos_id] = {
+                    pos_data: dict[str, Any] = {
                         "position_id": pos_id,
                         "symbol": symbol,
                         "side": signal.bias.upper() if hasattr(signal, "bias") else "LONG",
                         "entry_price": last_close,
                         "current_price": last_close,
-                        "sl_pct": signal.stop_distance,
+                        "sl_pct": drm_sl,
                         "r_value_pct": signal.stop_distance,
                         "atr_pct": max(float(getattr(fv, "atr_ratio_5_20", 0.005) or 0.005), 0.001),
                     }
+                    # Store DRM trailing rules for position management
+                    if drm_decision is not None:
+                        pos_data["drm_trailing_rules"] = drm_decision.trailing_rules
+                        pos_data["drm_initial_sl"] = drm_decision.sl_price
+                        pos_data["drm_current_sl"] = drm_decision.sl_price
+                    self._open_positions[pos_id] = pos_data
 
                 # Step 10-11: telemetry + post
                 evt_type = "order_filled" if ex_result.success else "order_rejected"
@@ -773,8 +1436,33 @@ class ArgusPipeline:
                         "gate_results": pretrade_gate_results,
                         "execution_mode": decision.execution_mode,
                         "advisory_message": ex_result.advisory_message,
+                        "runtime_risk": runtime_risk.as_dict() if runtime_risk is not None else None,
+                        # v6 orchestrator metadata
+                        "v6_regime": _v6_validation.final_regime if _v6_validation else None,
+                        "v6_regime_scores": {
+                            "trend": _v6_validation.trend_score,
+                            "volatility": _v6_validation.volatility_score,
+                            "structure": _v6_validation.structure_score,
+                        } if _v6_validation else None,
+                        "v6_trend_gate": {
+                            "verified": _v6_trend_gate.verified,
+                            "score": _v6_trend_gate.score,
+                        } if _v6_trend_gate else None,
+                        "v6_orchestrator": {
+                            "enabled": _v6_orch_decision.enabled_engines,
+                            "disabled": _v6_orch_decision.disabled_engines,
+                            "regime_used": _v6_orch_decision.regime_used,
+                            "verified_trend": _v6_orch_decision.verified_trend,
+                            "rr_mult": _v6_orch_decision.risk_overrides.rr_mult,
+                            "size_mult": _v6_orch_decision.risk_overrides.size_mult,
+                            "reason": _v6_orch_decision.reason,
+                        } if _v6_orch_decision else None,
                     }
                 )
+
+        # Position management: apply DRM trailing stops each cycle
+        if self._drm_active:
+            self._apply_drm_trailing_stops()
 
         self.event_bus.publish(EventType.HEARTBEAT, {"run_id": self.ctx.run_id, "ts": cycle_now.isoformat()})
         return outputs
@@ -784,10 +1472,39 @@ class ArgusPipeline:
         if override:
             return [str(s).upper() for s in override if str(s).strip()]
 
+        # SONAR-driven crypto symbols (top 2 allocated from scan)
+        if asset_class == "crypto" and self._sonar_watchlist is not None:
+            allocated = self._sonar_watchlist.allocated
+            if allocated:
+                return allocated
+
         configured = self.config.base.asset_classes.get(asset_class)
         if configured and configured.enabled and configured.symbols:
             return configured.symbols[:1]
         return [self._fallback_symbol(asset_class)]
+
+    def _maybe_run_sonar_scan(self, now: datetime) -> None:
+        """Run SONAR scan if scanner is available and interval has elapsed."""
+        if self._sonar_scanner is None:
+            return
+        interval = self._sonar_scanner.scan_interval_seconds
+        if self._sonar_last_scan is not None:
+            elapsed = (now - self._sonar_last_scan).total_seconds()
+            if elapsed < interval:
+                return
+        try:
+            universe = self._sonar_scanner.discover_universe()
+            watchlist = self._sonar_scanner.scan(universe)
+            self._sonar_watchlist = watchlist
+            self._sonar_last_scan = now
+            self._LOG.info(
+                "SONAR scan: universe=%d watchlist=%d allocated=%s",
+                watchlist.universe_size,
+                len(watchlist.watchlist),
+                watchlist.allocated,
+            )
+        except Exception as exc:
+            self._LOG.warning("SONAR scan failed: %s", exc)
 
     @staticmethod
     def _fallback_symbol(asset_class: str) -> str:
@@ -798,6 +1515,55 @@ class ArgusPipeline:
             "index": "NAS100",
             "bist": "THYAO",
         }.get(asset_class, "BTCUSDT")
+
+    def _apply_drm_trailing_stops(self) -> None:
+        """Apply break-even lock + DRM trailing stop logic each cycle."""
+        for pos_id, pos in list(self._open_positions.items()):
+            rules = pos.get("drm_trailing_rules")
+            if rules is None:
+                continue
+            entry_price = pos.get("entry_price", 0.0)
+            current_price = pos.get("current_price", entry_price)
+            initial_sl = pos.get("drm_initial_sl", entry_price)
+            current_sl = pos.get("drm_current_sl", initial_sl)
+            side = "long" if pos.get("side", "LONG").upper() == "LONG" else "short"
+
+            # Break-Even Lock: snap SL to BE at 1× ATR before DRM trailing
+            if self._breakeven_config.enabled:
+                atr_pct = pos.get("atr_pct", 0.01)
+                avg_entry = pos.get("avg_entry_price", entry_price)
+                atr_abs = atr_pct * avg_entry  # Convert pct to absolute
+                be_result = check_breakeven_trigger(
+                    side=side,
+                    avg_entry_price=avg_entry,
+                    current_price=current_price,
+                    atr=atr_abs,
+                    current_sl=current_sl,
+                    config=self._breakeven_config,
+                )
+                if be_result.triggered and be_result.new_sl != current_sl:
+                    current_sl = be_result.new_sl
+                    pos["drm_current_sl"] = current_sl
+                    self._LOG.debug(
+                        "BE Lock: %s %s SL snapped to BE %s (profit=%.1fR)",
+                        pos_id, side, current_sl, be_result.profit_distance,
+                    )
+
+            # DRM Trailing: standard R-multiple trailing after BE
+            new_sl = drm_apply_trailing(
+                side=side,
+                entry_price=entry_price,
+                initial_sl_price=initial_sl,
+                current_sl_price=current_sl,
+                current_price=current_price,
+                rules=rules,
+            )
+            if new_sl != current_sl:
+                pos["drm_current_sl"] = new_sl
+                self._LOG.debug(
+                    "DRM trailing: %s %s SL moved %s -> %s (price=%s)",
+                    pos_id, side, current_sl, new_sl, current_price,
+                )
 
     def _execution_mode(self, asset_class: str) -> str:
         if self.ctx.mode == "backtest":
@@ -810,8 +1576,11 @@ class ArgusPipeline:
         if requested != "auto":
             return requested
 
-        # Safety fallback: if API keys are not available, move to advisory mode
-        # rather than attempting blind auto execution.
+        # Paper mode: always allow auto execution (simulated, no real orders)
+        if self.ctx.mode == "paper":
+            return "auto"
+
+        # Live mode: require API keys for real execution
         exchange = str(cfg.exchange or "").lower()
         if exchange == "bingx":
             if os.getenv("BINGX_API_KEY") and os.getenv("BINGX_API_SECRET"):
@@ -1357,8 +2126,51 @@ class ArgusPipeline:
         except Exception:
             self._LOG.debug("backtest close fallback fetch failed symbol=%s", symbol, exc_info=True)
 
-        # Avoid replay-mode fallback to _load_ohlcv, because replay loader anchor
-        # may not match `at` here and could accidentally reuse entry-time pricing.
+        # Fallback: try the primary timeframe (e.g. 1h) when 1m data is unavailable.
+        # This is common for historical backtests where only hourly data exists.
+        _primary_tf = getattr(self, "_primary_tf", None) or "1h"
+        if _primary_tf != "1m":
+            for _tf_now in (at_ts, None):
+                try:
+                    rows = self.data_factory.fetch_ohlcv(
+                        symbol=symbol,
+                        timeframe=_primary_tf,
+                        limit=fetch_limit,
+                        now=_tf_now,
+                    )
+                    picked = _pick(rows)
+                    if picked is not None:
+                        _src = "fetch_primary_tf" if _tf_now is not None else "fetch_primary_tf_fallback"
+                        return picked[0], picked[1], _src
+                except Exception:
+                    pass
+
+        # Replay-mode fallback via forward_history buffer
+        if self.data_factory.mode == "replay" and hasattr(self, "_forward_history"):
+            fh = self._forward_history.get(symbol)
+            if fh is not None and not fh.empty:
+                try:
+                    frame = fh.copy()
+                    frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True, errors="coerce")
+                    frame = frame.dropna(subset=["timestamp"]).reset_index(drop=True)
+                    rows = [
+                        [
+                            row["timestamp"],
+                            row["open"],
+                            row["high"],
+                            row["low"],
+                            row["close"],
+                            row["volume"],
+                        ]
+                        for _, row in frame.iterrows()
+                    ]
+                    picked = _pick(rows)
+                    if picked is not None:
+                        return picked[0], picked[1], "forward_history_fallback"
+                except Exception:
+                    self._LOG.debug("backtest close forward_history fallback failed symbol=%s", symbol, exc_info=True)
+
+        # Non-replay fallback via _load_ohlcv
         if self.data_factory.mode != "replay":
             try:
                 frame = self._load_ohlcv(symbol=symbol, now=at)
@@ -1492,6 +2304,107 @@ class ArgusPipeline:
             ),
         )
 
+    def _evaluate_backtest_exit(
+        self,
+        *,
+        symbol: str,
+        side: str,
+        entry_price: float,
+        stop_distance: float,
+        entry_time: datetime,
+        exit_time: datetime,
+        engine: str = "",
+        atr_pct: float = 0.0,
+    ) -> tuple[float | None, datetime | None, str]:
+        """Enhanced exit evaluation with trailing stop, BE lock, and time-stop.
+
+        Delegates to ``exit_policy.evaluate_exit_bar_by_bar`` for bar-by-bar
+        evaluation matching ``backtest_simulator.py`` logic.
+
+        Returns (exit_price, exit_time, exit_reason).
+        If no early exit found, returns (None, None, "time_exit_backtest_sim").
+        """
+        from src.backtest.exit_policy import (
+            evaluate_exit_bar_by_bar,
+            get_engine_exit_config,
+            REASON_TIME_EXIT,
+        )
+
+        fh = self._forward_history.get(symbol)
+        if fh is None or fh.empty:
+            return None, None, REASON_TIME_EXIT
+
+        # Check required columns for full evaluation
+        required_cols = {"timestamp", "high", "low", "close"}
+        if not required_cols.issubset(set(fh.columns)):
+            self._LOG.warning(
+                "exit_eval fallback | symbol=%s missing columns=%s",
+                symbol, required_cols - set(fh.columns),
+            )
+            return None, None, REASON_TIME_EXIT
+
+        stop_price = (
+            entry_price * (1.0 - stop_distance)
+            if side == "long"
+            else entry_price * (1.0 + stop_distance)
+        )
+
+        entry_ts = pd.Timestamp(entry_time)
+        if entry_ts.tzinfo is None:
+            entry_ts = entry_ts.tz_localize("UTC")
+        exit_ts = pd.Timestamp(exit_time)
+        if exit_ts.tzinfo is None:
+            exit_ts = exit_ts.tz_localize("UTC")
+
+        mask = (fh["timestamp"] >= entry_ts) & (fh["timestamp"] <= exit_ts)
+        candle_df = fh.loc[mask].sort_values("timestamp")
+
+        if candle_df.empty:
+            return None, None, REASON_TIME_EXIT
+
+        # Convert DataFrame rows to list[dict] for exit_policy
+        candle_list: list[dict] = []
+        for _, row in candle_df.iterrows():
+            ts = row["timestamp"]
+            if hasattr(ts, "to_pydatetime"):
+                ts = ts.to_pydatetime()
+            if ts is not None and getattr(ts, "tzinfo", None) is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            candle_list.append({
+                "timestamp": ts,
+                "high": float(row["high"]),
+                "low": float(row["low"]),
+                "close": float(row["close"]),
+            })
+
+        config = get_engine_exit_config(engine)
+
+        self._LOG.debug(
+            "exit_eval | symbol=%s engine=%s candles=%d first=%s last=%s atr_pct=%.4f",
+            symbol, engine, len(candle_list),
+            candle_list[0]["timestamp"] if candle_list else "N/A",
+            candle_list[-1]["timestamp"] if candle_list else "N/A",
+            atr_pct,
+        )
+
+        result = evaluate_exit_bar_by_bar(
+            candles=candle_list,
+            side=side,
+            entry_price=entry_price,
+            initial_stop_price=stop_price,
+            atr_pct=atr_pct,
+            config=config,
+        )
+
+        if result is None:
+            return None, None, REASON_TIME_EXIT
+
+        # time_exit_backtest_sim means nothing hit — let caller use original exit logic
+        if result.exit_reason == REASON_TIME_EXIT:
+            return None, None, REASON_TIME_EXIT
+
+        return result.exit_price, result.exit_time, result.exit_reason
+
     def _persist_backtest_execution_sim_trade(
         self,
         *,
@@ -1509,6 +2422,8 @@ class ArgusPipeline:
         hold_minutes: int,
         fees_pct: float,
         slippage_pct: float,
+        reason_exit: str = "time_exit_backtest_sim",
+        regime: str = "",
     ) -> None:
         """Persist one deterministic closed trade from advisory backtest output."""
         if self.v25_conn is None:
@@ -1533,7 +2448,8 @@ class ArgusPipeline:
         qty = max(float(size), 0.0)
         pnl = float(entry_px * qty * net_pnl_pct)
         duration_hours = float((exit_time - entry_time).total_seconds() / 3600.0)
-        regime = "REPLAY" if self.data_factory.mode == "replay" else "UNKNOWN"
+        if not regime:
+            regime = "UNKNOWN"
 
         trade_id = f"btsim-{symbol}-{entry_time.strftime('%Y%m%d%H%M%S%f')}-{s}"
         self.v25_conn.execute(
@@ -1542,8 +2458,9 @@ class ArgusPipeline:
               trade_id, symbol, side, capital_engine, entry_time, exit_time,
               entry_price, exit_price, size, pnl, pnl_pct, fees, slippage,
               net_pnl_pct, regime_at_entry, regime_at_exit, engine, sub_strategy,
-              confidence, sqs_score, stop_distance, duration_hours, hold_minutes, reason_entry, reason_exit
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              confidence, sqs_score, stop_distance, duration_hours, hold_minutes, reason_entry, reason_exit,
+              leverage
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 trade_id,
@@ -1570,7 +2487,8 @@ class ArgusPipeline:
                 duration_hours,
                 int(max(1, int(hold_minutes))),
                 "backtest_sim_entry",
-                "time_exit_backtest_sim",
+                reason_exit,
+                lev,
             ),
         )
 
@@ -1613,13 +2531,17 @@ class ArgusPipeline:
         _ = asset_class
         return list(self._open_positions.values())
 
+    def _is_crypto_fee_mode(self, asset_class: str) -> bool:
+        """Check if crypto fee mode is active for this asset class."""
+        return self._crypto_fee_cfg.enabled and asset_class == "crypto"
+
     @staticmethod
     def _engine_hint_for_regime(regime: str | None) -> str:
         if regime:
             mapped = REGIME_TO_ENGINE.get(regime)
             if mapped:
                 return str(mapped)
-        return ENGINE_PHOENIX
+        return ENGINE_AEGEAN
 
     def _reject(
         self,
@@ -1941,6 +2863,32 @@ class ArgusPipeline:
             raise
         return FeatureBuilder()
 
+    def _full_features_snapshot(
+        self, fv: Any, regime: str, candles: pd.DataFrame | None = None,
+    ) -> dict[str, Any]:
+        """Build expanded features snapshot (v2: 22+ fields + feature pack v0)."""
+        snapshot: dict[str, Any] = {"regime": regime, "_version": 2}
+        for name in [
+            "atr_14_pct", "atr_ratio_5_20", "bb_width", "realized_vol_20d",
+            "adx_14", "price_vs_ma200", "ema_21_vs_55", "lr_slope_20", "aroon_osc",
+            "rsi_14", "bb_pct_b", "roc_10", "willr_14", "cci_20",
+            "volume_ratio", "obv_slope_10", "vwap_dev_pct", "cmf_20", "volume_delta",
+            "hurst_exponent", "entropy_50",
+        ]:
+            val = getattr(fv, name, None)
+            if val is not None and isinstance(val, (int, float)):
+                snapshot[name] = ArgusPipeline._safe_float(val)
+
+        # Attach feature pack v0 if candles available
+        if candles is not None and len(candles) >= 20:
+            try:
+                from src.features.feature_pack_v0 import compute_feature_pack_v0
+                snapshot["feature_pack_v0"] = compute_feature_pack_v0(candles)
+            except Exception as e:
+                snapshot["feature_pack_v0"] = {"_version": 0, "error": str(e)[:120]}
+
+        return snapshot
+
     @staticmethod
     def _safe_float(value: Any, default: float = 0.0) -> float:
         try:
@@ -2012,9 +2960,10 @@ class ArgusPipeline:
         if self.forward_sim:
             if self.data_factory.mode == "replay":
                 replay_anchor = self.replay_now if self.replay_now is not None else None
+                primary_tf = getattr(self, "_primary_tf", "1h")
                 rows = self.data_factory.fetch_ohlcv(
                     symbol=symbol,
-                    timeframe="1m",
+                    timeframe=primary_tf,
                     limit=1,
                     now=replay_anchor,
                 )
@@ -2063,9 +3012,10 @@ class ArgusPipeline:
         # Replay mode: deterministic local parquet slice around replay_now
         if self.data_factory.mode == "replay":
             replay_anchor = self.replay_now if self.replay_now is not None else None
+            primary_tf = getattr(self, "_primary_tf", "1h")
             rows = self.data_factory.fetch_ohlcv(
                 symbol=symbol,
-                timeframe="1m",
+                timeframe=primary_tf,
                 limit=self.ohlcv_limit,
                 now=replay_anchor,
             )
@@ -2260,7 +3210,136 @@ def main() -> None:
     parser.add_argument("--max-trades-per-day", type=int, default=50, help="Paper-only max trades per day (default: 50).")
     parser.add_argument("--telegram-signals", action="store_true", default=False, help="Enable Telegram alerts for actionable advisory signals (requires TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID).")
     parser.add_argument("--telegram-min-confidence", type=float, default=0.60, help="Minimum confidence for Telegram signal notifications (default: 0.60).")
+    # --- Backtest-only engine optimization ---
+    parser.add_argument("--optimize-engines", action="store_true", default=False, help="Run backtest-only walk-forward engine parameter optimization and exit.")
+    parser.add_argument("--optimize-assets", default="BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,DOGEUSDT", help="Comma-separated assets for cross-asset optimization.")
+    parser.add_argument("--optimize-start", default="2018-01-01", help="Optimization start date (YYYY-MM-DD, inclusive).")
+    parser.add_argument("--optimize-end", default="2026-01-01", help="Optimization end date (YYYY-MM-DD, exclusive).")
+    parser.add_argument("--walk-window-days", type=int, default=180, help="Walk-forward train window length in days.")
+    parser.add_argument("--walk-step-days", type=int, default=30, help="Walk-forward test step length in days.")
+    # --- Backtest-only risk optimization ---
+    parser.add_argument("--optimize-risk", action="store_true", default=False, help="Run backtest-only walk-forward risk parameter optimization and exit.")
+    parser.add_argument("--risk-optimize-engine", default="Titan", help="Engine used for risk optimization (alpha fixed to deterministic baseline).")
+    parser.add_argument("--auto-risk-optimize", action="store_true", default=False, help="Backtest-only: run risk optimizer, write risk_config.json, and exit.")
+    parser.add_argument(
+        "--use-risk-config",
+        action="store_true",
+        default=False,
+        help="Enable runtime risk overrides from --risk-config (paper/backtest only).",
+    )
+    parser.add_argument(
+        "--risk-config",
+        default="runs/v25/risk_config.json",
+        help="Path to risk_config.json for --use-risk-config and --auto-risk-optimize output.",
+    )
     args = parser.parse_args()
+
+    if bool(args.use_risk_config) and str(args.mode).lower() == "live":
+        print("[risk] --use-risk-config is ignored in live mode (behavior unchanged).")
+        args.use_risk_config = False
+
+    if args.optimize_engines:
+        if str(args.mode).lower() != "backtest":
+            print("[optimize] --optimize-engines is backtest-only. Use --mode backtest.")
+            raise SystemExit(2)
+        if args.walk_window_days <= 0 or args.walk_step_days <= 0:
+            print("[optimize] --walk-window-days and --walk-step-days must be positive.")
+            raise SystemExit(2)
+        try:
+            opt_start = datetime.strptime(str(args.optimize_start), "%Y-%m-%d").date()
+            opt_end = datetime.strptime(str(args.optimize_end), "%Y-%m-%d").date()
+        except ValueError as exc:
+            print(f"[optimize] invalid optimize date format ({exc})")
+            raise SystemExit(2) from exc
+        optimize_assets = tuple(parse_symbols_arg(args.optimize_assets))
+        if not optimize_assets:
+            print("[optimize] --optimize-assets must contain at least one symbol.")
+            raise SystemExit(2)
+
+        from src.optimization.engine_optimizer import OptimizationRequest, run_engine_optimization
+
+        artifacts = run_engine_optimization(
+            OptimizationRequest(
+                assets=optimize_assets,
+                optimize_start=opt_start,
+                optimize_end=opt_end,
+                walk_window_days=int(args.walk_window_days),
+                walk_step_days=int(args.walk_step_days),
+                reports_dir=Path("reports"),
+            )
+        )
+        print(
+            "[optimize] completed | sets={sets} overfit={overfit} splits={splits}".format(
+                sets=artifacts.result_count,
+                overfit=artifacts.overfit_count,
+                splits=artifacts.split_count,
+            )
+        )
+        print(f"[optimize] summary={artifacts.summary_path}")
+        print(f"[optimize] results={artifacts.results_csv_path}")
+        print(f"[optimize] heatmap={artifacts.heatmap_csv_path}")
+        return
+
+    if args.optimize_risk or args.auto_risk_optimize:
+        if str(args.mode).lower() != "backtest":
+            print("[risk-optimize] --optimize-risk/--auto-risk-optimize is backtest-only. Use --mode backtest.")
+            raise SystemExit(2)
+        if args.walk_window_days <= 0 or args.walk_step_days <= 0:
+            print("[risk-optimize] --walk-window-days and --walk-step-days must be positive.")
+            raise SystemExit(2)
+        try:
+            opt_start = datetime.strptime(str(args.optimize_start), "%Y-%m-%d").date()
+            opt_end = datetime.strptime(str(args.optimize_end), "%Y-%m-%d").date()
+        except ValueError as exc:
+            print(f"[risk-optimize] invalid optimize date format ({exc})")
+            raise SystemExit(2) from exc
+        optimize_assets = tuple(parse_symbols_arg(args.optimize_assets))
+        if not optimize_assets:
+            print("[risk-optimize] --optimize-assets must contain at least one symbol.")
+            raise SystemExit(2)
+
+        from src.optimization.engine_optimizer import OptimizationRequest, run_risk_optimization
+
+        artifacts = run_risk_optimization(
+            OptimizationRequest(
+                assets=optimize_assets,
+                optimize_start=opt_start,
+                optimize_end=opt_end,
+                walk_window_days=int(args.walk_window_days),
+                walk_step_days=int(args.walk_step_days),
+                reports_dir=Path("reports"),
+            ),
+            engine=str(args.risk_optimize_engine),
+        )
+
+        print(
+            "[risk-optimize] completed | sets={sets} overfit={overfit} splits={splits}".format(
+                sets=artifacts.result_count,
+                overfit=artifacts.overfit_count,
+                splits=artifacts.split_count,
+            )
+        )
+        print(f"[risk-optimize] summary={artifacts.summary_path}")
+        print(f"[risk-optimize] results={artifacts.results_csv_path}")
+        if artifacts.heatmap_csv_path is not None:
+            print(f"[risk-optimize] heatmap={artifacts.heatmap_csv_path}")
+        if artifacts.best_config_path is not None:
+            print(f"[risk-optimize] best_config={artifacts.best_config_path}")
+
+        if args.auto_risk_optimize:
+            if artifacts.best_parameter_set is None:
+                print("[risk-optimize] no non-overfit risk parameter set found; risk_config.json not written.")
+                raise SystemExit(1)
+            cfg_path = Path(str(args.risk_config))
+            cfg_path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "engine": str(args.risk_optimize_engine),
+                "risk_parameters": artifacts.best_parameter_set,
+            }
+            cfg_path.write_text(json.dumps(payload, sort_keys=True, indent=2), encoding="utf-8")
+            print(f"[risk-optimize] wrote={cfg_path}")
+        return
 
     conn: sqlite3.Connection | None = None
     fee_model: Any | None = None
@@ -2331,6 +3410,8 @@ def main() -> None:
         risk_profile=str(args.risk_profile),
         allow_crisis=bool(args.allow_crisis),
         symbols_override=symbols_override,
+        use_runtime_risk_config=bool(args.use_risk_config),
+        runtime_risk_config_path=str(args.risk_config),
     )
     pipeline._primary_tf = str(args.timeframe)
     pipeline._paper_taker_fee = float(args.taker_fee)
@@ -2343,6 +3424,9 @@ def main() -> None:
             print(f"[symbols] crypto universe={','.join(symbols_override['crypto'])}")
     else:
         print(f"[data] MOCK — using synthetic random walk OHLCV")
+
+    if bool(args.use_risk_config) and args.mode in {"paper", "backtest"}:
+        print(f"[risk] runtime overrides enabled | path={args.risk_config}")
 
     # Apply --orion flag
     if args.orion:
@@ -2360,6 +3444,22 @@ def main() -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
     decisions_log = run_dir / "decisions.jsonl"
 
+    # ── Stateful Backtest Simulator ──
+    bt_simulator = None
+    if args.mode == "backtest":
+        try:
+            from src.backtest.backtest_simulator import BacktestSimulator
+            bt_simulator = BacktestSimulator(
+                initial_balance=10_000.0,
+                default_fee_pct=float(args.taker_fee),
+                be_trigger_atr_multiple=1.5,
+                trail_pct=0.01,
+                max_concurrent_positions=3,
+            )
+            print(f"[bt] Stateful simulator v5 ON | balance=$10,000 | BE=1.5xATR | trail=1.0% | max_pos=3")
+        except Exception as exc:
+            print(f"[bt] Simulator init failed: {exc}")
+
     telegram_notifier = TelegramSignalNotifier.from_env(
         conn=v25_conn_ref,
         enabled=bool(args.telegram_signals and args.mode in {"paper", "live"}),
@@ -2370,6 +3470,20 @@ def main() -> None:
             print("[notify] Telegram signal alerts ENABLED")
         else:
             print("[notify] Telegram signal alerts requested but disabled (missing TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID)")
+
+    trade_report_manager: Any | None = None
+    if args.mode in {"paper", "backtest"} and v25_conn_ref is not None:
+        try:
+            from src.reporting.trade_reporting import TradeReportManager
+
+            trade_report_manager = TradeReportManager(
+                conn=v25_conn_ref,
+                run_dir=run_dir,
+                run_id=pipeline.ctx.run_id,
+                run_started_at=datetime.now(timezone.utc),
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"[reports] trade reporting disabled: {exc}")
 
     print(
         f"[run] mode={args.mode} cycles={max_cycles} assets={','.join(assets)} "
@@ -2517,6 +3631,45 @@ def main() -> None:
 
         for item in outputs:
             print(item)
+
+        # ── Stateful Backtest: feed signals + evaluate positions ──
+        if bt_simulator is not None:
+            for item in outputs:
+                bt_simulator.on_signal(item, cycle_now)
+            # Feed current candle for position evaluation
+            try:
+                _bt_candles = pipeline._load_ohlcv(symbol="BTCUSDT", now=cycle_now)
+                if not _bt_candles.empty:
+                    _bt_last = _bt_candles.iloc[-1]
+                    _bt_atr_pct = 0.0
+                    _bt_atr_pctl = 0.0
+                    if len(_bt_candles) >= 14:
+                        _bt_highs = _bt_candles["high"].astype(float)
+                        _bt_lows = _bt_candles["low"].astype(float)
+                        _bt_closes = _bt_candles["close"].astype(float)
+                        _bt_tr = pd.concat([
+                            _bt_highs - _bt_lows,
+                            (_bt_highs - _bt_closes.shift(1)).abs(),
+                            (_bt_lows - _bt_closes.shift(1)).abs(),
+                        ], axis=1).max(axis=1)
+                        _bt_atr = float(_bt_tr.rolling(14).mean().iloc[-1])
+                        _bt_atr_pct = _bt_atr / float(_bt_last["close"]) if float(_bt_last["close"]) > 0 else 0
+                        # v5: ATR percentile — rank current atr_pct in last 200 bars
+                        _bt_atr_pct_series = (_bt_tr.rolling(14).mean() / _bt_closes).dropna()
+                        if len(_bt_atr_pct_series) >= 20:
+                            _window = _bt_atr_pct_series.iloc[-200:] if len(_bt_atr_pct_series) >= 200 else _bt_atr_pct_series
+                            _current_val = float(_bt_atr_pct_series.iloc[-1])
+                            _bt_atr_pctl = float((_window <= _current_val).sum()) / len(_window)
+                    bt_simulator.on_candle(
+                        high=float(_bt_last["high"]),
+                        low=float(_bt_last["low"]),
+                        close=float(_bt_last["close"]),
+                        atr_pct=_bt_atr_pct,
+                        atr_pctl=_bt_atr_pctl,
+                        timestamp=cycle_now,
+                    )
+            except Exception:
+                pass  # Non-critical: skip candle eval if data unavailable
 
         # Always append observable decisions log for cycle-level debugging
         with open(decisions_log, "a", encoding="utf-8") as f:
@@ -2671,10 +3824,10 @@ def main() -> None:
                     continue
 
                 regime = pipeline._extract_regime_from_gate_results(rec.get("gate_results"))
-                telegram_notifier.notify_signal(
+                telegram_notifier.notify_trade_executed(
                     timestamp=cycle_now,
                     symbol=str(rec.get("symbol", item.get("symbol", "UNKNOWN"))),
-                    action=action,
+                    side=action,
                     confidence=_as_float_default(item.get("confidence"), 0.0),
                     engine=str(item.get("engine") or pipeline._engine_hint_for_regime(None)),
                     regime=regime,
@@ -2683,8 +3836,8 @@ def main() -> None:
                     size_pct=_opt_float(item.get("position_size_pct")),
                     leverage=_opt_float(item.get("leverage")),
                     entry_price=_opt_float(item.get("suggested_entry_price")),
-                    stop_loss_pct=_opt_float(item.get("stop_loss_pct")),
-                    take_profit_pct=_opt_float(item.get("take_profit_pct")),
+                    stop_loss=_opt_float(item.get("stop_loss_pct")),
+                    take_profit=_opt_float(item.get("take_profit_pct")),
                     advisory_message=str(item.get("advisory_message")) if item.get("advisory_message") else None,
                 )
 
@@ -2730,6 +3883,10 @@ def main() -> None:
                         leverage=leverage,
                     )
                     regime = pipeline._extract_regime_from_gate_results(rec.get("gate_results"))
+                    # Extract ATR from features_snapshot (v2) for exit policy BE lock
+                    _gate_res = rec.get("gate_results")
+                    _feat_snap = (_gate_res.get("features_snapshot", {}) if isinstance(_gate_res, dict) else {})
+                    atr_pct = float(_feat_snap.get("atr_14_pct", 0.0) or 0.0)
                     by_hold_eval: dict[int, tuple[datetime, float, float, float, datetime, str]] = {}
 
                     if hold_grid_minutes:
@@ -2883,6 +4040,27 @@ def main() -> None:
                         int(selected_hold),
                     )
 
+                    # Dynamic exit evaluation: trailing stop, BE lock, time-stop, SL
+                    _exit_px, _exit_time, _exit_reason = pipeline._evaluate_backtest_exit(
+                        symbol=symbol,
+                        side=action,
+                        entry_price=entry_price,
+                        stop_distance=stop_distance,
+                        entry_time=entry_time,
+                        exit_time=exit_time,
+                        engine=engine,
+                        atr_pct=atr_pct,
+                    )
+                    if _exit_px is not None and _exit_time is not None:
+                        exit_price = float(_exit_px)
+                        exit_time = _exit_time
+                        pipeline._LOG.debug(
+                            "backtest exit hit | symbol=%s side=%s reason=%s price=%.8f time=%s",
+                            symbol, action, _exit_reason, exit_price, exit_time.isoformat(),
+                        )
+                    else:
+                        _exit_reason = "time_exit_backtest_sim"
+
                     pipeline._persist_backtest_execution_sim_trade(
                         symbol=symbol,
                         side=action,
@@ -2898,6 +4076,8 @@ def main() -> None:
                         hold_minutes=int(selected_hold),
                         fees_pct=fees_pct,
                         slippage_pct=slippage_pct,
+                        reason_exit=_exit_reason,
+                        regime=regime,
                     )
                 v25_conn_ref.commit()
             except Exception as e:
@@ -2933,7 +4113,63 @@ def main() -> None:
             except Exception as e:
                 print(f"[v25] backtest trade persistence error: {e}")
 
+        closed_trade_reports: list[dict[str, Any]] = []
+        if trade_report_manager is not None:
+            try:
+                closed_trade_reports = trade_report_manager.sync_closed_trades()
+            except Exception as exc:  # noqa: BLE001
+                print(f"[reports] trade report sync error: {exc}")
+
+        if telegram_notifier.active and closed_trade_reports and args.mode in {"paper", "live"}:
+            for rec in closed_trade_reports:
+                exit_ts_raw = str(rec.get("exit_time") or "")
+                try:
+                    notify_ts = datetime.fromisoformat(exit_ts_raw.replace("Z", "+00:00"))
+                    if notify_ts.tzinfo is None:
+                        notify_ts = notify_ts.replace(tzinfo=timezone.utc)
+                    else:
+                        notify_ts = notify_ts.astimezone(timezone.utc)
+                except Exception:
+                    notify_ts = cycle_now
+
+                telegram_notifier.notify_trade_closed(
+                    timestamp=notify_ts,
+                    symbol=str(rec.get("symbol", "UNKNOWN")),
+                    side=str(rec.get("side", "long")),
+                    pnl_pct=float(rec.get("net_pnl_pct", 0.0)),
+                    engine=str(rec.get("engine", "ROUTER")),
+                    max_drawdown_pct=float(rec.get("drawdown_during_trade", 0.0)),
+                    duration_minutes=int(rec.get("hold_minutes", 0)) if rec.get("hold_minutes") is not None else None,
+                    trailing_activated=bool(rec.get("trailing_activated", False)),
+                    regime=str(rec.get("regime_at_exit") or rec.get("regime_at_entry") or "UNKNOWN"),
+                    run_dir=str(run_dir),
+                    trade_id=str(rec.get("trade_id")) if rec.get("trade_id") is not None else None,
+                )
+
         print(f"[cycle {cycle}/{max_cycles}] outputs={len(outputs)}")
+
+    # ── Stateful Backtest Tear Sheet ──
+    if bt_simulator is not None:
+        bt_simulator.print_tear_sheet()
+        try:
+            import math as _math
+
+            def _sanitize_for_json(obj: Any) -> Any:
+                if isinstance(obj, float) and (_math.isinf(obj) or _math.isnan(obj)):
+                    return 999999.99 if obj > 0 else -999999.99
+                if isinstance(obj, dict):
+                    return {k: _sanitize_for_json(v) for k, v in obj.items()}
+                if isinstance(obj, (list, tuple)):
+                    return [_sanitize_for_json(v) for v in obj]
+                return obj
+
+            ts_data = _sanitize_for_json(bt_simulator.tear_sheet())
+            (run_dir / "tear_sheet.json").write_text(
+                json.dumps(ts_data, indent=2, default=str) + "\n", encoding="utf-8",
+            )
+            print(f"[bt] tear sheet saved to {run_dir / 'tear_sheet.json'}")
+        except Exception as exc:
+            print(f"[bt] tear sheet save error: {exc}")
 
     if args.mode == "backtest" and args.v25:
         try:

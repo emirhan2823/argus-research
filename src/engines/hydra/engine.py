@@ -30,18 +30,20 @@ class HydraEngine:
     """Scalp engine active in RANGING regime (low ADX, calm markets)."""
 
     # --- From config/engines.yaml hydra section ---
-    min_confidence: float = 0.60
+    min_confidence: float = 0.55
     max_concurrent: int = 5
     adx_max: float = 25.0
-    rsi_oversold: float = 30.0
-    rsi_overbought: float = 70.0
+    rsi_oversold: float = 35.0
+    rsi_overbought: float = 65.0
     bb_std: float = 2.0
+    bb_entry_long: float = 0.20
+    bb_entry_short: float = 0.80
     obi_threshold: float = 0.15
     volume_delta_periods: int = 3
-    min_volume_ratio: float = 1.2
+    min_volume_ratio: float = 0.8
     sl_atr_mult: float = 1.5
     sl_fixed_pct: float = 0.003
-    tp_fixed_pct: float = 0.004
+    tp_fixed_pct: float = 0.006
 
     def generate_signal(
         self,
@@ -72,25 +74,21 @@ class HydraEngine:
         return best
 
     def _long_scalp(self, features: FeatureVector) -> Optional[EngineSignal]:
-        """Long scalp: price near lower BB + RSI oversold + supportive orderbook."""
-        # Price must be near lower Bollinger Band (bb_pct_b < 0.10)
-        if features.bb_pct_b > 0.10:
+        """Long scalp: price near lower BB with RSI/volume confirmation."""
+        # Price must be near lower Bollinger Band (primary trigger)
+        if features.bb_pct_b > self.bb_entry_long:
             return None
 
-        # RSI must be oversold
-        if features.rsi_14 > self.rsi_oversold:
-            return None
-
-        # Volume must confirm (not dead market)
-        if features.volume_ratio < self.min_volume_ratio:
-            return None
-
-        # Build confidence score
-        conf = 0.50
+        # Build confidence score — BB position is primary, RSI/volume are bonuses
+        conf = 0.48
         # Deeper into lower band = more confident
-        conf += (0.10 - features.bb_pct_b) * 3.0
-        # Lower RSI = more confident
-        conf += (self.rsi_oversold - features.rsi_14) / 100.0
+        conf += (self.bb_entry_long - features.bb_pct_b) * 2.0
+        # RSI bonus (not required, but adds confidence)
+        if features.rsi_14 <= self.rsi_oversold:
+            conf += (self.rsi_oversold - features.rsi_14) / 80.0
+        # Volume bonus
+        if features.volume_ratio >= self.min_volume_ratio:
+            conf += 0.05
         # Orderbook imbalance bonus (if available)
         if features.orderbook_imbalance is not None:
             if features.orderbook_imbalance > self.obi_threshold:
@@ -113,30 +111,26 @@ class HydraEngine:
             bias="long",
             confidence=conf,
             stop_distance=stop,
-            expected_return=max(stop * 1.3, self.tp_fixed_pct),
+            expected_return=max(stop * 2.0, self.tp_fixed_pct),
             atr=features.atr_14,
         )
 
     def _short_scalp(self, features: FeatureVector) -> Optional[EngineSignal]:
-        """Short scalp: price near upper BB + RSI overbought + supportive orderbook."""
-        # Price must be near upper Bollinger Band (bb_pct_b > 0.90)
-        if features.bb_pct_b < 0.90:
+        """Short scalp: price near upper BB with RSI/volume confirmation."""
+        # Price must be near upper Bollinger Band (primary trigger)
+        if features.bb_pct_b < self.bb_entry_short:
             return None
 
-        # RSI must be overbought
-        if features.rsi_14 < self.rsi_overbought:
-            return None
-
-        # Volume must confirm
-        if features.volume_ratio < self.min_volume_ratio:
-            return None
-
-        # Build confidence score
-        conf = 0.50
+        # Build confidence score — BB position is primary, RSI/volume are bonuses
+        conf = 0.48
         # Further into upper band = more confident
-        conf += (features.bb_pct_b - 0.90) * 3.0
-        # Higher RSI = more confident
-        conf += (features.rsi_14 - self.rsi_overbought) / 100.0
+        conf += (features.bb_pct_b - self.bb_entry_short) * 2.0
+        # RSI bonus (not required, adds confidence when overbought)
+        if features.rsi_14 >= self.rsi_overbought:
+            conf += (features.rsi_14 - self.rsi_overbought) / 80.0
+        # Volume bonus
+        if features.volume_ratio >= self.min_volume_ratio:
+            conf += 0.05
         # Orderbook imbalance bonus (negative = selling pressure = good for shorts)
         if features.orderbook_imbalance is not None:
             if features.orderbook_imbalance < -self.obi_threshold:
@@ -158,7 +152,7 @@ class HydraEngine:
             bias="short",
             confidence=conf,
             stop_distance=stop,
-            expected_return=max(stop * 1.3, self.tp_fixed_pct),
+            expected_return=max(stop * 2.0, self.tp_fixed_pct),
             atr=features.atr_14,
         )
 

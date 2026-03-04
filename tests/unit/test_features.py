@@ -35,6 +35,7 @@ def test_technical_features_return_expected_17_fields() -> None:
         "realized_vol_20d",
         "parkinson_vol",
         "bb_width",
+        "atr_pctl",
         "adx_14",
         "price_vs_ma200",
         "ema_21_vs_55",

@@ -6,7 +6,13 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Optional
 
-from src.core.constants import ENGINE_PHOENIX, REGIME_CRISIS
+from src.core.constants import (
+    ENGINE_PHOENIX,
+    MIN_CONFIDENCE,
+    MIN_NET_EXPECTED_RETURN,
+    MIN_REWARD_RISK_RATIO,
+    REGIME_CRISIS,
+)
 from src.core.types import EngineSignal, FeatureVector, RegimeState
 
 
@@ -27,10 +33,15 @@ class GateInput:
     signal: Optional[EngineSignal]
     features: FeatureVector
     hermes_block_active: bool = False
-    min_confidence: float = 0.55
-    min_net_expected_return: float = 0.001
-    min_reward_risk: float = 1.5
+    min_confidence: float = MIN_CONFIDENCE
+    min_net_expected_return: float = MIN_NET_EXPECTED_RETURN
+    min_reward_risk: float = MIN_REWARD_RISK_RATIO
     allow_crisis_override: bool = False
+    crypto_fee_mode: bool = False
+    crypto_taker_fee_bps: float = 3.0
+    crypto_min_rr: float = 2.0
+    crypto_min_tp_pct: float = 0.01
+    crypto_titan_min_edge: float = 0.15
 
 
 def gate_breakeven_r_fee(
@@ -108,6 +119,45 @@ def evaluate_gates(inp: GateInput) -> GateResult:
     reward_risk_ratio = inp.signal.expected_return / max(inp.signal.stop_distance, 1e-9)
     if reward_risk_ratio < inp.min_reward_risk:
         return GateResult(False, 7, "hold", "reward_risk_below_threshold", snapshot)
+
+    # Gate 7.5: crypto fee-adjusted expectancy
+    if inp.crypto_fee_mode and inp.signal is not None:
+        sl_pct = max(inp.signal.stop_distance, 1e-9)
+        tp_pct = inp.signal.expected_return
+        taker_fee_pct = inp.crypto_taker_fee_bps / 10_000.0
+        win_prob = max(0.0, min(1.0, inp.signal.confidence))
+
+        fee_adjusted_edge = (
+            reward_risk_ratio * win_prob
+            - (1.0 - win_prob)
+            - (2.0 * taker_fee_pct / sl_pct)
+        )
+
+        if fee_adjusted_edge <= 0:
+            return GateResult(
+                False, 7, "hold",
+                f"crypto_fee_edge_negative edge={fee_adjusted_edge:.4f}", snapshot,
+            )
+        if reward_risk_ratio < inp.crypto_min_rr:
+            return GateResult(
+                False, 7, "hold",
+                f"crypto_min_rr_fail rr={reward_risk_ratio:.2f}<{inp.crypto_min_rr}",
+                snapshot,
+            )
+        if tp_pct < inp.crypto_min_tp_pct:
+            return GateResult(
+                False, 7, "hold",
+                f"crypto_min_tp_fail tp={tp_pct:.4f}<{inp.crypto_min_tp_pct}",
+                snapshot,
+            )
+
+        # TITAN-specific: higher edge threshold for trend trades (unlimited hold)
+        if inp.signal.engine == "TITAN" and fee_adjusted_edge < inp.crypto_titan_min_edge:
+            return GateResult(
+                False, 7, "hold",
+                f"titan_edge_insufficient edge={fee_adjusted_edge:.4f}<{inp.crypto_titan_min_edge}",
+                snapshot,
+            )
 
     # Gate 9 (Breakeven-R fee burden) is enforced in pre_trade.py via
     # compute_validated_size(). It requires sizing output (notional_usd)

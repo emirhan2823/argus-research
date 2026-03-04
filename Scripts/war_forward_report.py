@@ -309,7 +309,7 @@ def _load_closed_trades(db_path: Path) -> list[dict[str, Any]]:
                        entry_time, exit_time, entry_price, exit_price,
                        hold_minutes, pnl_pct, net_pnl_pct, confidence,
                        regime_at_entry, regime_at_exit, stop_distance,
-                       size
+                       size, COALESCE(leverage, 1.0) AS leverage
                 FROM trades
                 WHERE exit_time IS NOT NULL
                 ORDER BY COALESCE(exit_time, entry_time) ASC, entry_time ASC, trade_id ASC
@@ -512,6 +512,9 @@ def _build_trade_analytics(
             or row.get("regime_at_exit")
             or regime_at_entry
         )
+        runtime_risk = entry_gate.get("runtime_risk", {}) if isinstance(entry_gate, dict) else {}
+        if not isinstance(runtime_risk, dict):
+            runtime_risk = {}
 
         drawdown_during_trade, mfe, mae = _compute_excursions(
             loader=loader,
@@ -521,6 +524,12 @@ def _build_trade_analytics(
             exit_time=exit_time,
             entry_price=entry_price,
         )
+        stop_distance = _as_float(row.get("stop_distance"))
+        rr_ratio = _as_float(runtime_risk.get("rr_ratio"), 2.0)
+        tp_distance = float(max(0.0, stop_distance * rr_ratio))
+        leverage_used = float(max(1.0, _as_float(row.get("leverage"), _as_float(runtime_risk.get("leverage_cap"), 1.0))))
+        raw_size = _as_float(row.get("size"), 0.0)
+        size_pct_used = float(min(1.0, max(0.0, raw_size)))
 
         trade_payload: dict[str, Any] = {
             "scenario": scenario_id,
@@ -546,7 +555,10 @@ def _build_trade_analytics(
             "drawdown_during_trade": float(drawdown_during_trade),
             "max_favorable_excursion": float(mfe),
             "max_adverse_excursion": float(mae),
-            "stop_distance": _as_float(row.get("stop_distance")),
+            "stop_distance": float(stop_distance),
+            "tp_distance": float(tp_distance),
+            "leverage_used": float(leverage_used),
+            "size_pct_used": float(size_pct_used),
         }
 
         what_right, what_wrong = _trade_texts(trade_payload)
@@ -574,6 +586,10 @@ def _build_trade_analytics(
             "drawdown_during_trade": trade_payload["drawdown_during_trade"],
             "max_favorable_excursion": trade_payload["max_favorable_excursion"],
             "max_adverse_excursion": trade_payload["max_adverse_excursion"],
+            "leverage_used": trade_payload["leverage_used"],
+            "size_pct_used": trade_payload["size_pct_used"],
+            "stop_distance": trade_payload["stop_distance"],
+            "tp_distance": trade_payload["tp_distance"],
             "what_went_right": trade_payload["what_went_right"],
             "what_went_wrong": trade_payload["what_went_wrong"],
             "improvement_suggestion": trade_payload["improvement_suggestion"],

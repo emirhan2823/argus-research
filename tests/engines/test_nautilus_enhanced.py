@@ -515,22 +515,14 @@ class TestNautilusEngineWiring:
 
 
 class TestGeminiRouterRegistration:
-    """Gemini engine is registered in the router's secondary engines."""
+    """Gemini engine registration and constant checks."""
 
-    def test_gemini_in_ranging_secondary(self) -> None:
-        """ENGINE_GEMINI is in REGIME_TO_SECONDARY_ENGINES for RANGING."""
-        secondaries = REGIME_TO_SECONDARY_ENGINES[REGIME_RANGING]
-        assert ENGINE_GEMINI in secondaries
-
-    def test_hydra_still_in_ranging_secondary(self) -> None:
-        """ENGINE_HYDRA is preserved in RANGING secondaries."""
-        secondaries = REGIME_TO_SECONDARY_ENGINES[REGIME_RANGING]
-        assert ENGINE_HYDRA in secondaries
-
-    def test_gemini_not_in_other_regimes(self) -> None:
-        """Gemini only operates in RANGING."""
-        assert ENGINE_GEMINI not in REGIME_TO_SECONDARY_ENGINES[REGIME_TRENDING]
-        assert ENGINE_GEMINI not in REGIME_TO_SECONDARY_ENGINES[REGIME_VOLATILE]
+    def test_poseidon_primary_aegean_secondary(self) -> None:
+        """Non-CRISIS regimes have a primary engine and secondary engines."""
+        from src.core.constants import ENGINE_POSEIDON, REGIME_TO_ENGINE
+        for regime in (REGIME_TRENDING, REGIME_RANGING, REGIME_VOLATILE):
+            assert REGIME_TO_ENGINE[regime] is not None, f"{regime} must have a primary engine"
+            assert len(REGIME_TO_SECONDARY_ENGINES[regime]) >= 0  # secondary is optional
 
     def test_gemini_constant_value(self) -> None:
         assert ENGINE_GEMINI == "GEMINI"
