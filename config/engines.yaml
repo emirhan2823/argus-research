@@ -4,6 +4,8 @@ engines:
     min_adx: 35
     min_confidence: 0.55
     max_concurrent: 3
+    continuation_min_volume: 0.8
+    adx_rising_bars: 1
     asset_profiles:
       crypto: { min_adx: 35, confluence_min_factors: 3 }
       equities: { min_adx: 15, confluence_min_factors: 2 }
@@ -219,9 +221,9 @@ engines:
   # v2.5 Confluence Filter (multi-factor independent confirmation)
   confluence_filter:
     enabled: true
-    min_factors_required: 3
-    min_confluence_score: 0.45
-    counter_trend_penalty: 0.10
+    min_factors_required: 4
+    min_confluence_score: 0.60
+    counter_trend_penalty: 0.15
 
   # v2.5 Trade Quality Classifier (meta-grade A/B/C/D)
   trade_quality:
@@ -229,7 +231,8 @@ engines:
     grade_a_threshold: 0.80
     grade_b_threshold: 0.65
     grade_c_threshold: 0.50
-    grade_c_min_confidence: 0.70
+    grade_c_min_confidence: 0.55
+    allow_grade_c_in_crypto: true
 
   # v2.5 Adaptive Confidence Floor
   adaptive_confidence:

@@ -2,7 +2,7 @@
 
 # ── System ────────────────────────────────────────────────────────
 SYSTEM_NAME = "argus"
-SYSTEM_VERSION = "2.0.0"
+SYSTEM_VERSION = "2.5.0"
 
 # ── Asset Classes ─────────────────────────────────────────────────
 AC_CRYPTO = "crypto"
@@ -149,16 +149,15 @@ BUDGET_TOTAL_MS = 10000
 
 # ── Regime Routing Map ────────────────────────────────────────────
 REGIME_TO_ENGINE = {
-    REGIME_TRENDING: ENGINE_POSEIDON,
-    REGIME_RANGING: ENGINE_NAUTILUS,   # Mean reversion for sideways markets
-    REGIME_VOLATILE: ENGINE_POSEIDON,
+    REGIME_TRENDING: ENGINE_TITAN,     # Dual-setup trend engine
+    REGIME_RANGING: ENGINE_NAUTILUS,   # MR primary for sideways markets
+    REGIME_VOLATILE: ENGINE_POSEIDON,  # MR Consortium for volatile markets
     REGIME_CRISIS: None,
 }
 
 # Secondary engines per regime (run after primary)
-# POSEIDON (MR Consortium) primary, AEGEAN trend-following as secondary
 REGIME_TO_SECONDARY_ENGINES = {
-    REGIME_TRENDING: [ENGINE_AEGEAN],
+    REGIME_TRENDING: [ENGINE_AEGEAN],  # Confirmation-only in trending
     REGIME_RANGING: [ENGINE_HYDRA],    # Scalper secondary for ranging
     REGIME_VOLATILE: [ENGINE_AEGEAN],
     REGIME_CRISIS: [],

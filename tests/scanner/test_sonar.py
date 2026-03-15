@@ -255,3 +255,39 @@ def test_score_components_in_range():
         assert 0 <= score.structure_strength <= 100
         assert 0 <= score.atr_percentile <= 100
         assert 0 <= score.volume_expansion <= 100
+
+
+def test_discover_universe_respects_listing_as_of():
+    binance = _mock_binance_client()
+    binance.fetch_exchange_info.return_value = [
+        {"symbol": "BTCUSDT", "listing_ts": "2020-01-01T00:00:00Z"},
+        {"symbol": "HYPEUSDT", "listing_ts": "2024-12-05T00:00:00Z"},
+    ]
+    binance.fetch_24h_tickers.return_value = [
+        {"symbol": "BTCUSDT", "volume_usdt": 3_000_000_000, "last_price": 60000.0, "price_change_pct": 0.7},
+        {"symbol": "HYPEUSDT", "volume_usdt": 800_000_000, "last_price": 10.0, "price_change_pct": 4.2},
+    ]
+    scanner = SonarScanner(binance_client=binance, bingx_client=None, min_volume_usdt_24h=50_000_000)
+    pre = scanner.discover_universe(as_of=datetime(2024, 11, 1, tzinfo=timezone.utc))
+    post = scanner.discover_universe(as_of=datetime(2025, 1, 1, tzinfo=timezone.utc))
+    assert "HYPEUSDT" not in pre
+    assert "HYPEUSDT" in post
+
+
+def test_scan_adds_new_listing_boost():
+    binance = _mock_binance_client()
+    binance.fetch_exchange_info.return_value = [
+        {"symbol": "BTCUSDT", "listing_ts": "2020-01-01T00:00:00Z"},
+        {"symbol": "HYPEUSDT", "listing_ts": "2024-12-05T00:00:00Z"},
+    ]
+    binance.fetch_24h_tickers.return_value = [
+        {"symbol": "BTCUSDT", "volume_usdt": 3_000_000_000, "last_price": 60000.0, "price_change_pct": 0.7},
+        {"symbol": "HYPEUSDT", "volume_usdt": 800_000_000, "last_price": 10.0, "price_change_pct": 4.2},
+    ]
+    scanner = SonarScanner(binance_client=binance, bingx_client=None, min_volume_usdt_24h=50_000_000)
+    as_of = datetime(2024, 12, 15, tzinfo=timezone.utc)
+    universe = scanner.discover_universe(as_of=as_of)
+    watchlist = scanner.scan(universe, as_of=as_of)
+    by_symbol = {s.symbol: s for s in watchlist.watchlist}
+    if "HYPEUSDT" in by_symbol:
+        assert by_symbol["HYPEUSDT"].new_listing_boost > 0.0

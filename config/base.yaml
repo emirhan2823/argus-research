@@ -1,6 +1,6 @@
 system:
   name: "argus"
-  version: "2.0.0"
+  version: "2.5.0"
   mode: "paper"
   log_level: "INFO"
 

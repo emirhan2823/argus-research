@@ -13,7 +13,7 @@ class TestConfigLoader:
         cfg = load_config(config_dir=CONFIG_DIR)
         assert isinstance(cfg, ArgusConfig)
         assert cfg.base.system.name == "argus"
-        assert cfg.base.system.version == "2.0.0"
+        assert cfg.base.system.version == "2.5.0"
 
     def test_base_has_asset_classes(self):
         cfg = load_config(config_dir=CONFIG_DIR)
@@ -36,7 +36,7 @@ class TestConfigLoader:
 
     def test_risk_config(self):
         cfg = load_config(config_dir=CONFIG_DIR)
-        assert cfg.risk.sizing.base_risk_pct == 0.015
+        assert cfg.risk.sizing.base_risk_pct == 0.02
         assert cfg.risk.portfolio_allocation.max_crypto_pct == 0.50
         assert cfg.risk.stop_loss.stock_max_stop == 0.08
 

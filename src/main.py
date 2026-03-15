@@ -9,7 +9,7 @@ import os
 import random
 import sqlite3
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -42,6 +42,7 @@ from src.engines.titan.engine import TitanEngine
 from src.execution.executor import Executor
 from src.execution.hermes_position_manager import HermesPositionManager
 from src.mde.gates import GateInput, evaluate_gates
+from src.mde.liquidity_policy import resolve_liquidity_policy
 from src.mde.router import RegimeRouter
 from src.mde.sizing import SizingInput, compute_size
 from src.regime.consensus import RegimeConsensus
@@ -50,7 +51,7 @@ from src.regime.state_machine import RegimeStateMachine
 from src.regime.regime_validator import RegimeValidator
 from src.regime.trend_gate import check_trend_gate
 from src.regime.engine_orchestrator import EngineOrchestrator
-from src.risk.kill_switch import KillSwitch
+from src.risk.kill_switch import KillSwitch, KillSwitchThresholds
 from src.risk.pre_trade import PreTradeChecker, PreTradeInput
 from src.risk.risk_runtime_adapter import (
     DEFAULT_RUNTIME_RISK_PATH,
@@ -70,6 +71,8 @@ from src.correlation.tracker import CorrelationTracker
 from src.correlation.signals import CorrelationSignalGenerator
 from src.engines.gemini.engine import GeminiEngine
 from src.mde.precision_filter import PrecisionConfig
+from src.mde.strategy_profiles import resolve_strategy_profile
+from src.mde.trade_quality import TradeQualityConfig
 from src.notifications.telegram import TelegramSignalNotifier
 from src.orchestration.orion import OrionOrchestrator
 from src.scanner.sonar import SonarScanner, SonarWatchlist
@@ -174,6 +177,40 @@ def resolve_crypto_symbol_universe(*, symbols_arg: str | None, universe_size: in
     return list(base[:size])
 
 
+def _parse_utc_datetime(raw: str) -> datetime:
+    parsed = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def resolve_replay_schedule(
+    *,
+    replay_now: str | None,
+    replay_start: str | None,
+    replay_end: str | None,
+    cycle_step_minutes: int,
+) -> tuple[pd.Timestamp | None, datetime | None, int | None]:
+    """Resolve replay anchor and optional cycle count from start/end window."""
+    if replay_start is not None or replay_end is not None:
+        if not replay_start or not replay_end:
+            raise ValueError("--replay-start and --replay-end must be provided together")
+        start_dt = _parse_utc_datetime(str(replay_start))
+        end_dt = _parse_utc_datetime(str(replay_end))
+        if end_dt < start_dt:
+            raise ValueError("--replay-end must be >= --replay-start")
+        step_sec = max(1, int(cycle_step_minutes)) * 60
+        total_sec = (end_dt - start_dt).total_seconds()
+        cycles = int(total_sec // step_sec) + 1
+        return cast(pd.Timestamp, pd.Timestamp(start_dt)), start_dt, max(1, cycles)
+
+    if replay_now is None:
+        return None, None, None
+
+    replay_now_dt = _parse_utc_datetime(str(replay_now))
+    return cast(pd.Timestamp, pd.Timestamp(replay_now_dt)), replay_now_dt, None
+
+
 @dataclass
 class PipelineContext:
     mode: str
@@ -227,6 +264,10 @@ class ArgusPipeline:
         risk_profile: str = "normal",
         allow_crisis: bool = False,
         symbols_override: dict[str, list[str]] | None = None,
+        enable_backtest_sonar: bool = False,
+        strategy_profiles_config_path: str | Path = "config/strategy_profiles.yaml",
+        strategy_profiles_enabled: bool | None = None,
+        liquidity_policy_config_path: str | Path = "config/high_liquidity_filters.yaml",
         use_runtime_risk_config: bool = False,
         runtime_risk_config_path: str | Path | None = None,
     ) -> None:
@@ -246,6 +287,7 @@ class ArgusPipeline:
         normalized_risk = str(risk_profile).strip().lower()
         self.risk_profile = normalized_risk if normalized_risk in {"strict", "normal", "relaxed"} else "normal"
         self.allow_crisis = bool(allow_crisis)
+        self.enable_backtest_sonar = bool(enable_backtest_sonar)
         resolved_data_mode = (data_mode or os.getenv("ARGUS_DATA_MODE", "mock")).lower()
         if replay_now is not None and resolved_data_mode == "mock":
             resolved_data_mode = "replay"
@@ -277,7 +319,7 @@ class ArgusPipeline:
 
         self.sentinel = SentinelValidator()
         self.feature_builder = self._init_feature_builder()
-        self.rule_classifier = RuleBasedRegimeClassifier()
+        self.rule_classifier = self._init_regime_classifier()
         self.consensus = RegimeConsensus()
         self.state_machines: dict[str, RegimeStateMachine] = {}
 
@@ -294,9 +336,13 @@ class ArgusPipeline:
         self.nautilus_engine = NautilusEngine()
         self.aegean_engine = AegeanEngine()
         self.poseidon_engine = PoseidonEngine()
-        self.titan_engine = TitanEngine()
+        _titan_cfg = self.config.engines.titan
+        self.titan_engine = TitanEngine(
+            min_volume_expansion=_titan_cfg.continuation_min_volume,
+            adx_rising_bars=_titan_cfg.adx_rising_bars,
+        )
 
-        # SONAR universe scanner (crypto only, paper/live modes)
+        # SONAR universe scanner
         self._sonar_scanner: SonarScanner | None = None
         self._sonar_watchlist: SonarWatchlist | None = None
         self._sonar_last_scan: datetime | None = None
@@ -309,6 +355,24 @@ class ArgusPipeline:
                 )
             except Exception:
                 self._LOG.warning("SONAR scanner init failed, using static symbol list")
+        elif (
+            mode == "backtest"
+            and self.enable_backtest_sonar
+            and "crypto" in assets
+            and self.data_factory.mode == "replay"
+        ):
+            try:
+                from src.scanner.replay_sonar_client import ReplaySonarClient
+
+                self._sonar_scanner = SonarScanner(
+                    binance_client=ReplaySonarClient(root="data/binance", default_interval="15m"),
+                    bingx_client=None,
+                    # Faster refresh in backtest to react to listing changes.
+                    scan_interval_seconds=300,
+                    min_volume_usdt_24h=1_000_000.0,
+                )
+            except Exception:
+                self._LOG.warning("Backtest SONAR scanner init failed, using static symbol list")
         # Initialize Gemini (correlation pairs engine) from config
         self._gemini_engine, self._correlation_tracker = self._init_gemini_engine()
         self.router = RegimeRouter(
@@ -324,11 +388,36 @@ class ArgusPipeline:
         )
         self.atlas = AtlasRiskOverlay()
         runtime_db = "runs/year2/v2_runtime/argus_runtime.db"
-        self.kill_switch = KillSwitch(db_path=runtime_db)
+        _dd_cfg = self.config.risk.drawdown
+        self.kill_switch = KillSwitch(
+            db_path=runtime_db,
+            thresholds=KillSwitchThresholds(
+                dd_caution=_dd_cfg.dd_caution,
+                dd_defensive=_dd_cfg.dd_defensive,
+                dd_halt=_dd_cfg.dd_halt,
+                dd_lockdown=_dd_cfg.dd_lockdown,
+            ),
+        )
         self.pre_trade = PreTradeChecker()
         self.executor = Executor(broker=DemoBroker())
+        # Confluence filter defaults from config/engines.yaml
+        _cfc = self.config.engines.confluence_filter
+        from src.mde.confluence_filter import ConfluenceConfig as _CC
+        self._confluence_config_default = _CC(
+            min_factors_required=_cfc.min_factors_required,
+            min_confluence_score=_cfc.min_confluence_score,
+            counter_trend_penalty=_cfc.counter_trend_penalty,
+        )
+        # Sizing defaults from config/risk.yaml
+        self._sizing_cfg = self.config.risk.sizing
         self._dynamic_exit_config = self._load_dynamic_exit_config()
         self._precision_config = self._load_precision_config()
+        self._trade_quality_config = self._load_trade_quality_config()
+        self._strategy_profiles_cfg = self._load_strategy_profiles_config(
+            path=strategy_profiles_config_path,
+            enabled_override=strategy_profiles_enabled,
+        )
+        self._liquidity_policy_cfg = self._load_liquidity_policy_config(path=liquidity_policy_config_path)
         # Dynamic Risk Manager config (active in paper/live modes)
         self._drm_config = DRMConfig(
             atr_multiplier=1.5,
@@ -689,6 +778,21 @@ class ArgusPipeline:
                     "mode": self.ctx.mode,
                     "features_snapshot": self._full_features_snapshot(fv, regime_state.regime, candles=candles),
                 }
+                _profile_resolution = None
+                _profile_min_conf_override: float | None = None
+                _profile_min_rr_override: float | None = None
+                _profile_crypto_min_rr_override: float | None = None
+                _profile_confluence_factors_override: int | None = None
+                _profile_confluence_score_override: float | None = None
+                _liq_resolution = None
+                _liq_precision_min_grade: str | None = None
+                _liq_precision_min_score: float | None = None
+                _liq_confluence_factors_override: int | None = None
+                _liq_confluence_score_override: float | None = None
+                _liq_min_rr_override: float | None = None
+                _liq_crypto_min_rr_override: float | None = None
+                _liq_min_tp_pct_override: float | None = None
+                _liq_tq_overrides: dict[str, Any] = {}
                 if crisis_override_active:
                     base_gate_results["crisis_override"] = True
 
@@ -774,6 +878,60 @@ class ArgusPipeline:
                             gate_results=base_gate_results,
                         )
                         continue
+
+                # Step 6.05: high-liquidity policy resolver (BTC/ETH overrides)
+                if signal is not None:
+                    _liq_resolution = resolve_liquidity_policy(
+                        config=self._liquidity_policy_cfg,
+                        symbol=symbol,
+                        timeframe=str(getattr(self, "_primary_tf", "1h")),
+                        engine=signal.engine,
+                        side=signal.bias,
+                    )
+                    if _liq_resolution is not None:
+                        base_gate_results["liquidity_policy"] = {
+                            "policy": _liq_resolution.policy_name,
+                            "symbol": _liq_resolution.symbol,
+                            "timeframe": _liq_resolution.timeframe,
+                            "engine": _liq_resolution.engine,
+                            "side": _liq_resolution.side,
+                            "engine_allowed": _liq_resolution.engine_allowed,
+                            "engine_mode": _liq_resolution.engine_mode,
+                        }
+                        if _liq_resolution.engine_allowed is False:
+                            self._reject(
+                                outputs=outputs,
+                                asset_class=asset_class,
+                                symbol=symbol,
+                                reason=self._annotate_reason(
+                                    f"liquidity_policy_engine_block:{signal.engine}",
+                                    crisis_override=crisis_override_active,
+                                ),
+                                engine=str(signal.engine),
+                                action="rejected",
+                                confidence=float(signal.confidence),
+                                gate_results=base_gate_results,
+                            )
+                            continue
+                        _liq_precision_min_grade = _liq_resolution.precision_min_grade
+                        _liq_precision_min_score = _liq_resolution.precision_min_score
+                        _liq_confluence_factors_override = _liq_resolution.confluence_min_factors
+                        _liq_confluence_score_override = _liq_resolution.confluence_min_score
+                        _liq_min_rr_override = _liq_resolution.min_rr
+                        _liq_crypto_min_rr_override = _liq_resolution.crypto_min_rr
+                        _liq_min_tp_pct_override = _liq_resolution.min_tp_pct
+                        if _liq_resolution.tq_grade_a_threshold is not None:
+                            _liq_tq_overrides["grade_a_threshold"] = _liq_resolution.tq_grade_a_threshold
+                        if _liq_resolution.tq_grade_b_threshold is not None:
+                            _liq_tq_overrides["grade_b_threshold"] = _liq_resolution.tq_grade_b_threshold
+                        if _liq_resolution.tq_grade_c_threshold is not None:
+                            _liq_tq_overrides["grade_c_threshold"] = _liq_resolution.tq_grade_c_threshold
+                        if _liq_resolution.tq_grade_c_min_confidence is not None:
+                            _liq_tq_overrides["grade_c_min_confidence"] = _liq_resolution.tq_grade_c_min_confidence
+                        if _liq_resolution.tq_allow_grade_c_in_crypto is not None:
+                            _liq_tq_overrides["allow_grade_c_in_crypto"] = _liq_resolution.tq_allow_grade_c_in_crypto
+                        if _liq_tq_overrides:
+                            base_gate_results["liquidity_policy"]["trade_quality_overrides"] = dict(_liq_tq_overrides)
 
                 # Step 6.1: AEGEAN confirmation boost for TITAN in TRENDING
                 # When AEGEAN is confirmation-only, its signal boosts TITAN confidence
@@ -980,12 +1138,35 @@ class ArgusPipeline:
                         "spread_ratio": _prec.spread_ratio,
                         "confidence_adjustment": _prec.confidence_adjustment,
                     }
-                    if not _prec.passed:
+                    _precision_passed = bool(_prec.passed)
+                    _precision_reason = f"precision_grade_{_prec.grade} ({_prec.score:.2f})"
+                    if _liq_precision_min_grade is not None:
+                        _grade_order = {"A": 4, "B": 3, "C": 2, "D": 1, "F": 0}
+                        _actual = _grade_order.get(str(_prec.grade).upper(), 0)
+                        _required = _grade_order.get(str(_liq_precision_min_grade).upper(), 0)
+                        if _actual < _required:
+                            _precision_passed = False
+                            _precision_reason = (
+                                f"liquidity_precision_grade_fail grade={_prec.grade}"
+                                f"<{_liq_precision_min_grade}"
+                            )
+                            base_gate_results["precision_filter"]["liquidity_min_grade"] = _liq_precision_min_grade
+                    if _liq_precision_min_score is not None:
+                        if float(_prec.score) < float(_liq_precision_min_score):
+                            _precision_passed = False
+                            _precision_reason = (
+                                f"liquidity_precision_score_fail score={_prec.score:.2f}"
+                                f"<{float(_liq_precision_min_score):.2f}"
+                            )
+                            base_gate_results["precision_filter"]["liquidity_min_score"] = float(_liq_precision_min_score)
+
+                    base_gate_results["precision_filter"]["passed"] = _precision_passed
+                    if not _precision_passed:
                         self._reject(
                             outputs=outputs, asset_class=asset_class,
                             symbol=symbol,
                             reason=self._annotate_reason(
-                                f"precision_grade_{_prec.grade} ({_prec.score:.2f})",
+                                _precision_reason,
                                 crisis_override=crisis_override_active,
                             ),
                             engine=str(signal.engine),
@@ -1035,6 +1216,57 @@ class ArgusPipeline:
                     _adj_conf = max(0.0, min(1.0, signal.confidence * _ra.confidence_multiplier))
                     signal = signal.model_copy(update={"confidence": _adj_conf})
 
+                # Step 6.75: strategy profile overrides (setup/side/vol bucket)
+                if signal is not None:
+                    _profile_resolution = resolve_strategy_profile(
+                        config=self._strategy_profiles_cfg,
+                        engine=signal.engine,
+                        regime=regime_state.regime,
+                        side=signal.bias,
+                        sub_strategy=signal.sub_strategy,
+                        atr_pctl=fv.atr_pctl,
+                        realized_vol_20d=fv.realized_vol_20d,
+                        volume_ratio=fv.volume_ratio,
+                        roc_10=fv.roc_10,
+                    )
+                    if _profile_resolution is not None:
+                        _profile_min_conf_override = _profile_resolution.min_confidence
+                        _profile_min_rr_override = _profile_resolution.min_rr
+                        _profile_crypto_min_rr_override = _profile_resolution.crypto_min_rr
+                        _profile_confluence_factors_override = _profile_resolution.confluence_min_factors
+                        _profile_confluence_score_override = _profile_resolution.confluence_min_score
+
+                        _adj_conf = max(
+                            0.0,
+                            min(1.0, signal.confidence + _profile_resolution.confidence_shift),
+                        )
+                        _adj_sl = max(
+                            0.001,
+                            min(0.10, signal.stop_distance * _profile_resolution.sl_mult),
+                        )
+                        _adj_tp = max(0.0005, signal.expected_return * _profile_resolution.tp_mult)
+                        signal = signal.model_copy(
+                            update={
+                                "confidence": _adj_conf,
+                                "stop_distance": _adj_sl,
+                                "expected_return": _adj_tp,
+                            }
+                        )
+                        base_gate_results["strategy_profile"] = {
+                            "profile": _profile_resolution.profile_name,
+                            "setup": _profile_resolution.setup,
+                            "side": _profile_resolution.side,
+                            "vol_bucket": _profile_resolution.vol_bucket,
+                            "confidence_shift": _profile_resolution.confidence_shift,
+                            "sl_mult": _profile_resolution.sl_mult,
+                            "tp_mult": _profile_resolution.tp_mult,
+                            "min_confidence_override": _profile_min_conf_override,
+                            "min_rr_override": _profile_min_rr_override,
+                            "crypto_min_rr_override": _profile_crypto_min_rr_override,
+                            "confluence_min_factors_override": _profile_confluence_factors_override,
+                            "confluence_min_score_override": _profile_confluence_score_override,
+                        }
+
                 # Step 6.8: confluence filter (multi-factor independent confirmation)
                 _confluence_score = 0.0
                 if signal is not None:
@@ -1048,7 +1280,37 @@ class ArgusPipeline:
                             counter_trend_penalty=0.05,
                         )
                     else:
-                        _cf_config = None  # use defaults from engines.yaml
+                        _cf_config = self._confluence_config_default
+                    if _profile_confluence_factors_override is not None or _profile_confluence_score_override is not None:
+                        _cf_base = _cf_config or self._confluence_config_default
+                        _cf_config = ConfluenceConfig(
+                            min_factors_required=(
+                                int(_profile_confluence_factors_override)
+                                if _profile_confluence_factors_override is not None
+                                else _cf_base.min_factors_required
+                            ),
+                            min_confluence_score=(
+                                float(_profile_confluence_score_override)
+                                if _profile_confluence_score_override is not None
+                                else _cf_base.min_confluence_score
+                            ),
+                            counter_trend_penalty=_cf_base.counter_trend_penalty,
+                        )
+                    if _liq_confluence_factors_override is not None or _liq_confluence_score_override is not None:
+                        _cf_base = _cf_config or self._confluence_config_default
+                        _cf_config = ConfluenceConfig(
+                            min_factors_required=(
+                                int(_liq_confluence_factors_override)
+                                if _liq_confluence_factors_override is not None
+                                else _cf_base.min_factors_required
+                            ),
+                            min_confluence_score=(
+                                float(_liq_confluence_score_override)
+                                if _liq_confluence_score_override is not None
+                                else _cf_base.min_confluence_score
+                            ),
+                            counter_trend_penalty=_cf_base.counter_trend_penalty,
+                        )
                     _cf = evaluate_confluence(
                         bias=signal.bias,
                         engine=signal.engine,
@@ -1111,6 +1373,9 @@ class ArgusPipeline:
                     _rr = signal.expected_return / max(signal.stop_distance, 1e-9)
                     _sqs = sq.quality_score if signal is not None and 'sq' in dir() else 0.50
                     _prec_s = _prec.score if '_prec' in dir() else 0.50
+                    _tq_cfg = self._trade_quality_config
+                    if _liq_tq_overrides:
+                        _tq_cfg = replace(_tq_cfg, **_liq_tq_overrides)
                     _tq = classify_trade_quality(TradeQualityInput(
                         signal_quality_score=_sqs,
                         precision_grade_score=_prec_s,
@@ -1118,11 +1383,18 @@ class ArgusPipeline:
                         regime_alignment_score=_regime_alignment_score,
                         final_confidence=signal.confidence,
                         reward_risk_ratio=_rr,
-                    ), engine=signal.engine, crypto_fee_mode=self._is_crypto_fee_mode(asset_class))
+                    ), engine=signal.engine, crypto_fee_mode=self._is_crypto_fee_mode(asset_class), config=_tq_cfg)
                     base_gate_results["trade_quality"] = {
                         "grade": _tq.grade,
                         "composite_score": _tq.composite_score,
                         "passed": _tq.passed,
+                        "config": {
+                            "grade_a_threshold": _tq_cfg.grade_a_threshold,
+                            "grade_b_threshold": _tq_cfg.grade_b_threshold,
+                            "grade_c_threshold": _tq_cfg.grade_c_threshold,
+                            "grade_c_min_confidence": _tq_cfg.grade_c_min_confidence,
+                            "allow_grade_c_in_crypto": _tq_cfg.allow_grade_c_in_crypto,
+                        },
                         "inputs": {
                             "sqs": _sqs,
                             "precision": _prec_s,
@@ -1149,12 +1421,32 @@ class ArgusPipeline:
 
                 # Step 7: gates (with adaptive confidence floor)
                 from src.mde.adaptive_confidence import compute_adaptive_floor
-                from src.core.constants import MIN_CONFIDENCE as _BASE_MIN_CONF
+                from src.core.constants import MIN_CONFIDENCE as _BASE_MIN_CONF, MIN_REWARD_RISK_RATIO as _BASE_MIN_RR
                 _adaptive = compute_adaptive_floor(
                     base_min_confidence=_BASE_MIN_CONF,
                     recent_trade_outcomes=getattr(self, '_recent_trade_outcomes', []),
                     engine=signal.engine if signal is not None else None,
                 )
+                _effective_min_conf = _adaptive.effective_min_confidence
+                if _profile_min_conf_override is not None:
+                    _effective_min_conf = max(_effective_min_conf, float(_profile_min_conf_override))
+
+                _effective_min_rr = _BASE_MIN_RR
+                if _profile_min_rr_override is not None:
+                    _effective_min_rr = max(0.50, float(_profile_min_rr_override))
+                if _liq_min_rr_override is not None:
+                    _effective_min_rr = max(0.50, float(_liq_min_rr_override))
+
+                _effective_crypto_min_rr = float(self._crypto_fee_cfg.min_rr)
+                if _profile_crypto_min_rr_override is not None:
+                    _effective_crypto_min_rr = max(0.50, float(_profile_crypto_min_rr_override))
+                if _liq_crypto_min_rr_override is not None:
+                    _effective_crypto_min_rr = max(0.50, float(_liq_crypto_min_rr_override))
+
+                _effective_crypto_min_tp_pct = float(self._crypto_fee_cfg.min_tp_pct)
+                if _liq_min_tp_pct_override is not None:
+                    _effective_crypto_min_tp_pct = max(0.0, float(_liq_min_tp_pct_override))
+
                 gate_result = evaluate_gates(
                     GateInput(
                         sentinel_score=sentinel_report.score,
@@ -1166,12 +1458,13 @@ class ArgusPipeline:
                             sentiment_score=fv.hermes_sentiment_score,
                             urgency=fv.hermes_urgency,
                         ),
-                        min_confidence=_adaptive.effective_min_confidence,
+                        min_confidence=_effective_min_conf,
+                        min_reward_risk=_effective_min_rr,
                         allow_crisis_override=crisis_override_active,
                         crypto_fee_mode=self._is_crypto_fee_mode(asset_class),
                         crypto_taker_fee_bps=self._crypto_fee_cfg.taker_fee_bps,
-                        crypto_min_rr=self._crypto_fee_cfg.min_rr,
-                        crypto_min_tp_pct=self._crypto_fee_cfg.min_tp_pct,
+                        crypto_min_rr=_effective_crypto_min_rr,
+                        crypto_min_tp_pct=_effective_crypto_min_tp_pct,
                         crypto_titan_min_edge=self._crypto_fee_cfg.titan_min_edge,
                     )
                 )
@@ -1227,6 +1520,10 @@ class ArgusPipeline:
                         dd_mult=1.0,
                         rsl_mult=1.0 if rsl_level < 2 else 0.5,
                         hermes_mult=1.0,
+                        base_risk_pct=self._sizing_cfg.base_risk_pct,
+                        min_risk_pct=self._sizing_cfg.min_risk_pct,
+                        max_risk_pct=self._sizing_cfg.max_risk_pct,
+                        max_position_size=self._sizing_cfg.max_position_size,
                     )
                 )
                 position_size_pct = float(size.position_size)
@@ -1493,8 +1790,8 @@ class ArgusPipeline:
             if elapsed < interval:
                 return
         try:
-            universe = self._sonar_scanner.discover_universe()
-            watchlist = self._sonar_scanner.scan(universe)
+            universe = self._sonar_scanner.discover_universe(as_of=now)
+            watchlist = self._sonar_scanner.scan(universe, as_of=now)
             self._sonar_watchlist = watchlist
             self._sonar_last_scan = now
             self._LOG.info(
@@ -2805,6 +3102,83 @@ class ArgusPipeline:
             return PrecisionConfig()
 
     @staticmethod
+    def _load_trade_quality_config() -> TradeQualityConfig:
+        """Load TradeQualityConfig from engines.yaml. Returns defaults if unavailable."""
+        try:
+            import yaml
+
+            engines_path = Path("config/engines.yaml")
+            if not engines_path.exists():
+                return TradeQualityConfig()
+            raw = yaml.safe_load(engines_path.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict):
+                return TradeQualityConfig()
+            engines = raw.get("engines", raw)
+            tq = engines.get("trade_quality", {})
+            if not isinstance(tq, dict):
+                return TradeQualityConfig()
+            return TradeQualityConfig(
+                grade_a_threshold=float(tq.get("grade_a_threshold", 0.80)),
+                grade_b_threshold=float(tq.get("grade_b_threshold", 0.65)),
+                grade_c_threshold=float(tq.get("grade_c_threshold", 0.50)),
+                grade_c_min_confidence=float(tq.get("grade_c_min_confidence", 0.85)),
+                allow_grade_c_in_crypto=bool(tq.get("allow_grade_c_in_crypto", False)),
+            )
+        except Exception:
+            return TradeQualityConfig()
+
+    @staticmethod
+    def _load_strategy_profiles_config(
+        *,
+        path: str | Path = "config/strategy_profiles.yaml",
+        enabled_override: bool | None = None,
+    ) -> dict[str, Any]:
+        """Load setup/side/volatility profile matrix from strategy_profiles.yaml."""
+        try:
+            import yaml
+
+            cfg_path = Path(path)
+            if not cfg_path.exists():
+                return {"enabled": bool(enabled_override) if enabled_override is not None else False}
+            raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict):
+                return {"enabled": bool(enabled_override) if enabled_override is not None else False}
+            node = raw.get("strategy_profiles", raw)
+            if not isinstance(node, dict):
+                return {"enabled": bool(enabled_override) if enabled_override is not None else False}
+            out = dict(node)
+            if enabled_override is None:
+                out["enabled"] = bool(out.get("enabled", False))
+            else:
+                out["enabled"] = bool(enabled_override)
+            out["config_path"] = str(cfg_path)
+            return out
+        except Exception:
+            return {"enabled": bool(enabled_override) if enabled_override is not None else False}
+
+    @staticmethod
+    def _load_liquidity_policy_config(*, path: str | Path = "config/high_liquidity_filters.yaml") -> dict[str, Any]:
+        """Load high-liquidity filter policy matrix from YAML."""
+        try:
+            import yaml
+
+            cfg_path = Path(path)
+            if not cfg_path.exists():
+                return {"enabled": False, "config_path": str(cfg_path)}
+            raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict):
+                return {"enabled": False, "config_path": str(cfg_path)}
+            node = raw.get("high_liquidity_filters", raw)
+            if not isinstance(node, dict):
+                return {"enabled": False, "config_path": str(cfg_path)}
+            out = dict(node)
+            out["enabled"] = bool(out.get("enabled", False))
+            out["config_path"] = str(cfg_path)
+            return out
+        except Exception:
+            return {"enabled": False, "config_path": str(path)}
+
+    @staticmethod
     def _init_exchange_client(evolve: bool) -> Any | None:
         """Initialize exchange client for live data.
 
@@ -2847,6 +3221,22 @@ class ArgusPipeline:
         except Exception as exc:
             logging.getLogger(__name__).warning("[DataSource] Failed to init: %s", exc)
             return None
+
+    def _init_regime_classifier(self) -> RuleBasedRegimeClassifier:
+        """Build regime classifier, wiring thresholds from config/regimes.yaml."""
+        rt = self.config.regime.thresholds
+        return RuleBasedRegimeClassifier(
+            trending_min_adx=float(rt.trending.get("adx_min", 32.0)),
+            trending_min_hurst=float(rt.trending.get("hurst_min", 0.58)),
+            trending_alignment_candles=int(rt.trending.get("alignment_candles", 20)),
+            ranging_max_adx=float(rt.ranging.get("adx_max", 32.0)),
+            ranging_max_hurst=float(rt.ranging.get("hurst_max", 0.50)),
+            volatile_atr_ratio=float(rt.volatile.get("atr_ratio_min", 1.4)),
+            volatile_vol_multiple=float(rt.volatile.get("vol_multiple", 1.5)),
+            crisis_price_drop_24h=float(rt.crisis.get("price_drop_24h", -0.08)),
+            crisis_vol_multiple=float(rt.crisis.get("vol_multiple", 3.0)),
+            crisis_depth_ratio=float(rt.crisis.get("depth_collapse", 0.30)),
+        )
 
     @staticmethod
     def _init_feature_builder() -> Any | None:
@@ -3098,6 +3488,16 @@ def main() -> None:
         help="Replay anchor time (UTC ISO-8601, e.g. 2024-01-01T00:10:00Z).",
     )
     parser.add_argument(
+        "--replay-start",
+        default=None,
+        help="Replay window start (UTC ISO-8601). Use with --replay-end.",
+    )
+    parser.add_argument(
+        "--replay-end",
+        default=None,
+        help="Replay window end (UTC ISO-8601). Use with --replay-start.",
+    )
+    parser.add_argument(
         "--forward-sim",
         action="store_true",
         default=False,
@@ -3197,6 +3597,23 @@ def main() -> None:
     parser.add_argument("--demo-24h", action="store_true", default=False, help="Run in 24/7 demo mode: loop indefinitely with heartbeat, auto log rotation, safe exception handling.")
     parser.add_argument("--orion", action="store_true", default=False, help="Enable ORION meta-orchestrator for dynamic engine weighting and risk posture.")
     parser.add_argument("--live-data", action="store_true", default=False, help="Use real market data from exchange API instead of mock random walks.")
+    parser.add_argument("--backtest-sonar", action="store_true", default=False, help="Backtest+replay only: enable SONAR dynamic universe scan from local replay data.")
+    parser.add_argument(
+        "--enable-strategy-profiles",
+        action="store_true",
+        default=False,
+        help="Enable setup/side/volatility profile overrides regardless of YAML enabled flag.",
+    )
+    parser.add_argument(
+        "--strategy-profiles-config",
+        default="config/strategy_profiles.yaml",
+        help="Path to strategy profile matrix YAML (default: config/strategy_profiles.yaml).",
+    )
+    parser.add_argument(
+        "--liquidity-policy-config",
+        default="config/high_liquidity_filters.yaml",
+        help="Path to high-liquidity filter policy YAML (default: config/high_liquidity_filters.yaml).",
+    )
     parser.add_argument("--timeframe", default="1h", help="Primary OHLCV timeframe for live data (e.g. 1m, 5m, 15m, 1h). Default: 1h.")
     parser.add_argument("--symbols", default=None, help="Comma-separated symbol override list (e.g. BTCUSDT,ETHUSDT,SOLUSDT).")
     parser.add_argument("--symbol-universe-size", type=int, choices=[5, 15], default=5, help="Default crypto universe size for live-data mode when --symbols is omitted.")
@@ -3366,20 +3783,23 @@ def main() -> None:
             print(f"[v25] bootstrap FAILED: {exc}")
             raise SystemExit(1) from exc
 
+    cycle_step_minutes = max(1, int(args.cycle_step_minutes))
     replay_now_ts: pd.Timestamp | None = None
     replay_now_dt: datetime | None = None
-    if args.replay_now:
-        try:
-            raw_iso = str(args.replay_now).replace("Z", "+00:00")
-            replay_now_dt = datetime.fromisoformat(raw_iso)
-            if replay_now_dt.tzinfo is None:
-                replay_now_dt = replay_now_dt.replace(tzinfo=timezone.utc)
-            else:
-                replay_now_dt = replay_now_dt.astimezone(timezone.utc)
-            replay_now_ts = cast(pd.Timestamp, pd.Timestamp(replay_now_dt))
-        except Exception as exc:  # noqa: BLE001
-            print(f"[replay] invalid --replay-now value: {args.replay_now!r} ({exc})")
-            raise SystemExit(2) from exc
+    replay_window_cycles: int | None = None
+    if (args.replay_start or args.replay_end) and str(args.mode).lower() != "backtest":
+        print("[replay] --replay-start/--replay-end are backtest-only flags.")
+        raise SystemExit(2)
+    try:
+        replay_now_ts, replay_now_dt, replay_window_cycles = resolve_replay_schedule(
+            replay_now=args.replay_now,
+            replay_start=args.replay_start,
+            replay_end=args.replay_end,
+            cycle_step_minutes=cycle_step_minutes,
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"[replay] invalid replay window arguments ({exc})")
+        raise SystemExit(2) from exc
 
     assets = [a.strip() for a in args.assets.split(",") if a.strip()]
     symbols_override: dict[str, list[str]] = {}
@@ -3410,15 +3830,27 @@ def main() -> None:
         risk_profile=str(args.risk_profile),
         allow_crisis=bool(args.allow_crisis),
         symbols_override=symbols_override,
+        enable_backtest_sonar=bool(args.backtest_sonar),
+        strategy_profiles_config_path=str(args.strategy_profiles_config),
+        strategy_profiles_enabled=(True if bool(args.enable_strategy_profiles) else None),
+        liquidity_policy_config_path=str(args.liquidity_policy_config),
         use_runtime_risk_config=bool(args.use_risk_config),
         runtime_risk_config_path=str(args.risk_config),
     )
     pipeline._primary_tf = str(args.timeframe)
     pipeline._paper_taker_fee = float(args.taker_fee)
     pipeline._paper_maker_fee = float(args.maker_fee)
+    if pipeline._sonar_scanner is not None:
+        pipeline._sonar_scanner.scan_timeframe = str(args.timeframe)
+        _sonar_binance_client = getattr(pipeline._sonar_scanner, "binance_client", None)
+        if _sonar_binance_client is not None and hasattr(_sonar_binance_client, "default_interval"):
+            setattr(_sonar_binance_client, "default_interval", str(args.timeframe))
 
-    # Apply --live-data flag
-    if args.live_data:
+    # Data mode visibility
+    if pipeline.data_factory.mode == "replay":
+        anchor = replay_now_ts.isoformat() if replay_now_ts is not None else "None"
+        print(f"[data] REPLAY — deterministic local OHLCV | timeframe={args.timeframe} | anchor={anchor}")
+    elif args.live_data:
         print(f"[data] LIVE — real {args.timeframe} klines from exchange API")
         if symbols_override.get("crypto"):
             print(f"[symbols] crypto universe={','.join(symbols_override['crypto'])}")
@@ -3427,6 +3859,17 @@ def main() -> None:
 
     if bool(args.use_risk_config) and args.mode in {"paper", "backtest"}:
         print(f"[risk] runtime overrides enabled | path={args.risk_config}")
+
+    if bool(args.backtest_sonar) and args.mode == "backtest":
+        status = "ENABLED" if pipeline._sonar_scanner is not None else "DISABLED"
+        print(f"[sonar] backtest mode {status}")
+
+    profile_status = "ENABLED" if bool(pipeline._strategy_profiles_cfg.get("enabled", False)) else "DISABLED"
+    profile_cfg_path = str(pipeline._strategy_profiles_cfg.get("config_path", args.strategy_profiles_config))
+    print(f"[profiles] strategy profiles {profile_status} | config={profile_cfg_path}")
+    liq_status = "ENABLED" if bool(pipeline._liquidity_policy_cfg.get("enabled", False)) else "DISABLED"
+    liq_cfg_path = str(pipeline._liquidity_policy_cfg.get("config_path", args.liquidity_policy_config))
+    print(f"[liquidity] high-liquidity policy {liq_status} | config={liq_cfg_path}")
 
     # Apply --orion flag
     if args.orion:
@@ -3437,6 +3880,11 @@ def main() -> None:
 
     default_cycles = 1 if args.mode == "backtest" else 5 if args.mode == "paper" else 1
     max_cycles = max(1, int(args.max_cycles if args.max_cycles is not None else default_cycles))
+    if replay_window_cycles is not None:
+        if args.max_cycles is None:
+            max_cycles = replay_window_cycles
+        else:
+            max_cycles = min(max_cycles, replay_window_cycles)
     if args.smoke:
         max_cycles = 50
     default_run_dir = "runs/paper_v2" if args.mode == "paper" else "runs/backtest_v25"
@@ -3490,7 +3938,6 @@ def main() -> None:
         f"run_dir={run_dir} replay_now={replay_now_ts.isoformat() if replay_now_ts is not None else 'None'}"
     )
 
-    cycle_step_minutes = max(1, int(args.cycle_step_minutes))
     hold_minutes = max(1, int(args.hold_minutes))
 
     def _parse_hold_grid_minutes(raw: Any) -> list[int]:

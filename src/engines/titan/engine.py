@@ -172,6 +172,22 @@ class TitanEngine:
         default_factory=dict, repr=False,
     )
 
+    # Diagnostic counters (no behavior change, just observability)
+    _diag: dict[str, int] = field(default_factory=lambda: {
+        "cont_long_calls": 0, "cont_short_calls": 0,
+        "cont_long_fail_adx": 0, "cont_long_fail_adx_rising": 0,
+        "cont_long_fail_ema": 0, "cont_long_fail_ma200": 0,
+        "cont_long_fail_structure": 0, "cont_long_fail_atr_pctl": 0,
+        "cont_long_fail_volume": 0, "cont_long_pass": 0,
+        "cont_short_fail_adx": 0, "cont_short_fail_adx_rising": 0,
+        "cont_short_fail_ema": 0, "cont_short_fail_ma200": 0,
+        "cont_short_fail_structure": 0, "cont_short_fail_atr_pctl": 0,
+        "cont_short_fail_volume": 0, "cont_short_pass": 0,
+        "pullback_fail": 0, "pullback_pass": 0,
+        "regime_reject": 0, "history_reject": 0,
+        "signal_produced": 0,
+    }, repr=False)
+
     def feed_candles(
         self,
         *,
@@ -201,10 +217,12 @@ class TitanEngine:
         Picks highest confidence. Short wins tie-break only.
         """
         if regime.regime != REGIME_TRENDING:
+            self._diag["regime_reject"] += 1
             return None
 
         history = self._candle_history.get(features.symbol)
         if history is None or len(history[0]) < 50:
+            self._diag["history_reject"] += 1
             return None
 
         highs, lows, closes = history
@@ -243,6 +261,7 @@ class TitanEngine:
         if trend_score > 0:
             best = self._apply_leverage_hint(best, trend_score)
 
+        self._diag["signal_produced"] += 1
         return best
 
     # ------------------------------------------------------------------
@@ -490,8 +509,10 @@ class TitanEngine:
 
         # Pullback entry
         if not self._check_pullback_entry(features, highs, lows, closes, bias):
+            self._diag["pullback_fail"] += 1
             return None
 
+        self._diag["pullback_pass"] += 1
         volume_bonus = _clamp((features.volume_ratio - 1.0) / 2.0, 0.0, 1.0)
         atr_pctl = features.atr_pctl if features.atr_pctl is not None else 0.0
         atr_bonus = _clamp(atr_pctl, 0.0, 1.0)
@@ -531,20 +552,26 @@ class TitanEngine:
 
         Returns (passed, structure_strength 0-1).
         """
+        self._diag["cont_long_calls"] += 1
+
         # 1) ADX > min_adx
         if features.adx_14 < self.min_adx:
+            self._diag["cont_long_fail_adx"] += 1
             return False, 0.0
 
         # 2) ADX rising
         if not self._check_adx_rising(highs, lows, closes):
+            self._diag["cont_long_fail_adx_rising"] += 1
             return False, 0.0
 
         # 3) EMA21 > EMA55
         if features.ema_21_vs_55 <= 0:
+            self._diag["cont_long_fail_ema"] += 1
             return False, 0.0
 
         # 4) Price > MA200
         if features.price_vs_ma200 <= 0:
+            self._diag["cont_long_fail_ma200"] += 1
             return False, 0.0
 
         # 5) HH/HL structure
@@ -559,22 +586,27 @@ class TitanEngine:
         )
 
         if len(swing_highs) < 2 or len(swing_lows) < 2:
+            self._diag["cont_long_fail_structure"] += 1
             return False, 0.0
 
         hh = swing_highs[-1].price > swing_highs[-2].price
         hl = swing_lows[-1].price > swing_lows[-2].price
         if not (hh and hl):
+            self._diag["cont_long_fail_structure"] += 1
             return False, 0.0
 
         # 6) ATR percentile
         atr_pctl = features.atr_pctl if features.atr_pctl is not None else 0.0
         if atr_pctl < self.min_atr_pctl:
+            self._diag["cont_long_fail_atr_pctl"] += 1
             return False, 0.0
 
         # 7) Volume expansion
         if features.volume_ratio < self.min_volume_expansion:
+            self._diag["cont_long_fail_volume"] += 1
             return False, 0.0
 
+        self._diag["cont_long_pass"] += 1
         strength = self._count_bullish_structure(swing_highs, swing_lows)
         norm_strength = _clamp(strength / 4.0, 0.0, 1.0)
 
@@ -588,16 +620,22 @@ class TitanEngine:
         closes: list[float],
     ) -> tuple[bool, float]:
         """6-condition trend confirmation for short CONTINUATION."""
+        self._diag["cont_short_calls"] += 1
+
         if features.adx_14 < self.min_adx:
+            self._diag["cont_short_fail_adx"] += 1
             return False, 0.0
 
         if not self._check_adx_rising(highs, lows, closes):
+            self._diag["cont_short_fail_adx_rising"] += 1
             return False, 0.0
 
         if features.ema_21_vs_55 >= 0:
+            self._diag["cont_short_fail_ema"] += 1
             return False, 0.0
 
         if features.price_vs_ma200 >= 0:
+            self._diag["cont_short_fail_ma200"] += 1
             return False, 0.0
 
         levels = detect_swing_levels(highs=highs, lows=lows, window=self.swing_window)
@@ -611,20 +649,25 @@ class TitanEngine:
         )
 
         if len(swing_highs) < 2 or len(swing_lows) < 2:
+            self._diag["cont_short_fail_structure"] += 1
             return False, 0.0
 
         ll = swing_lows[-1].price < swing_lows[-2].price
         lh = swing_highs[-1].price < swing_highs[-2].price
         if not (ll and lh):
+            self._diag["cont_short_fail_structure"] += 1
             return False, 0.0
 
         atr_pctl = features.atr_pctl if features.atr_pctl is not None else 0.0
         if atr_pctl < self.min_atr_pctl:
+            self._diag["cont_short_fail_atr_pctl"] += 1
             return False, 0.0
 
         if features.volume_ratio < self.min_volume_expansion:
+            self._diag["cont_short_fail_volume"] += 1
             return False, 0.0
 
+        self._diag["cont_short_pass"] += 1
         strength = self._count_bearish_structure(swing_highs, swing_lows)
         norm_strength = _clamp(strength / 4.0, 0.0, 1.0)
 

@@ -40,6 +40,8 @@ class SonarScore:
     volume_expansion: float     # Volume expansion normalized 0-100
     bias: str                   # "long" | "short" | "neutral"
     rank: int = 0
+    new_listing_boost: float = 0.0
+    listing_age_days: float | None = None
 
 
 @dataclass(frozen=True)
@@ -167,6 +169,8 @@ class SonarScanner:
 
     # Timing
     scan_interval_seconds: int = 900  # 15 min
+    scan_timeframe: str = "1h"
+    scan_ohlcv_limit: int = 100
 
     # Scoring weights
     w_adx: float = 0.25
@@ -174,27 +178,43 @@ class SonarScanner:
     w_structure: float = 0.25
     w_atr_pctl: float = 0.15
     w_volume: float = 0.15
+    max_new_listing_boost: float = 10.0
+    new_listing_window_days: int = 45
 
     # OHLCV cache: symbol -> (monotonic_ts, highs, lows, closes, volumes)
     _ohlcv_cache: dict[str, tuple[float, list[float], list[float], list[float], list[float]]] = field(
         default_factory=dict, repr=False,
     )
+    _listing_ts_map: dict[str, datetime] = field(default_factory=dict, repr=False)
 
     # ── Universe discovery ────────────────────────────────────────────
 
-    def discover_universe(self) -> list[str]:
+    def discover_universe(self, *, as_of: datetime | None = None) -> list[str]:
         """Fetch and merge perpetual symbols from Binance + BingX, ranked by volume.
 
         Returns top `universe_size` symbols sorted by 24h USDT volume descending.
         """
         volume_map: dict[str, float] = {}
 
+        listing_map: dict[str, datetime] = {}
+        as_of_utc = self._as_utc(as_of) if as_of is not None else None
+
         # Binance
         if self.binance_client is not None:
             try:
-                tickers = self.binance_client.fetch_24h_tickers()
-                info = self.binance_client.fetch_exchange_info()
-                valid_symbols = {s["symbol"] for s in info}
+                tickers = self._fetch_tickers(self.binance_client, as_of=as_of_utc)
+                info = self._fetch_exchange_info(self.binance_client, as_of=as_of_utc)
+                valid_symbols: set[str] = set()
+                for s in info:
+                    sym = str(s.get("symbol", ""))
+                    if not sym:
+                        continue
+                    listed_at = self._extract_listing_ts(s)
+                    if as_of_utc is not None and listed_at is not None and listed_at > as_of_utc:
+                        continue
+                    valid_symbols.add(sym)
+                    if listed_at is not None:
+                        listing_map[sym] = listed_at
                 for t in tickers:
                     sym = t["symbol"]
                     if sym in valid_symbols:
@@ -205,8 +225,18 @@ class SonarScanner:
         # BingX
         if self.bingx_client is not None:
             try:
-                bx_tickers = self.bingx_client.fetch_all_tickers()
-                bx_symbols = {s["symbol"] for s in self.bingx_client.fetch_all_symbols()}
+                bx_tickers = self._fetch_tickers(self.bingx_client, as_of=as_of_utc)
+                bx_symbols: set[str] = set()
+                for s in self._fetch_exchange_info(self.bingx_client, as_of=as_of_utc):
+                    sym = str(s.get("symbol", ""))
+                    if not sym:
+                        continue
+                    listed_at = self._extract_listing_ts(s)
+                    if as_of_utc is not None and listed_at is not None and listed_at > as_of_utc:
+                        continue
+                    bx_symbols.add(sym)
+                    if listed_at is not None:
+                        listing_map[sym] = listed_at
                 for t in bx_tickers:
                     sym = t["symbol"]
                     if sym in bx_symbols and sym.endswith("USDT"):
@@ -222,12 +252,13 @@ class SonarScanner:
         qualified.sort(key=lambda x: x[1], reverse=True)
 
         universe = [sym for sym, _ in qualified[:self.universe_size]]
+        self._listing_ts_map = {sym: ts for sym, ts in listing_map.items() if sym in universe}
         LOG.info("SONAR universe: %d qualified out of %d total", len(universe), len(volume_map))
         return universe
 
     # ── Scanning ──────────────────────────────────────────────────────
 
-    def scan(self, universe: list[str]) -> SonarWatchlist:
+    def scan(self, universe: list[str], *, as_of: datetime | None = None) -> SonarWatchlist:
         """Score top symbols and produce ranked watchlist.
 
         Only fetches OHLCV for top `ohlcv_fetch_limit` symbols (by position
@@ -239,13 +270,21 @@ class SonarScanner:
 
         scores: list[SonarScore] = []
         for symbol in candidates_to_score:
-            ohlcv = self._fetch_ohlcv_cached(symbol, now)
+            ohlcv = self._fetch_ohlcv_cached(symbol, now, as_of=as_of)
             if ohlcv is None:
                 continue
             highs, lows, closes, volumes = ohlcv
             if len(closes) < 30:
                 continue
-            score = self._score_symbol(symbol, highs, lows, closes, volumes)
+            score = self._score_symbol(
+                symbol,
+                highs,
+                lows,
+                closes,
+                volumes,
+                as_of=as_of,
+                listing_ts=self._listing_ts_map.get(symbol),
+            )
             scores.append(score)
 
         # Rank by trend_score descending
@@ -261,6 +300,8 @@ class SonarScanner:
                 volume_expansion=s.volume_expansion,
                 bias=s.bias,
                 rank=i + 1,
+                new_listing_boost=s.new_listing_boost,
+                listing_age_days=s.listing_age_days,
             )
             for i, s in enumerate(scores)
         ]
@@ -302,6 +343,9 @@ class SonarScanner:
         lows: list[float],
         closes: list[float],
         volumes: list[float],
+        *,
+        as_of: datetime | None = None,
+        listing_ts: datetime | None = None,
     ) -> SonarScore:
         """Compute TrendScore (0-100) for a single symbol."""
 
@@ -365,6 +409,17 @@ class SonarScanner:
             + self.w_atr_pctl * atr_percentile
             + self.w_volume * volume_expansion
         )
+        listing_age_days: float | None = None
+        new_listing_boost = 0.0
+        if listing_ts is not None:
+            ref_now = self._as_utc(as_of) if as_of is not None else datetime.now(timezone.utc)
+            listing_age_days = max(0.0, (ref_now - listing_ts).total_seconds() / 86400.0)
+            if listing_age_days <= float(self.new_listing_window_days):
+                freshness = 1.0 - (listing_age_days / max(1.0, float(self.new_listing_window_days)))
+                vol_factor = _clamp(volume_expansion / 100.0, 0.20, 1.00)
+                new_listing_boost = self.max_new_listing_boost * freshness * vol_factor
+
+        trend_score += new_listing_boost
         trend_score = _clamp(trend_score, 0.0, 100.0)
 
         return SonarScore(
@@ -376,6 +431,8 @@ class SonarScanner:
             atr_percentile=atr_percentile,
             volume_expansion=volume_expansion,
             bias=bias,
+            new_listing_boost=round(new_listing_boost, 4),
+            listing_age_days=round(listing_age_days, 4) if listing_age_days is not None else None,
         )
 
     def _compute_structure_score(
@@ -440,17 +497,24 @@ class SonarScanner:
     # ── OHLCV fetching with cache ─────────────────────────────────────
 
     def _fetch_ohlcv_cached(
-        self, symbol: str, now_mono: float,
+        self,
+        symbol: str,
+        now_mono: float,
+        *,
+        as_of: datetime | None = None,
     ) -> tuple[list[float], list[float], list[float], list[float]] | None:
         """Fetch 100-bar 1h OHLCV with simple TTL cache."""
-        cached = self._ohlcv_cache.get(symbol)
-        if cached is not None:
-            cached_at, h, l, c, v = cached
-            if (now_mono - cached_at) < self.scan_interval_seconds:
-                return h, l, c, v
+        # In deterministic replay scans (as_of provided), bypass TTL cache to
+        # avoid stale bars from future timestamps.
+        if as_of is None:
+            cached = self._ohlcv_cache.get(symbol)
+            if cached is not None:
+                cached_at, h, l, c, v = cached
+                if (now_mono - cached_at) < self.scan_interval_seconds:
+                    return h, l, c, v
 
         # Try Binance first, fallback to BingX
-        rows = self._fetch_ohlcv_raw(symbol)
+        rows = self._fetch_ohlcv_raw(symbol, as_of=as_of)
         if not rows:
             return None
 
@@ -459,15 +523,20 @@ class SonarScanner:
         closes = [float(r[4]) for r in rows]
         volumes = [float(r[5]) for r in rows]
 
-        self._ohlcv_cache[symbol] = (now_mono, highs, lows, closes, volumes)
+        if as_of is None:
+            self._ohlcv_cache[symbol] = (now_mono, highs, lows, closes, volumes)
         return highs, lows, closes, volumes
 
-    def _fetch_ohlcv_raw(self, symbol: str) -> list[list[Any]]:
+    def _fetch_ohlcv_raw(self, symbol: str, *, as_of: datetime | None = None) -> list[list[Any]]:
         """Fetch raw OHLCV from best available exchange."""
         if self.binance_client is not None:
             try:
-                rows = self.binance_client.fetch_ohlcv(
-                    symbol=symbol, timeframe="1h", limit=100,
+                rows = self._fetch_ohlcv_from_client(
+                    client=self.binance_client,
+                    symbol=symbol,
+                    timeframe=self.scan_timeframe,
+                    limit=self.scan_ohlcv_limit,
+                    as_of=as_of,
                 )
                 if rows:
                     return rows
@@ -476,12 +545,136 @@ class SonarScanner:
 
         if self.bingx_client is not None:
             try:
-                rows = self.bingx_client.fetch_ohlcv(
-                    symbol=symbol, timeframe="1h", limit=100,
+                rows = self._fetch_ohlcv_from_client(
+                    client=self.bingx_client,
+                    symbol=symbol,
+                    timeframe=self.scan_timeframe,
+                    limit=self.scan_ohlcv_limit,
+                    as_of=as_of,
                 )
                 if rows:
                     return rows
             except Exception:
                 pass
 
+        return []
+
+    @staticmethod
+    def _as_utc(value: datetime) -> datetime:
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+    @staticmethod
+    def _extract_listing_ts(item: dict[str, Any]) -> datetime | None:
+        for key in (
+            "listing_ts",
+            "listed_at",
+            "onboardDate",
+            "onboard_date",
+            "list_time",
+            "launch_time",
+            "first_trade_ts",
+        ):
+            raw = item.get(key)
+            if raw is None:
+                continue
+            # Unix epoch seconds / milliseconds
+            if isinstance(raw, (int, float)):
+                ts = float(raw)
+                if ts > 1e12:
+                    ts /= 1000.0
+                try:
+                    return datetime.fromtimestamp(ts, tz=timezone.utc)
+                except (TypeError, ValueError, OSError):
+                    continue
+            # ISO datetime / date
+            if isinstance(raw, str):
+                text = raw.strip()
+                if not text:
+                    continue
+                try:
+                    parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+                    if parsed.tzinfo is None:
+                        return parsed.replace(tzinfo=timezone.utc)
+                    return parsed.astimezone(timezone.utc)
+                except ValueError:
+                    # YYYY-MM-DD fallback
+                    try:
+                        parsed = datetime.strptime(text, "%Y-%m-%d")
+                        return parsed.replace(tzinfo=timezone.utc)
+                    except ValueError:
+                        continue
+        return None
+
+    @staticmethod
+    def _fetch_ohlcv_from_client(
+        *,
+        client: Any,
+        symbol: str,
+        timeframe: str,
+        limit: int,
+        as_of: datetime | None,
+    ) -> list[list[Any]]:
+        if as_of is not None:
+            try:
+                return client.fetch_ohlcv(symbol=symbol, timeframe=timeframe, limit=limit, now=as_of)
+            except TypeError:
+                pass
+        return client.fetch_ohlcv(symbol=symbol, timeframe=timeframe, limit=limit)
+
+    @staticmethod
+    def _fetch_exchange_info(client: Any, *, as_of: datetime | None) -> list[dict[str, Any]]:
+        if client is None:
+            return []
+        if hasattr(client, "fetch_exchange_info"):
+            if as_of is not None:
+                try:
+                    data = client.fetch_exchange_info(as_of=as_of)
+                    if isinstance(data, list):
+                        return [x for x in data if isinstance(x, dict)]
+                except TypeError:
+                    pass
+            data = client.fetch_exchange_info()
+            if isinstance(data, list):
+                return [x for x in data if isinstance(x, dict)]
+        if hasattr(client, "fetch_all_symbols"):
+            if as_of is not None:
+                try:
+                    data = client.fetch_all_symbols(as_of=as_of)
+                    if isinstance(data, list):
+                        return [x for x in data if isinstance(x, dict)]
+                except TypeError:
+                    pass
+            data = client.fetch_all_symbols()
+            if isinstance(data, list):
+                return [x for x in data if isinstance(x, dict)]
+        return []
+
+    @staticmethod
+    def _fetch_tickers(client: Any, *, as_of: datetime | None) -> list[dict[str, Any]]:
+        if client is None:
+            return []
+        if hasattr(client, "fetch_24h_tickers"):
+            if as_of is not None:
+                try:
+                    data = client.fetch_24h_tickers(as_of=as_of)
+                    if isinstance(data, list):
+                        return [x for x in data if isinstance(x, dict)]
+                except TypeError:
+                    pass
+            data = client.fetch_24h_tickers()
+            if isinstance(data, list):
+                return [x for x in data if isinstance(x, dict)]
+        if hasattr(client, "fetch_all_tickers"):
+            if as_of is not None:
+                try:
+                    data = client.fetch_all_tickers(as_of=as_of)
+                    if isinstance(data, list):
+                        return [x for x in data if isinstance(x, dict)]
+                except TypeError:
+                    pass
+            data = client.fetch_all_tickers()
+            if isinstance(data, list):
+                return [x for x in data if isinstance(x, dict)]
         return []

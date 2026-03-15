@@ -4,15 +4,16 @@ regime:
 
   thresholds:
     trending:
-      adx_min: 25
+      adx_min: 32
+      hurst_min: 0.58
       alignment_candles: 20
     ranging:
-      adx_max: 20
-      hurst_max: 0.45
+      adx_max: 32
+      hurst_max: 0.50
       bb_period: 20
     volatile:
-      atr_ratio_min: 1.8
-      vol_multiple: 2.0
+      atr_ratio_min: 1.4
+      vol_multiple: 1.5
     crisis:
       price_drop_24h: -0.08
       vol_multiple: 3.0

@@ -37,14 +37,15 @@ class TradeQualityResult:
     reason: str
 
 
-# Grade thresholds
-_GRADE_A = 0.80
-_GRADE_B = 0.65
-_GRADE_C = 0.50
-# Below C → Grade D
+@dataclass(frozen=True)
+class TradeQualityConfig:
+    """Configurable thresholds and pass rules for trade quality grading."""
 
-# Confidence required for Grade C exception
-_GRADE_C_MIN_CONFIDENCE = 0.85
+    grade_a_threshold: float = 0.80
+    grade_b_threshold: float = 0.65
+    grade_c_threshold: float = 0.50
+    grade_c_min_confidence: float = 0.85
+    allow_grade_c_in_crypto: bool = False
 
 
 def _clamp(value: float, low: float, high: float) -> float:
@@ -52,7 +53,11 @@ def _clamp(value: float, low: float, high: float) -> float:
 
 
 def classify_trade_quality(
-    inp: TradeQualityInput, *, engine: str = "", crypto_fee_mode: bool = False,
+    inp: TradeQualityInput,
+    *,
+    engine: str = "",
+    crypto_fee_mode: bool = False,
+    config: TradeQualityConfig | None = None,
 ) -> TradeQualityResult:
     """Classify trade into A/B/C/D based on weighted composite of all filter scores.
 
@@ -64,6 +69,7 @@ def classify_trade_quality(
     - Final confidence: 0.10
     - Reward/risk ratio: 0.10 (normalized to 0-1 by dividing by 4.0)
     """
+    cfg = config or TradeQualityConfig()
     rr_normalized = _clamp(inp.reward_risk_ratio / 4.0, 0.0, 1.0)
 
     composite = (
@@ -77,20 +83,30 @@ def classify_trade_quality(
     composite = _clamp(composite, 0.0, 1.0)
 
     # Assign grade
-    if composite >= _GRADE_A:
+    if composite >= cfg.grade_a_threshold:
         grade = "A"
-    elif composite >= _GRADE_B:
+    elif composite >= cfg.grade_b_threshold:
         grade = "B"
-    elif composite >= _GRADE_C:
+    elif composite >= cfg.grade_c_threshold:
         grade = "C"
     else:
         grade = "D"
 
-    # Crypto fee mode: only A/B pass, C always rejected
+    # Crypto fee mode: A/B pass; C can be conditionally allowed by config.
     if crypto_fee_mode:
         if grade in ("A", "B"):
             passed = True
             reason = f"trade_quality_{grade} composite={composite:.3f} [crypto]"
+        elif (
+            grade == "C"
+            and bool(cfg.allow_grade_c_in_crypto)
+            and inp.final_confidence >= cfg.grade_c_min_confidence
+        ):
+            passed = True
+            reason = (
+                "trade_quality_C_exception_crypto "
+                f"composite={composite:.3f} conf={inp.final_confidence:.3f}>={cfg.grade_c_min_confidence:.2f}"
+            )
         else:
             passed = False
             reason = f"trade_quality_{grade}_reject_crypto composite={composite:.3f}"
@@ -105,13 +121,19 @@ def classify_trade_quality(
     if grade in ("A", "B"):
         passed = True
         reason = f"trade_quality_{grade} composite={composite:.3f}"
-    elif grade == "C" and inp.final_confidence >= _GRADE_C_MIN_CONFIDENCE:
+    elif grade == "C" and inp.final_confidence >= cfg.grade_c_min_confidence:
         passed = True
-        reason = f"trade_quality_C_exception composite={composite:.3f} conf={inp.final_confidence:.3f}>=0.85"
+        reason = (
+            f"trade_quality_C_exception composite={composite:.3f} "
+            f"conf={inp.final_confidence:.3f}>={cfg.grade_c_min_confidence:.2f}"
+        )
     else:
         passed = False
         if grade == "C":
-            reason = f"trade_quality_C_reject composite={composite:.3f} conf={inp.final_confidence:.3f}<0.85"
+            reason = (
+                f"trade_quality_C_reject composite={composite:.3f} "
+                f"conf={inp.final_confidence:.3f}<{cfg.grade_c_min_confidence:.2f}"
+            )
         else:
             reason = f"trade_quality_D_reject composite={composite:.3f}"
 

@@ -1,0 +1,50 @@
+high_liquidity_filters:
+  enabled: true
+  target_symbols:
+    - BTCUSDT
+    - ETHUSDT
+  policies:
+    "1h":
+      defaults:
+        precision:
+          min_grade: "D"
+          min_score: 0.45
+        confluence:
+          min_factors: 3
+          min_score: 0.50
+        risk:
+          min_rr: 2.0
+          crypto_min_rr: 2.1
+          min_tp_pct: 0.010
+        trade_quality:
+          grade_a_threshold: 0.80
+          grade_b_threshold: 0.65
+          grade_c_threshold: 0.50
+          grade_c_min_confidence: 0.85
+          allow_grade_c_in_crypto: false
+      sides:
+        short:
+          risk:
+            min_rr: 2.1
+            crypto_min_rr: 2.2
+    "15m":
+      defaults:
+        precision:
+          min_grade: "C"
+          min_score: 0.5
+        confluence:
+          min_factors: 4
+          min_score: 0.55
+        risk:
+          min_rr: 2.2
+          crypto_min_rr: 2.3
+          min_tp_pct: 0.012
+        trade_quality:
+          grade_a_threshold: 0.82
+          grade_b_threshold: 0.67
+          grade_c_threshold: 0.52
+          grade_c_min_confidence: 0.85
+          allow_grade_c_in_crypto: false
+      engines:
+        HYDRA:
+          mode: "off"

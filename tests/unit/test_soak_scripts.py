@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -60,8 +63,34 @@ while alive:
     env["ARGUS_STARTUP_WAIT_SEC"] = "1"
     env["SOAK_SMOKE_WAIT_SEC"] = "1"
 
+    if os.name == "nt":
+        powershell = shutil.which("powershell") or shutil.which("pwsh")
+        if powershell is None:
+            pytest.skip("PowerShell is required for soak smoke test on Windows")
+        cmd = [
+            powershell,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(REPO_ROOT / "Scripts/win_soak_smoke.ps1"),
+            "-Strategy",
+            "council",
+            "-RunDir",
+            str(run_dir),
+            "-WaitSec",
+            "1",
+        ]
+        ok_marker = "[win_soak_smoke] OK"
+    else:
+        bash = shutil.which("bash")
+        if bash is None:
+            pytest.skip("bash is required for soak smoke test")
+        cmd = [bash, str(REPO_ROOT / "Scripts/soak_smoke.sh"), "council"]
+        ok_marker = "[soak_smoke] OK"
+
     proc = subprocess.run(
-        ["bash", str(REPO_ROOT / "Scripts/soak_smoke.sh"), "council"],
+        cmd,
         cwd=str(REPO_ROOT),
         env=env,
         capture_output=True,
@@ -70,6 +99,6 @@ while alive:
     )
 
     assert proc.returncode == 0, proc.stdout + "\n" + proc.stderr
-    assert "[soak_smoke] OK" in proc.stdout
+    assert ok_marker in proc.stdout
     assert (run_dir / "daemon.log").exists()
     assert not (run_dir / "daemon.pid").exists()

@@ -110,6 +110,8 @@ class TitanConfig(BaseModel):
     min_adx: float = 25.0
     min_confidence: float = 0.55
     max_concurrent: int = 2
+    continuation_min_volume: float = 1.2
+    adx_rising_bars: int = 3
     trend_follow: dict[str, Any] = Field(default_factory=dict)
     breakout: dict[str, Any] = Field(default_factory=dict)
     exit_system: TitanExitConfig = Field(default_factory=TitanExitConfig)
@@ -161,12 +163,22 @@ class AtlasConfig(BaseModel):
     crisis_mult: float = 0.0
 
 
+class ConfluenceFilterConfig(BaseModel):
+    enabled: bool = True
+    min_factors_required: int = 4
+    min_confluence_score: float = 0.60
+    counter_trend_penalty: float = 0.15
+
+
 class EnginesConfig(BaseModel):
     titan: TitanConfig = Field(default_factory=TitanConfig)
     nautilus: NautilusConfig = Field(default_factory=NautilusConfig)
     phoenix: PhoenixConfig = Field(default_factory=PhoenixConfig)
     hermes: HermesConfig = Field(default_factory=HermesConfig)
     atlas: AtlasConfig = Field(default_factory=AtlasConfig)
+    confluence_filter: ConfluenceFilterConfig = Field(
+        default_factory=ConfluenceFilterConfig
+    )
 
 
 # ── Risk Config ───────────────────────────────────────────────────
