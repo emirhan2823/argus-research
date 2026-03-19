@@ -28,7 +28,7 @@ DEFAULT_REGIME = REGIME_RANGING
 # ── Engines ───────────────────────────────────────────────────────
 ENGINE_TITAN = "TITAN"
 ENGINE_NAUTILUS = "NAUTILUS"
-ENGINE_PHOENIX = "PHOENIX"
+ENGINE_PHOENIX = "PHOENIX"  # DEPRECATED — quarantined, not instantiated in pipeline
 ENGINE_HERMES = "HERMES"
 ENGINE_HYDRA = "HYDRA"
 ENGINE_GEMINI = "GEMINI"

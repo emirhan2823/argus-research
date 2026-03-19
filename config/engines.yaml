@@ -16,6 +16,7 @@ engines:
       ema_slow: 55
       atr_trail_mult: 2.5
       min_volume_ratio: 1.0
+      pullback_atr_tolerance: 1.2
     breakout:
       donchian_period: 20
       volume_spike: 1.5
@@ -78,6 +79,8 @@ engines:
       first_close_pct: 0.50
       trail_remaining: true
 
+  # QUARANTINED — PHOENIX engine not instantiated in pipeline (2026-03-15)
+  # See Docs/argus_refactor/phoenix_quarantine.md
   phoenix:
     active_regimes: ["TRENDING", "RANGING", "VOLATILE"]
     min_confidence: 0.60

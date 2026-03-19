@@ -151,15 +151,15 @@ class TitanEngine:
     atr_expansion_pctl: float = 0.65
 
     # --- CONTINUATION setup: trend confirmation ---
-    min_adx: float = 22.0
-    adx_rising_bars: int = 3
+    min_adx: float = 35.0  # YAML single source of truth (config/engines.yaml)
+    adx_rising_bars: int = 1  # YAML single source of truth
     min_atr_pctl: float = 0.55
-    min_volume_expansion: float = 1.2
+    min_volume_expansion: float = 0.8  # YAML single source of truth
 
     # --- Shared ---
     swing_window: int = 5
     breakdown_volume_mult: float = 1.5
-    pullback_atr_tolerance: float = 0.5
+    pullback_atr_tolerance: float = 1.2  # YAML single source of truth
 
     # --- Risk ---
     target_rr: float = 3.0

@@ -65,19 +65,41 @@ class DaemonMetrics:
         self.decisions_log = run_dir / "decisions.jsonl"
         self.heartbeat_path = run_dir / "heartbeat.json"
         self.metrics_path = run_dir / "metrics.json"
+        # Engine-level monitoring
+        self.engine_signals: dict[str, int] = {}
+        self.engine_fills: dict[str, int] = {}
+        self.engine_rejects: dict[str, int] = {}
+        self.regime_activity: dict[str, int] = {}
+        self.rejection_reasons: dict[str, int] = {}
+        self.engine_pnl: dict[str, float] = {}
 
     def record_cycle(self, outputs: list[dict], elapsed: float) -> None:
         self.cycles += 1
         self.last_cycle_time = elapsed
         for out in outputs:
             action = out.get("action", "")
+            engine = out.get("engine", "UNKNOWN")
+            regime = out.get("v6_regime", out.get("regime", "UNKNOWN"))
+            reason = out.get("reason", "")
+
             if action == "fill":
                 self.trades_filled += 1
                 self.signals_generated += 1
+                self.engine_fills[engine] = self.engine_fills.get(engine, 0) + 1
+                pnl = float(out.get("pnl_pct", 0))
+                self.engine_pnl[engine] = self.engine_pnl.get(engine, 0.0) + pnl
             elif action == "reject":
                 self.trades_rejected += 1
+                self.engine_rejects[engine] = self.engine_rejects.get(engine, 0) + 1
+                self.rejection_reasons[reason] = self.rejection_reasons.get(reason, 0) + 1
             elif action in ("advisory", "signal"):
                 self.signals_generated += 1
+                self.engine_signals[engine] = self.engine_signals.get(engine, 0) + 1
+
+            # Track regime activity
+            if regime and regime != "UNKNOWN":
+                self.regime_activity[regime] = self.regime_activity.get(regime, 0) + 1
+
             # Log every decision
             with open(self.decisions_log, "a", encoding="utf-8") as f:
                 out["_cycle"] = self.cycles
@@ -114,6 +136,15 @@ class DaemonMetrics:
             "trades_rejected": self.trades_rejected,
             "errors": self.errors,
             "fill_rate": round(self.trades_filled / max(self.signals_generated, 1), 4),
+            # Engine-level monitoring
+            "engine_signals": dict(sorted(self.engine_signals.items())),
+            "engine_fills": dict(sorted(self.engine_fills.items())),
+            "engine_rejects": dict(sorted(self.engine_rejects.items())),
+            "engine_pnl": {k: round(v, 4) for k, v in sorted(self.engine_pnl.items())},
+            "regime_activity": dict(sorted(self.regime_activity.items())),
+            "top_rejection_reasons": dict(sorted(
+                self.rejection_reasons.items(), key=lambda x: x[1], reverse=True
+            )[:10]),
         })
 
 
@@ -233,12 +264,18 @@ def run_daemon(
 
             metrics.record_cycle(outputs, elapsed)
 
-            # Log summary
+            # Log summary with engine breakdown
             fills = sum(1 for o in outputs if o.get("action") == "fill")
             rejects = sum(1 for o in outputs if o.get("action") == "reject")
+            advisories = [o for o in outputs if o.get("action") in ("advisory", "signal")]
+            engine_summary = {}
+            for o in advisories:
+                eng = o.get("engine", "?")
+                engine_summary[eng] = engine_summary.get(eng, 0) + 1
+            eng_str = " ".join(f"{k}={v}" for k, v in sorted(engine_summary.items())) if engine_summary else "none"
             LOG.info(
-                "[Cycle %d] Done in %.1fs | signals=%d fills=%d rejects=%d",
-                cycle, elapsed, len(outputs), fills, rejects,
+                "[Cycle %d] Done in %.1fs | signals=%d fills=%d rejects=%d | engines: %s",
+                cycle, elapsed, len(outputs), fills, rejects, eng_str,
             )
 
             # Post-trade reflection (learning)

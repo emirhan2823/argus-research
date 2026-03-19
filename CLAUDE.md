@@ -84,3 +84,32 @@ For audit findings, profitability analysis, and experiment history:
 - `docs/argus-audit/current-state.md` — validated findings, open issues, architecture notes
 - `docs/argus-audit/profitability-findings.md` — scenario-specific performance analysis
 - `docs/argus-audit/experiment-log.md` — experiment history with results and interpretations
+
+## Knowledge Base (Second Brain)
+
+Persistent project knowledge lives in the Obsidian vault at `E:/vault/`.
+
+### MCP Tools (configured in `.vscode/mcp.json`)
+- `obsidian-vault` — read/list vault notes via mcp-obsidian
+- `smart-connections` — semantic search across vault
+- `qmd` — hybrid search (BM25 + vector) via `@tobilu/qmd`
+
+### Vault Skills (in `.claude/skills/`)
+- `/vault-search` — search vault by topic or tag
+- `/vault-write` — create/update atomic notes
+- `/brain-ingest` — ingest raw content (meeting notes, transcripts, URLs) into atomic vault notes
+- `/vault-ingest` — same as brain-ingest, alternative entry
+
+### Key Vault Notes
+- `1-Projects/Project - argus-terminal.md` — project hub
+- `2-Areas/Signal pipeline terminal 9 asama.md` — pipeline architecture
+- `3-Resources/Engine roster terminal 8 engine.md` — engine reference
+- `2-Areas/Config binding durumu terminal vs core.md` — config status
+- `2-Areas/Paper live execution gap.md` — known execution gaps
+
+### Memory Rules
+- MEMORY.md at vault root — max 200 lines, auto-updated
+- Before creating knowledge in MEMORY.md, check if a vault note already exists
+- Prefer vault notes for persistent knowledge; use CLAUDE.md only for rules/instructions
+- Every checkpoint/milestone → update vault with atomic notes
+- Hallucination prevention: NEVER invent facts, only use provided info or vault content

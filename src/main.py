@@ -26,7 +26,7 @@ if __package__ in (None, ""):
 
 from src.core.clock import Clock
 from src.core.config import load_config
-from src.core.constants import ENGINE_AEGEAN, ENGINE_HERMES, ENGINE_HYDRA, ENGINE_NAUTILUS, ENGINE_PHOENIX, ENGINE_POSEIDON, ENGINE_TITAN, REGIME_CRISIS, REGIME_TO_ENGINE
+from src.core.constants import ENGINE_AEGEAN, ENGINE_HERMES, ENGINE_HYDRA, ENGINE_NAUTILUS, ENGINE_POSEIDON, ENGINE_TITAN, REGIME_CRISIS, REGIME_TO_ENGINE
 from src.core.events import EventBus, EventType
 from src.core.types import Decision, EngineSignal, FeatureVector, RegimeState, TelemetryEvent
 from src.data.data_factory import DataFactory
@@ -36,7 +36,7 @@ from src.engines.hermes.engine import HermesEngine
 from src.engines.aegean.engine import AegeanEngine
 from src.engines.hydra.engine import HydraEngine
 from src.engines.nautilus.engine import NautilusEngine
-from src.engines.phoenix.engine import PhoenixEngine
+# PhoenixEngine import removed — PHOENIX quarantined (see Docs/argus_refactor/phoenix_quarantine.md)
 from src.engines.poseidon.engine import PoseidonEngine
 from src.engines.titan.engine import TitanEngine
 from src.execution.executor import Executor
@@ -332,14 +332,96 @@ class ArgusPipeline:
             crypto_mr_max_atr_pctl=self._crypto_fee_cfg.mr_max_atr_pctl,
         )
 
-        self.hermes_engine = HermesEngine()
-        self.nautilus_engine = NautilusEngine()
-        self.aegean_engine = AegeanEngine()
-        self.poseidon_engine = PoseidonEngine()
+        # ── Engine instantiation (config-driven) ─────────────────────
+        _hermes_cfg = self.config.engines.hermes
+        self.hermes_engine = HermesEngine(
+            min_confidence=_hermes_cfg.min_confidence,
+        )
+
+        _naut_cfg = self.config.engines.nautilus
+        self.nautilus_engine = NautilusEngine(
+            max_adx=_naut_cfg.max_adx,
+            min_confidence=_naut_cfg.min_confidence,
+            bb_entry_threshold=_naut_cfg.bb_reversion.get("entry_threshold", 0.15),
+            rsi_oversold=_naut_cfg.bb_reversion.get("rsi_oversold", 35.0),
+            rsi_overbought=_naut_cfg.bb_reversion.get("rsi_overbought", 65.0),
+        )
+
+        _aeg_cfg = self.config.engines.aegean
+        self.aegean_engine = AegeanEngine(
+            min_confidence=_aeg_cfg.min_confidence,
+            htf_ema_period=_aeg_cfg.mtf_trend_filter.get("htf_ema_period", 200),
+        )
+
+        _pos_cfg = self.config.engines.poseidon
+        self.poseidon_engine = PoseidonEngine(
+            min_confidence=_pos_cfg.min_confidence,
+            max_hold_bars=_pos_cfg.max_hold_bars,
+            atr_stop_mult=_pos_cfg.atr_stop_mult,
+            bb_long_threshold=_pos_cfg.bb_long_threshold,
+            bb_short_threshold=_pos_cfg.bb_short_threshold,
+            rsi_oversold=_pos_cfg.rsi_oversold,
+            rsi_overbought=_pos_cfg.rsi_overbought,
+            cci_oversold=_pos_cfg.cci_oversold,
+            cci_overbought=_pos_cfg.cci_overbought,
+            willr_oversold=_pos_cfg.willr_oversold,
+            willr_overbought=_pos_cfg.willr_overbought,
+            vwap_long_threshold=_pos_cfg.vwap_long_threshold,
+            vwap_short_threshold=_pos_cfg.vwap_short_threshold,
+            cmf_long_threshold=_pos_cfg.cmf_long_threshold,
+            cmf_short_threshold=_pos_cfg.cmf_short_threshold,
+            wt_n1=_pos_cfg.wt_n1,
+            wt_n2=_pos_cfg.wt_n2,
+            wt_ob=_pos_cfg.wt_ob,
+            wt_os=_pos_cfg.wt_os,
+            harsi_length=_pos_cfg.harsi_length,
+            harsi_smoothing=_pos_cfg.harsi_smoothing,
+            harsi_ob=_pos_cfg.harsi_ob,
+            harsi_ob_extreme=_pos_cfg.harsi_ob_extreme,
+            harsi_os=_pos_cfg.harsi_os,
+            harsi_os_extreme=_pos_cfg.harsi_os_extreme,
+            entropy_period=_pos_cfg.entropy_period,
+            entropy_smooth=_pos_cfg.entropy_smooth,
+            entropy_bins=_pos_cfg.entropy_bins,
+            entropy_atr_period=_pos_cfg.entropy_atr_period,
+            entropy_atr_base=_pos_cfg.entropy_atr_base,
+            entropy_atr_max=_pos_cfg.entropy_atr_max,
+            entropy_filter_weight=_pos_cfg.entropy_filter_weight,
+            strong_threshold=_pos_cfg.strong_threshold,
+            normal_threshold=_pos_cfg.normal_threshold,
+            weak_threshold=_pos_cfg.weak_threshold,
+            consortium_alpha=_pos_cfg.consortium_alpha,
+        )
+
         _titan_cfg = self.config.engines.titan
+        _titan_tf = _titan_cfg.trend_follow
         self.titan_engine = TitanEngine(
-            min_volume_expansion=_titan_cfg.continuation_min_volume,
+            rsi_exhaustion_high=float(_titan_tf.get("rsi_exhaustion_high", 70.0)),
+            rsi_exhaustion_low=float(_titan_tf.get("rsi_exhaustion_low", 30.0)),
+            min_adx=_titan_cfg.min_adx,
             adx_rising_bars=_titan_cfg.adx_rising_bars,
+            min_volume_expansion=_titan_cfg.continuation_min_volume,
+            atr_trail_mult=float(_titan_tf.get("atr_trail_mult", 2.5)),
+            min_confidence=_titan_cfg.min_confidence,
+            pullback_atr_tolerance=float(_titan_tf.get("pullback_atr_tolerance", 1.2)),
+        )
+
+        _hyd_cfg = self.config.engines.hydra
+        _hyd_scalp = _hyd_cfg.scalp
+        _hyd_targets = _hyd_cfg.targets
+        self.hydra_engine = HydraEngine(
+            min_confidence=_hyd_cfg.min_confidence,
+            max_concurrent=_hyd_cfg.max_concurrent,
+            adx_max=float(_hyd_scalp.get("adx_max", 25.0)),
+            rsi_oversold=float(_hyd_scalp.get("rsi_oversold", 35.0)),
+            rsi_overbought=float(_hyd_scalp.get("rsi_overbought", 65.0)),
+            bb_std=float(_hyd_scalp.get("bb_std", 2.0)),
+            obi_threshold=float(_hyd_scalp.get("obi_threshold", 0.15)),
+            volume_delta_periods=int(_hyd_scalp.get("volume_delta_periods", 3)),
+            min_volume_ratio=float(_hyd_scalp.get("min_volume_ratio", 0.8)),
+            sl_atr_mult=float(_hyd_targets.get("sl_atr_mult", 1.5)),
+            sl_fixed_pct=float(_hyd_targets.get("sl_fixed_pct", 0.003)),
+            tp_fixed_pct=float(_hyd_targets.get("tp_fixed_pct", 0.006)),
         )
 
         # SONAR universe scanner
@@ -379,7 +461,7 @@ class ArgusPipeline:
             engines={
                 "TITAN": self.titan_engine,
                 "NAUTILUS": self.nautilus_engine,
-                "HYDRA": HydraEngine(),
+                "HYDRA": self.hydra_engine,
                 "HERMES": self.hermes_engine,
                 "AEGEAN": self.aegean_engine,
                 "POSEIDON": self.poseidon_engine,
@@ -1273,7 +1355,7 @@ class ArgusPipeline:
                     from src.mde.confluence_filter import ConfluenceConfig, evaluate_confluence
                     # Mean-reversion engines (NAUTILUS, HYDRA, PHOENIX) get relaxed
                     # confluence since trend-based factors conflict with their strategies
-                    if signal.engine in (ENGINE_NAUTILUS, ENGINE_HYDRA, ENGINE_PHOENIX, ENGINE_AEGEAN, ENGINE_POSEIDON):
+                    if signal.engine in (ENGINE_NAUTILUS, ENGINE_HYDRA, ENGINE_AEGEAN, ENGINE_POSEIDON):
                         _cf_config = ConfluenceConfig(
                             min_factors_required=2,
                             min_confluence_score=0.35,
@@ -3614,6 +3696,22 @@ def main() -> None:
         default="config/high_liquidity_filters.yaml",
         help="Path to high-liquidity filter policy YAML (default: config/high_liquidity_filters.yaml).",
     )
+    parser.add_argument(
+        "--force-engine",
+        default=None,
+        help="Backtest-only: force single engine isolation (e.g. POSEIDON). Overrides orchestrator to enable only this engine.",
+    )
+    parser.add_argument(
+        "--force-engines",
+        default=None,
+        help="Backtest-only: force multiple engines (comma-separated, e.g. AEGEAN,TITAN). Overrides orchestrator.",
+    )
+    parser.add_argument(
+        "--no-compound",
+        action="store_true",
+        default=False,
+        help="Backtest-only: use fixed position sizing (no equity compounding).",
+    )
     parser.add_argument("--timeframe", default="1h", help="Primary OHLCV timeframe for live data (e.g. 1m, 5m, 15m, 1h). Default: 1h.")
     parser.add_argument("--symbols", default=None, help="Comma-separated symbol override list (e.g. BTCUSDT,ETHUSDT,SOLUSDT).")
     parser.add_argument("--symbol-universe-size", type=int, choices=[5, 15], default=5, help="Default crypto universe size for live-data mode when --symbols is omitted.")
@@ -3837,6 +3935,67 @@ def main() -> None:
         use_runtime_risk_config=bool(args.use_risk_config),
         runtime_risk_config_path=str(args.risk_config),
     )
+    # ── Force single engine isolation (backtest only) ──────────────
+    if args.force_engine is not None:
+        if str(args.mode).lower() != "backtest":
+            print("[force-engine] --force-engine is backtest-only. Use --mode backtest.")
+            raise SystemExit(2)
+        _force_engine_name = str(args.force_engine).upper()
+        _all_engine_names = {"TITAN", "POSEIDON", "NAUTILUS", "AEGEAN", "HYDRA", "HERMES", "GEMINI"}
+        if _force_engine_name not in _all_engine_names:
+            print(f"[force-engine] Unknown engine: {_force_engine_name}. Available: {sorted(_all_engine_names)}")
+            raise SystemExit(2)
+        _disabled = sorted(_all_engine_names - {_force_engine_name})
+        from src.regime.engine_orchestrator import OrchestratorDecision, RiskOverrides
+        _original_decide = pipeline._engine_orchestrator.decide
+
+        def _forced_decide(**kwargs: Any) -> OrchestratorDecision:
+            original = _original_decide(**kwargs)
+            return OrchestratorDecision(
+                enabled_engines=[_force_engine_name],
+                disabled_engines=_disabled,
+                risk_overrides=original.risk_overrides,
+                regime_used=original.regime_used,
+                verified_trend=original.verified_trend,
+                reason=f"force_engine_override_{_force_engine_name}",
+                confirmation_only_engines=frozenset(),
+                trend_score=original.trend_score,
+            )
+
+        pipeline._engine_orchestrator.decide = _forced_decide
+        print(f"[force-engine] Orchestrator overridden: only {_force_engine_name} enabled")
+
+    # ── Force multiple engines (backtest only) ──────────────
+    if args.force_engines is not None and args.force_engine is None:
+        if str(args.mode).lower() != "backtest":
+            print("[force-engines] --force-engines is backtest-only. Use --mode backtest.")
+            raise SystemExit(2)
+        _force_engine_names = [e.strip().upper() for e in str(args.force_engines).split(",") if e.strip()]
+        _all_engine_names_multi = {"TITAN", "POSEIDON", "NAUTILUS", "AEGEAN", "HYDRA", "HERMES", "GEMINI"}
+        _bad = [e for e in _force_engine_names if e not in _all_engine_names_multi]
+        if _bad:
+            print(f"[force-engines] Unknown engine(s): {_bad}. Available: {sorted(_all_engine_names_multi)}")
+            raise SystemExit(2)
+        _disabled_multi = sorted(_all_engine_names_multi - set(_force_engine_names))
+        from src.regime.engine_orchestrator import OrchestratorDecision as _OD2
+        _original_decide_multi = pipeline._engine_orchestrator.decide
+
+        def _forced_decide_multi(**kwargs: Any) -> _OD2:
+            original = _original_decide_multi(**kwargs)
+            return _OD2(
+                enabled_engines=list(_force_engine_names),
+                disabled_engines=_disabled_multi,
+                risk_overrides=original.risk_overrides,
+                regime_used=original.regime_used,
+                verified_trend=original.verified_trend,
+                reason=f"force_engines_override_{'_'.join(_force_engine_names)}",
+                confirmation_only_engines=frozenset(),
+                trend_score=original.trend_score,
+            )
+
+        pipeline._engine_orchestrator.decide = _forced_decide_multi
+        print(f"[force-engines] Orchestrator overridden: {_force_engine_names} enabled (all standalone)")
+
     pipeline._primary_tf = str(args.timeframe)
     pipeline._paper_taker_fee = float(args.taker_fee)
     pipeline._paper_maker_fee = float(args.maker_fee)
@@ -3897,14 +4056,17 @@ def main() -> None:
     if args.mode == "backtest":
         try:
             from src.backtest.backtest_simulator import BacktestSimulator
+            _bt_fixed = bool(getattr(args, "no_compound", False))
             bt_simulator = BacktestSimulator(
                 initial_balance=10_000.0,
                 default_fee_pct=float(args.taker_fee),
                 be_trigger_atr_multiple=1.5,
                 trail_pct=0.01,
                 max_concurrent_positions=3,
+                fixed_size=_bt_fixed,
             )
-            print(f"[bt] Stateful simulator v5 ON | balance=$10,000 | BE=1.5xATR | trail=1.0% | max_pos=3")
+            _compound_label = "FIXED (no compound)" if _bt_fixed else "COMPOUND"
+            print(f"[bt] Stateful simulator v5 ON | balance=$10,000 | sizing={_compound_label} | BE=1.5xATR | trail=1.0% | max_pos=3")
         except Exception as exc:
             print(f"[bt] Simulator init failed: {exc}")
 

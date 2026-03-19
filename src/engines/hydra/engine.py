@@ -30,7 +30,7 @@ class HydraEngine:
     """Scalp engine active in RANGING regime (low ADX, calm markets)."""
 
     # --- From config/engines.yaml hydra section ---
-    min_confidence: float = 0.55
+    min_confidence: float = 0.60  # YAML single source of truth (config/engines.yaml)
     max_concurrent: int = 5
     adx_max: float = 25.0
     rsi_oversold: float = 35.0

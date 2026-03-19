@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import Any, Optional
 
 from src.core.constants import (
-    ENGINE_PHOENIX,
+    ENGINE_TITAN,
     MIN_CONFIDENCE,
     MIN_NET_EXPECTED_RETURN,
     MIN_REWARD_RISK_RATIO,
@@ -100,8 +100,10 @@ def evaluate_gates(inp: GateInput) -> GateResult:
     # Gate 3: risk-switch level
     if inp.rsl_level >= 3:
         return GateResult(False, 3, "hold", "rsl_halt", snapshot)
-    if inp.rsl_level >= 2 and (inp.signal is not None and inp.signal.engine != ENGINE_PHOENIX):
-        return GateResult(False, 3, "hold", "rsl_defensive_only_phoenix", snapshot)
+    # RSL2 defensive mode: only TITAN allowed (lowest MaxDD, non-negative across scenarios).
+    # All other engines blocked to reduce fragility during elevated risk.
+    if inp.rsl_level >= 2 and (inp.signal is not None and inp.signal.engine != ENGINE_TITAN):
+        return GateResult(False, 3, "hold", "rsl2_defensive_only_titan", snapshot)
 
     # Gate 4: signal must exist
     if inp.signal is None:

@@ -1,4 +1,10 @@
-"""PHOENIX engine: carry/basis opportunities."""
+"""PHOENIX engine: carry/basis opportunities.
+
+DEPRECATED — QUARANTINED as of 2026-03-15.
+This engine is never instantiated in the pipeline. It exists only for
+reference and potential future reactivation. Do not add new functionality.
+See Docs/argus_refactor/phoenix_quarantine.md for full reference inventory.
+"""
 
 from __future__ import annotations
 

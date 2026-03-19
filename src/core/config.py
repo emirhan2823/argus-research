@@ -107,22 +107,29 @@ class TitanExitConfig(BaseModel):
 
 class TitanConfig(BaseModel):
     active_regimes: list[str] = Field(default_factory=lambda: ["TRENDING"])
-    min_adx: float = 25.0
+    min_adx: float = 35.0
     min_confidence: float = 0.55
-    max_concurrent: int = 2
-    continuation_min_volume: float = 1.2
-    adx_rising_bars: int = 3
+    max_concurrent: int = 3
+    continuation_min_volume: float = 0.8
+    adx_rising_bars: int = 1
+    asset_profiles: dict[str, Any] = Field(default_factory=dict)
     trend_follow: dict[str, Any] = Field(default_factory=dict)
     breakout: dict[str, Any] = Field(default_factory=dict)
+    partial_tp: dict[str, Any] = Field(default_factory=dict)
     exit_system: TitanExitConfig = Field(default_factory=TitanExitConfig)
 
 
 class NautilusConfig(BaseModel):
     active_regimes: list[str] = Field(default_factory=lambda: ["RANGING"])
-    max_adx: float = 22.0
+    max_adx: float = 25.0
     min_confidence: float = 0.55
+    max_chop_trades_per_day: int = 6
     bb_reversion: dict[str, Any] = Field(default_factory=dict)
     funding_reversion: dict[str, Any] = Field(default_factory=dict)
+    micro_reversion: dict[str, Any] = Field(default_factory=dict)
+    chop_corr_gap: dict[str, Any] = Field(default_factory=dict)
+    asset_profiles: dict[str, Any] = Field(default_factory=dict)
+    partial_tp: dict[str, Any] = Field(default_factory=dict)
 
 
 class PhoenixConfig(BaseModel):
@@ -163,6 +170,89 @@ class AtlasConfig(BaseModel):
     crisis_mult: float = 0.0
 
 
+class HydraConfig(BaseModel):
+    active_regimes: list[str] = Field(default_factory=lambda: ["RANGING"])
+    min_confidence: float = 0.60
+    max_concurrent: int = 5
+    timeframe: str = "15m"
+    scalp: dict[str, Any] = Field(default_factory=dict)
+    execution: dict[str, Any] = Field(default_factory=dict)
+    targets: dict[str, Any] = Field(default_factory=dict)
+    partial_tp: dict[str, Any] = Field(default_factory=dict)
+
+
+class AegeanConfig(BaseModel):
+    active_regimes: list[str] = Field(
+        default_factory=lambda: ["TRENDING", "RANGING", "VOLATILE"]
+    )
+    min_confidence: float = 0.55
+    channel_multipliers: dict[str, float] = Field(default_factory=dict)
+    rsi_smooth_spans: dict[str, int] = Field(default_factory=dict)
+    atr_stop_multipliers: dict[str, float] = Field(default_factory=dict)
+    rr_ratios: dict[str, float] = Field(default_factory=dict)
+    mtf_trend_filter: dict[str, Any] = Field(default_factory=dict)
+
+
+class PoseidonConfig(BaseModel):
+    active_regimes: list[str] = Field(
+        default_factory=lambda: ["VOLATILE", "RANGING"]
+    )
+    min_confidence: float = 0.50
+    max_hold_bars: int = 12
+    atr_stop_mult: float = 2.0
+    bb_long_threshold: float = 0.15
+    bb_short_threshold: float = 0.85
+    rsi_oversold: float = 30.0
+    rsi_overbought: float = 70.0
+    cci_oversold: float = -150.0
+    cci_overbought: float = 150.0
+    willr_oversold: float = -85.0
+    willr_overbought: float = -15.0
+    vwap_long_threshold: float = -0.02
+    vwap_short_threshold: float = 0.02
+    cmf_long_threshold: float = -0.15
+    cmf_short_threshold: float = 0.15
+    wt_n1: int = 10
+    wt_n2: int = 21
+    wt_ob: float = 53.0
+    wt_os: float = -53.0
+    harsi_length: int = 14
+    harsi_smoothing: int = 1
+    harsi_ob: float = 20.0
+    harsi_ob_extreme: float = 30.0
+    harsi_os: float = -20.0
+    harsi_os_extreme: float = -30.0
+    entropy_period: int = 20
+    entropy_smooth: int = 10
+    entropy_bins: int = 10
+    entropy_atr_period: int = 10
+    entropy_atr_base: float = 2.0
+    entropy_atr_max: float = 5.0
+    entropy_filter_weight: float = 0.5
+    strong_threshold: float = 0.70
+    normal_threshold: float = 0.45
+    weak_threshold: float = 0.30
+    consortium_alpha: float = 0.3
+
+
+class GeminiConfig(BaseModel):
+    active_regimes: list[str] = Field(default_factory=lambda: ["RANGING"])
+    min_confidence: float = 0.60
+    max_simultaneous_pairs: int = 3
+    pairs: list[dict[str, str]] = Field(default_factory=list)
+    correlation: dict[str, Any] = Field(default_factory=dict)
+
+
+class PrecisionFilterConfig(BaseModel):
+    enabled: bool = True
+    grade_a_threshold: float = 0.80
+    grade_b_threshold: float = 0.65
+    grade_c_threshold: float = 0.50
+    grade_d_threshold: float = 0.35
+    min_passing_grade: str = "D"
+    confidence_adjustments: dict[str, float] = Field(default_factory=dict)
+
+
 class ConfluenceFilterConfig(BaseModel):
     enabled: bool = True
     min_factors_required: int = 4
@@ -170,14 +260,42 @@ class ConfluenceFilterConfig(BaseModel):
     counter_trend_penalty: float = 0.15
 
 
+class TradeQualityConfig(BaseModel):
+    enabled: bool = True
+    grade_a_threshold: float = 0.80
+    grade_b_threshold: float = 0.65
+    grade_c_threshold: float = 0.50
+    grade_c_min_confidence: float = 0.55
+    allow_grade_c_in_crypto: bool = True
+
+
+class AdaptiveConfidenceConfig(BaseModel):
+    enabled: bool = True
+    base_min_confidence: float = 0.55
+    lookback: int = 20
+    floor_low: float = 0.50
+    floor_high: float = 0.70
+
+
 class EnginesConfig(BaseModel):
     titan: TitanConfig = Field(default_factory=TitanConfig)
     nautilus: NautilusConfig = Field(default_factory=NautilusConfig)
-    phoenix: PhoenixConfig = Field(default_factory=PhoenixConfig)
+    phoenix: PhoenixConfig = Field(default_factory=PhoenixConfig)  # QUARANTINED
     hermes: HermesConfig = Field(default_factory=HermesConfig)
     atlas: AtlasConfig = Field(default_factory=AtlasConfig)
+    hydra: HydraConfig = Field(default_factory=HydraConfig)
+    aegean: AegeanConfig = Field(default_factory=AegeanConfig)
+    poseidon: PoseidonConfig = Field(default_factory=PoseidonConfig)
+    gemini: GeminiConfig = Field(default_factory=GeminiConfig)
+    precision_filter: PrecisionFilterConfig = Field(
+        default_factory=PrecisionFilterConfig
+    )
     confluence_filter: ConfluenceFilterConfig = Field(
         default_factory=ConfluenceFilterConfig
+    )
+    trade_quality: TradeQualityConfig = Field(default_factory=TradeQualityConfig)
+    adaptive_confidence: AdaptiveConfidenceConfig = Field(
+        default_factory=AdaptiveConfidenceConfig
     )
 
 

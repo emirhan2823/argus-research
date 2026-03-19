@@ -22,7 +22,8 @@ def _clamp(value: float, low: float, high: float) -> float:
 class HermesEngine:
     """News/sentiment engine with veto and position-management hints."""
 
-    min_confidence: float = 0.65
+    def __init__(self, *, min_confidence: float = 0.65) -> None:
+        self.min_confidence = min_confidence
 
     def generate_signal(
         self,

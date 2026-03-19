@@ -15,8 +15,8 @@ risk:
       titan_breakout: 2.0
       nautilus_bb_reversion: 1.0
       nautilus_funding: 3.0
-      phoenix_funding: 2.5
-      phoenix_basis: 3.0
+      phoenix_funding: 2.5   # QUARANTINED — PHOENIX not instantiated
+      phoenix_basis: 3.0     # QUARANTINED — PHOENIX not instantiated
 
   drawdown:
     dd_caution: 0.02

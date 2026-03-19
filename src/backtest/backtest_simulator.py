@@ -300,6 +300,7 @@ class BacktestSimulator:
     be_trigger_atr_multiple: float = 1.5
     trail_pct: float = 0.01  # 1.0% trailing distance
     max_concurrent_positions: int = 3
+    fixed_size: bool = False  # Use initial_balance for sizing (no compounding)
     account: VirtualAccount = field(default=None)  # type: ignore[assignment]
     positions: dict[str, SimulatedPosition] = field(default_factory=dict)
     _trade_counter: int = 0
@@ -371,7 +372,8 @@ class BacktestSimulator:
         tp_pct = tp_pct * v6_rr_mult
 
         # Calculate notional and margin
-        notional = self.account.total_equity * position_size_pct * leverage
+        sizing_equity = self.account.initial_balance if self.fixed_size else self.account.total_equity
+        notional = sizing_equity * position_size_pct * leverage
         margin = notional / leverage
 
         if not self.account.lock_margin(margin):
