@@ -1,0 +1,221 @@
+// ============================================================================
+// ARGUS Combined Indicator v1.0 — Pine Script v6
+// Combines: SONAR Trend Scanner + MR Filter (HARSI) + Trend/ATR Guards + Panel
+// Single indicator for TradingView Free (max 2 indicator limit)
+// ============================================================================
+
+//@version=6
+indicator("ARGUS Combined v1.0", "ARGUS", overlay=true, max_labels_count=50)
+
+// ── INPUTS ──────────────────────────────────────────────────────────────────
+
+// Display toggles
+showSignals   = input.bool(true,  "Show Signals (arrows + labels)",  group="Display")
+showPanel     = input.bool(true,  "Show Info Panel (last bar)",      group="Display")
+compactMarks  = input.bool(false, "Compact Mode (triangles only)",   group="Display")
+
+// SONAR Trend Scanner
+sonarAdxLen   = input.int(14,   "ADX Period",       minval=5,  group="SONAR Trend")
+sonarEmaFast  = input.int(21,   "EMA Fast",         minval=5,  group="SONAR Trend")
+sonarEmaSlow  = input.int(55,   "EMA Slow",         minval=10, group="SONAR Trend")
+sonarAtrLen   = input.int(14,   "ATR Period",       minval=5,  group="SONAR Trend")
+sonarAtrPctl  = input.int(100,  "ATR Pctl Lookback", minval=20, group="SONAR Trend")
+sonarMinAdx   = input.float(20, "Min ADX for Trend", minval=10, group="SONAR Trend")
+sonarMinScore = input.float(40, "Min SONAR Score",   minval=0,  group="SONAR Trend")
+
+// MR Filter (HARSI-like)
+harsiLen      = input.int(14,   "HARSI RSI Period",  minval=5,  group="MR Filter")
+harsiSmooth   = input.int(3,    "HARSI Smoothing",   minval=1,  group="MR Filter")
+harsiOB       = input.float(70, "HARSI Overbought",             group="MR Filter")
+harsiOS       = input.float(30, "HARSI Oversold",               group="MR Filter")
+
+// Fee-aware
+takerFeeBps   = input.float(3.0, "Taker Fee (bps)",  minval=0,  group="Fee Guard")
+minRR         = input.float(2.0, "Min R:R",          minval=1,  group="Fee Guard")
+
+// Colors
+colBullish    = input.color(#00C853, "Bullish Color",  group="Colors")
+colBearish    = input.color(#FF1744, "Bearish Color",  group="Colors")
+colNeutral    = input.color(#FFD600, "Neutral Color",  group="Colors")
+colPanel      = input.color(#1E1E1E, "Panel BG Color", group="Colors")
+
+
+// ── SECTION A: SONAR TREND SCANNER ─────────────────────────────────────────
+
+// ADX computation (Wilder)
+_trueRange  = math.max(high - low, math.abs(high - close[1]), math.abs(low - close[1]))
+_smoothTR   = 0.0
+_smoothTR  := nz(_smoothTR[1]) - nz(_smoothTR[1]) / sonarAdxLen + _trueRange
+
+_dmPlus     = high - high[1] > low[1] - low ? math.max(high - high[1], 0) : 0.0
+_dmMinus    = low[1] - low > high - high[1] ? math.max(low[1] - low, 0) : 0.0
+
+_smoothDMP  = 0.0
+_smoothDMP := nz(_smoothDMP[1]) - nz(_smoothDMP[1]) / sonarAdxLen + _dmPlus
+_smoothDMM  = 0.0
+_smoothDMM := nz(_smoothDMM[1]) - nz(_smoothDMM[1]) / sonarAdxLen + _dmMinus
+
+_diPlus     = _smoothTR != 0 ? 100.0 * _smoothDMP / _smoothTR : 0.0
+_diMinus    = _smoothTR != 0 ? 100.0 * _smoothDMM / _smoothTR : 0.0
+_dx         = _diPlus + _diMinus != 0 ? 100.0 * math.abs(_diPlus - _diMinus) / (_diPlus + _diMinus) : 0.0
+
+adxValue    = ta.rma(_dx, sonarAdxLen)
+
+// EMA slope
+emaFast     = ta.ema(close, sonarEmaFast)
+emaSlow     = ta.ema(close, sonarEmaSlow)
+emaSpread   = (emaFast - emaSlow) / emaSlow
+
+// ATR percentile
+atrValue    = ta.atr(sonarAtrLen)
+atrPct      = atrValue / close * 100
+atrPctRank  = ta.percentrank(atrPct, sonarAtrPctl)
+
+// Structure: Higher Highs / Lower Lows (simplified swing count)
+swingH      = ta.pivothigh(high, 5, 5)
+swingL      = ta.pivotlow(low, 5, 5)
+lastSwingH  = ta.valuewhen(not na(swingH), swingH, 0)
+prevSwingH  = ta.valuewhen(not na(swingH), swingH, 1)
+lastSwingL  = ta.valuewhen(not na(swingL), swingL, 0)
+prevSwingL  = ta.valuewhen(not na(swingL), swingL, 1)
+
+hhCount     = lastSwingH > prevSwingH ? 1.0 : 0.0
+hlCount     = lastSwingL > prevSwingL ? 1.0 : 0.0
+llCount     = lastSwingL < prevSwingL ? 1.0 : 0.0
+lhCount     = lastSwingH < prevSwingH ? 1.0 : 0.0
+
+bullStruct  = hhCount + hlCount          // 0-2
+bearStruct  = llCount + lhCount          // 0-2
+structScore = math.max(bullStruct, bearStruct) * 50.0  // 0-100
+
+// SONAR composite score (0-100)
+adxNorm     = math.min(adxValue / 60.0, 1.0) * 100.0
+emaScore    = math.min(math.abs(emaSpread) / 0.05, 1.0) * 100.0
+volScore    = math.min(volume / ta.sma(volume, 20) / 3.0, 1.0) * 100.0
+
+sonarScore  = adxNorm * 0.25 + emaScore * 0.20 + structScore * 0.25 + atrPctRank * 0.15 + volScore * 0.15
+
+// Direction bias
+bullBias    = emaFast > emaSlow and bullStruct >= 1
+bearBias    = emaFast < emaSlow and bearStruct >= 1
+
+sonarDir    = bullBias ? 1 : bearBias ? -1 : 0
+
+
+// ── SECTION B: MR FILTER (HARSI-like) + GUARDS ────────────────────────────
+
+// HARSI: Heikin-Ashi RSI
+rsiRaw      = ta.rsi(close, harsiLen)
+haClose     = (rsiRaw + math.max(rsiRaw, rsiRaw[1]) + math.min(rsiRaw, rsiRaw[1]) + rsiRaw[1]) / 4.0
+haOpen      = 0.0
+haOpen     := na(haOpen[1]) ? haClose : (nz(haOpen[1]) + nz(haClose[1])) / 2.0
+haHigh      = math.max(rsiRaw, math.max(haOpen, haClose))
+haLow       = math.min(rsiRaw, math.min(haOpen, haClose))
+harsiVal    = ta.ema(haClose, harsiSmooth)
+
+harsiOBhit  = harsiVal > harsiOB
+harsiOShit  = harsiVal < harsiOS
+harsiRising = harsiVal > harsiVal[1]
+
+// MR block: if HARSI in OB/OS zone, MR entry is risky
+mrBlocked   = harsiOBhit or harsiOShit
+
+// Trend guards
+adxAboveMin = adxValue >= sonarMinAdx
+atrPctlHigh = atrPctRank >= 40  // ATR pctl above 40th = sufficient volatility
+
+
+// ── SECTION C: TRADE QUALITY / FEE GUARD ──────────────────────────────────
+
+// Approximate R:R from ATR-based stop and target
+slPct       = atrPct / 100.0 * 2.0         // SL = 2x ATR%
+tpPct       = slPct * minRR                 // TP = SL * min_RR
+feePct      = takerFeeBps / 10000.0
+feeEdge     = minRR * 0.6 - 0.4 - 2.0 * feePct / math.max(slPct, 0.0001)
+feeOK       = feeEdge > 0
+
+// Grade: A = strong trend + volume, B = moderate, C = weak
+gradeA      = sonarScore >= 70 and adxAboveMin and feeOK
+gradeB      = sonarScore >= 40 and feeOK
+gradeC      = sonarScore >= 20
+grade       = gradeA ? 1 : gradeB ? 2 : gradeC ? 3 : 0
+
+
+// ── SIGNAL LOGIC ───────────────────────────────────────────────────────────
+
+// LONG signal: SONAR bullish + score above threshold + guards pass
+longCond    = bullBias and sonarScore >= sonarMinScore and adxAboveMin and atrPctlHigh and feeOK
+shortCond   = bearBias and sonarScore >= sonarMinScore and adxAboveMin and atrPctlHigh and feeOK
+
+// Flip detection: direction changed from previous bar
+longFlip    = longCond and (not longCond[1] or sonarDir[1] != 1)
+shortFlip   = shortCond and (not shortCond[1] or sonarDir[1] != -1)
+
+// For plotshape: series bool conditions at global scope
+showLongArrow  = showSignals and longFlip
+showShortArrow = showSignals and shortFlip
+showLongTri    = showSignals and compactMarks and longFlip
+showShortTri   = showSignals and compactMarks and shortFlip
+
+
+// ── PLOTTING ───────────────────────────────────────────────────────────────
+
+// EMA lines
+plot(emaFast, "EMA Fast", color=colBullish, linewidth=1)
+plot(emaSlow, "EMA Slow", color=colBearish, linewidth=1)
+
+// Background tint for trend direction
+trendBG = sonarDir == 1 ? color.new(colBullish, 92) : sonarDir == -1 ? color.new(colBearish, 92) : color.new(colNeutral, 95)
+bgcolor(trendBG, title="Trend Background")
+
+// Signal arrows (non-compact mode)
+plotshape(showLongArrow and not compactMarks, title="LONG Signal", style=shape.labelup, location=location.belowbar, color=colBullish, text="L", textcolor=color.white, size=size.small)
+plotshape(showShortArrow and not compactMarks, title="SHORT Signal", style=shape.labeldown, location=location.abovebar, color=colBearish, text="S", textcolor=color.white, size=size.small)
+
+// Compact mode: triangles only
+plotshape(showLongTri, title="LONG Triangle", style=shape.triangleup, location=location.belowbar, color=colBullish, size=size.tiny)
+plotshape(showShortTri, title="SHORT Triangle", style=shape.triangledown, location=location.abovebar, color=colBearish, size=size.tiny)
+
+// MR blocked warning (small diamond)
+mrWarnCond = showSignals and mrBlocked and not compactMarks
+plotshape(mrWarnCond, title="MR Blocked", style=shape.diamond, location=location.abovebar, color=colNeutral, size=size.tiny)
+
+
+// ── PANEL (last bar only) ──────────────────────────────────────────────────
+
+if showPanel and barstate.islast
+    dirStr   = sonarDir == 1 ? "LONG" : sonarDir == -1 ? "SHORT" : "FLAT"
+    gradeStr = grade == 1 ? "A" : grade == 2 ? "B" : grade == 3 ? "C" : "-"
+    mrStr    = mrBlocked ? "BLOCK" : "OK"
+    feeStr   = feeOK ? "OK" : "WARN"
+
+    intentStr = longCond ? "BUY" : shortCond ? "SELL" : "WAIT"
+
+    panelText = "ARGUS SONAR v1.0\n" +
+      "Score: "  + str.tostring(sonarScore, "#.0") + "/100\n" +
+      "Dir: "    + dirStr + "\n" +
+      "ADX: "    + str.tostring(adxValue, "#.0") + "\n" +
+      "ATR%: "   + str.tostring(atrPctRank, "#.0") + "pctl\n" +
+      "MR: "     + mrStr + "\n" +
+      "Grade: "  + gradeStr + "\n" +
+      "Fee: "    + feeStr + "\n" +
+      "Intent: " + intentStr
+
+    panelColor = sonarDir == 1 ? colBullish : sonarDir == -1 ? colBearish : colNeutral
+
+    label.new(
+      bar_index + 3, high,
+      text=panelText,
+      style=label.style_label_left,
+      color=color.new(colPanel, 10),
+      textcolor=panelColor,
+      textalign=text.align_left,
+      size=size.normal
+    )
+
+
+// ── ALERTS ─────────────────────────────────────────────────────────────────
+
+alertcondition(longFlip,  "ARGUS LONG Flip",  "ARGUS: LONG signal fired")
+alertcondition(shortFlip, "ARGUS SHORT Flip", "ARGUS: SHORT signal fired")
+alertcondition(mrBlocked, "ARGUS MR Blocked", "ARGUS: MR filter blocking entries")

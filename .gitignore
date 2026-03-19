@@ -1,0 +1,234 @@
+# =============================================================================
+# ARGUS REPOSITORY .gitignore
+# =============================================================================
+# This file defines what should NEVER be tracked in version control.
+# Violations of these rules will cause repo_sanity_check.sh to fail.
+#
+# PHILOSOPHY: Correctness > Safety > Scalability > Speed
+# If hygiene fails → system fails.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# 1. PYTHON RUNTIME
+# -----------------------------------------------------------------------------
+# Bytecode: Generated on import, machine-specific, causes merge conflicts
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+
+# Virtual environments: Large, user-specific, should use requirements.txt
+venv/
+env/
+.venv/
+.venv312/
+venv312/
+.env/
+ENV/
+
+# Distribution/packaging
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+.eggs/
+*.whl
+
+# Jupyter notebooks checkpoints
+.ipynb_checkpoints/
+
+# -----------------------------------------------------------------------------
+# 2. RUNTIME ARTIFACTS
+# -----------------------------------------------------------------------------
+# Run directories: Session data, large, unique per run
+runs/
+runs_archive/
+
+# Logs: Noisy, large, machine-specific
+logs/
+*.log
+phase*_daemon.log
+
+# Cache directories: Regenerable, large
+cache/
+.cache/
+argus_py/data/cache/
+argus_py/logs/
+
+# Temporary files
+temp/
+tmp/
+*.tmp
+*.temp
+.tmp/
+
+# -----------------------------------------------------------------------------
+# 3. DATA FILES
+# -----------------------------------------------------------------------------
+# CSVs: Large data artifacts (except whitelisted)
+*.csv
+# Whitelist: Keep tracked sample data (force add with git add -f)
+!tests/fixtures/*.csv
+!Docs/benchmarks/*.csv
+
+# Parquet: Binary data files
+*.parquet
+
+# Large JSON data
+Argus_*.json
+*TradeHistory*.json
+*.jsonl
+argus_tam_kod.txt
+
+# SQLite databases
+*.sqlite
+*.sqlite2
+*.sqlite3
+*.db
+ArgusScience*
+
+# Checkpoints: Model/training state
+checkpoints/
+*.ckpt
+*.h5
+
+# -----------------------------------------------------------------------------
+# 4. PATCH & CONFLICT LEFTOVERS
+# -----------------------------------------------------------------------------
+# These indicate incomplete merges - MUST be cleaned before commit
+*.rej
+*.orig
+*.bak
+*.backup
+
+# -----------------------------------------------------------------------------
+# 5. SECRETS & ENVIRONMENT
+# -----------------------------------------------------------------------------
+# NEVER commit secrets - security critical
+.env
+.env.*
+local.env
+*.env
+secrets/
+*.key
+*.pem
+*.p12
+
+# Config files with secrets
+Secrets.xcconfig
+*.xcconfig
+
+# API keys in code (these files contain hardcoded keys)
+Algo-Trading/Services/ChironLLMAdapter.swift
+Algo-Trading/Services/GroqClient.swift
+
+# -----------------------------------------------------------------------------
+# 6. GENERATED REPORTS & ARTIFACTS
+# -----------------------------------------------------------------------------
+# Auto-generated, should be regenerated not tracked
+artifacts/
+reports/
+generated/
+*.html
+!Docs/*.html
+
+# Coverage reports
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+
+# Test reports
+.pytest_cache/
+pytest_cache/
+.tox/
+
+# -----------------------------------------------------------------------------
+# 7. IDE & EDITOR
+# -----------------------------------------------------------------------------
+# VS Code
+.vscode/
+*.code-workspace
+
+# JetBrains
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+\#*\#
+.#*
+
+# -----------------------------------------------------------------------------
+# 8. MACOS & SYSTEM
+# -----------------------------------------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# -----------------------------------------------------------------------------
+# 9. XCODE & SWIFT (Legacy iOS parts)
+# -----------------------------------------------------------------------------
+build/
+DerivedData/
+*.pbxuser
+!default.pbxuser
+*.mode1v3
+!default.mode1v3
+*.mode2v3
+!default.mode2v3
+*.perspectivev3
+!default.perspectivev3
+xcuserdata/
+*.xccheckout
+*.moved-aside
+*.hmap
+*.ipa
+*.xcuserstate
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.build/
+.swiftpm/
+
+# -----------------------------------------------------------------------------
+# 10. ARCHIVES & BINARIES
+# -----------------------------------------------------------------------------
+*.zip
+*.tar
+*.tar.gz
+*.rar
+*.7z
+
+# Executables (unless intentionally tracked)
+ArgusRunnerCLI2
+ArgusRunnerBinary
+TestRunner
+
+# -----------------------------------------------------------------------------
+# 11. PROJECT-SPECIFIC WHITELIST (use git add -f)
+# -----------------------------------------------------------------------------
+# The following are patterns that are ignored above but may need to be force-added
+# for specific files. Use: git add -f <file>
+#
+# - tests/fixtures/*.csv  → Test fixture data
+# - Docs/benchmarks/*.csv → Benchmark comparison data
+# - Scripts/*.sh          → Shell scripts (allowed)
+# - Docs/*.html           → Documentation HTML (allowed)
+
+# =============================================================================
+# END OF .gitignore
+# =============================================================================

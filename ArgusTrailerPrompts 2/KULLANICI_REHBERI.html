@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="tr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Argus Terminal - Başlangıç Rehberi</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #e0e0e0;
+            line-height: 1.8;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 40px 25px;
+        }
+
+        h1 {
+            text-align: center;
+            font-size: 2.8em;
+            margin-bottom: 10px;
+            background: linear-gradient(90deg, #00d9ff, #00ff88);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #888;
+            margin-bottom: 15px;
+            font-size: 1.2em;
+        }
+
+        .welcome {
+            text-align: center;
+            background: linear-gradient(135deg, #00d9ff15, #00ff8815);
+            padding: 30px;
+            border-radius: 16px;
+            margin: 30px 0 40px;
+            border: 1px solid #00d9ff33;
+        }
+
+        .welcome p {
+            font-size: 1.1em;
+            color: #ccc;
+        }
+
+        .welcome strong {
+            color: #00ff88;
+        }
+
+        h2 {
+            color: #00d9ff;
+            margin: 50px 0 25px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #00d9ff33;
+            font-size: 1.7em;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        h2 .step-badge {
+            background: #00d9ff;
+            color: #000;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 0.7em;
+        }
+
+        h3 {
+            color: #00ff88;
+            margin: 25px 0 15px;
+            font-size: 1.2em;
+        }
+
+        .info-box {
+            background: #00d9ff12;
+            border-left: 4px solid #00d9ff;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+
+        .success-box {
+            background: #00ff8812;
+            border-left: 4px solid #00ff88;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+
+        .tip-box {
+            background: #ffd70012;
+            border-left: 4px solid #ffd700;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+
+        .warning-box {
+            background: #ff6b3520;
+            border-left: 4px solid #ff6b35;
+            padding: 25px;
+            border-radius: 8px;
+            margin: 30px 0;
+        }
+
+        ul,
+        ol {
+            margin: 15px 0 15px 25px;
+        }
+
+        li {
+            margin: 12px 0;
+        }
+
+        code {
+            background: #0d1117;
+            padding: 4px 10px;
+            border-radius: 5px;
+            font-family: 'Monaco', monospace;
+            font-size: 0.9em;
+            color: #00ff88;
+        }
+
+        .card {
+            background: #ffffff08;
+            border-radius: 16px;
+            padding: 30px;
+            margin: 25px 0;
+            border: 1px solid #ffffff15;
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .card-icon {
+            font-size: 2.5em;
+        }
+
+        .card-title {
+            font-size: 1.4em;
+            color: #fff;
+        }
+
+        .card-subtitle {
+            color: #888;
+            font-size: 0.9em;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+
+        th,
+        td {
+            padding: 14px 18px;
+            text-align: left;
+            border-bottom: 1px solid #333;
+        }
+
+        th {
+            background: #00d9ff15;
+            color: #00d9ff;
+        }
+
+        a {
+            color: #00d9ff;
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        /* Platform Cards */
+        .platform-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin: 25px 0;
+        }
+
+        .platform-card {
+            background: linear-gradient(135deg, #ffffff08, #ffffff03);
+            border: 1px solid #ffffff20;
+            border-radius: 16px;
+            padding: 25px;
+            text-align: center;
+            transition: all 0.3s;
+            cursor: pointer;
+        }
+
+        .platform-card:hover {
+            border-color: #00d9ff;
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0, 217, 255, 0.2);
+        }
+
+        .platform-card .icon {
+            font-size: 3em;
+            margin-bottom: 15px;
+        }
+
+        .platform-card .name {
+            font-size: 1.2em;
+            color: #fff;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .platform-card .tech {
+            color: #888;
+            font-size: 0.9em;
+            margin-bottom: 15px;
+        }
+
+        .platform-card .difficulty {
+            display: inline-block;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.8em;
+        }
+
+        .easy {
+            background: #00ff8833;
+            color: #00ff88;
+        }
+
+        .medium {
+            background: #ffd70033;
+            color: #ffd700;
+        }
+
+        .hard {
+            background: #ff6b3533;
+            color: #ff6b35;
+        }
+
+        .prompt-list {
+            display: grid;
+            gap: 10px;
+            margin: 20px 0;
+        }
+
+        .prompt-item {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding: 12px 18px;
+            background: #ffffff08;
+            border-radius: 10px;
+        }
+
+        .prompt-number {
+            background: #00d9ff33;
+            color: #00d9ff;
+            width: 28px;
+            height: 28px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 0.85em;
+        }
+
+        .prompt-name {
+            color: #fff;
+            font-weight: 500;
+        }
+
+        .prompt-desc {
+            color: #888;
+            font-size: 0.85em;
+            margin-left: auto;
+        }
+
+        .legal-section {
+            margin-top: 80px;
+            padding-top: 40px;
+            border-top: 2px solid #333;
+        }
+
+        .legal-section h2 {
+            color: #ff6b35;
+            border-color: #ff6b3533;
+        }
+
+        .footer {
+            text-align: center;
+            margin-top: 60px;
+            padding: 40px 30px;
+            background: #00000033;
+            border-radius: 16px;
+        }
+
+        @media print {
+            body {
+                background: white;
+                color: black;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>🚀 ARGUS TERMİNAL</h1>
+        <p class="subtitle">Başlangıç Rehberi</p>
+
+        <div class="welcome">
+            <p>
+                Merhaba! Bu rehber seni <strong>adım adım</strong> yönlendirecek.<br>
+                Hiç programlama bilmene gerek yok. Sadece talimatları takip et.
+            </p>
+        </div>
+
+        <!-- ADIM 1: PLATFORM SEÇ -->
+        <h2><span class="step-badge">1</span> Platformunu Seç</h2>
+
+        <div class="card">
+            <p>Argus Terminal'i hangi platformda oluşturmak istiyorsun? Hangisini seçersen seç, <strong>aynı mantık ve
+                    formüller</strong> geçerli.</p>
+
+            <div class="platform-grid">
+                <div class="platform-card">
+                    <div class="icon">🍎</div>
+                    <div class="name">iPhone / iPad</div>
+                    <div class="tech">Swift + SwiftUI</div>
+                    <div class="difficulty easy">Kolay</div>
+                    <p style="margin-top: 15px; font-size: 0.85em; color: #888;">Mac gerekli</p>
+                </div>
+
+                <div class="platform-card">
+                    <div class="icon">🤖</div>
+                    <div class="name">Android</div>
+                    <div class="tech">Kotlin + Jetpack Compose</div>
+                    <div class="difficulty easy">Kolay</div>
+                    <p style="margin-top: 15px; font-size: 0.85em; color: #888;">Windows/Mac/Linux</p>
+                </div>
+
+                <div class="platform-card">
+                    <div class="icon">🌐</div>
+                    <div class="name">Web Uygulaması</div>
+                    <div class="tech">React / Next.js / Vue</div>
+                    <div class="difficulty easy">Kolay</div>
+                    <p style="margin-top: 15px; font-size: 0.85em; color: #888;">Tüm sistemler</p>
+                </div>
+
+                <div class="platform-card">
+                    <div class="icon">🖥️</div>
+                    <div class="name">Desktop Uygulama</div>
+                    <div class="tech">Electron / Python / C#</div>
+                    <div class="difficulty medium">Orta</div>
+                    <p style="margin-top: 15px; font-size: 0.85em; color: #888;">Tüm sistemler</p>
+                </div>
+
+                <div class="platform-card">
+                    <div class="icon">📱</div>
+                    <div class="name">Hem iOS hem Android</div>
+                    <div class="tech">Flutter / React Native</div>
+                    <div class="difficulty medium">Orta</div>
+                    <p style="margin-top: 15px; font-size: 0.85em; color: #888;">Tek kod, iki platform</p>
+                </div>
+
+                <div class="platform-card">
+                    <div class="icon">🐍</div>
+                    <div class="name">Python Script</div>
+                    <div class="tech">Python + Streamlit</div>
+                    <div class="difficulty easy">Kolay</div>
+                    <p style="margin-top: 15px; font-size: 0.85em; color: #888;">Hızlı prototip</p>
+                </div>
+            </div>
+
+            <div class="tip-box">
+                💡 <strong>Hangi platformu seçersen seç:</strong> Bu promptlardaki <strong>formüller, motorlar ve
+                    mantık</strong> aynı kalır.
+                Sadece AI asistanına "Bunu [seçtiğin dil]'e çevir" demen yeterli!
+            </div>
+        </div>
+
+        <!-- ADIM 2: ARAÇLARI KUR -->
+        <h2><span class="step-badge">2</span> Gerekli Araçları Kur</h2>
+
+        <div class="card">
+            <h3>🤖 AI Asistan</h3>
+            <p>Promptları bir AI asistanına vereceksin. Hangisini kullanırsan kullan:</p>
+
+            <table>
+                <tr>
+                    <th>Araç</th>
+                    <th>Açıklama</th>
+                    <th>Fiyat</th>
+                </tr>
+                <tr style="background: #00ff8815;">
+                    <td><strong>⭐ Antigravity</strong></td>
+                    <td>VS Code + Gemini entegrasyonu</td>
+                    <td><strong>Ücretsiz</strong></td>
+                </tr>
+                <tr>
+                    <td><a href="https://chat.openai.com" target="_blank">ChatGPT</a></td>
+                    <td>OpenAI'ın asistanı</td>
+                    <td>Ücretsiz / Plus</td>
+                </tr>
+                <tr>
+                    <td><a href="https://claude.ai" target="_blank">Claude</a></td>
+                    <td>Anthropic'in asistanı</td>
+                    <td>Ücretsiz / Pro</td>
+                </tr>
+                <tr>
+                    <td><a href="https://gemini.google.com" target="_blank">Gemini</a></td>
+                    <td>Google'ın asistanı</td>
+                    <td>Ücretsiz / Advanced</td>
+                </tr>
+                <tr>
+                    <td>Diğer</td>
+                    <td>Cursor, Copilot, Windsurf vb.</td>
+                    <td>Değişir (çoğu ücretli)</td>
+                </tr>
+            </table>
+
+            <div class="success-box">
+                <strong>💡 Öneri:</strong> <strong>Antigravity</strong> tamamen ücretsiz ve VS Code içinde çalışıyor.
+                Kod yazarken direkt yanında!
+            </div>
+
+            <h3 style="margin-top: 30px;">🔧 Geliştirme Ortamı</h3>
+
+            <table>
+                <tr>
+                    <th>Platform</th>
+                    <th>Gerekli Araç</th>
+                    <th>İndirme Linki</th>
+                </tr>
+                <tr>
+                    <td>iPhone/iPad</td>
+                    <td>Xcode (Mac gerekli)</td>
+                    <td>App Store'dan indir</td>
+                </tr>
+                <tr>
+                    <td>Android</td>
+                    <td>Android Studio</td>
+                    <td><a href="https://developer.android.com/studio" target="_blank">developer.android.com</a></td>
+                </tr>
+                <tr>
+                    <td>Web</td>
+                    <td>VS Code veya Cursor</td>
+                    <td><a href="https://code.visualstudio.com" target="_blank">code.visualstudio.com</a></td>
+                </tr>
+                <tr>
+                    <td>Desktop</td>
+                    <td>VS Code / PyCharm</td>
+                    <td>Dile göre değişir</td>
+                </tr>
+                <tr>
+                    <td>Flutter</td>
+                    <td>Flutter SDK + VS Code</td>
+                    <td><a href="https://flutter.dev" target="_blank">flutter.dev</a></td>
+                </tr>
+                <tr>
+                    <td>Python</td>
+                    <td>Python 3 + pip</td>
+                    <td><a href="https://python.org" target="_blank">python.org</a></td>
+                </tr>
+            </table>
+        </div>
+
+        <!-- ADIM 3: PROMPTLARI KULLAN -->
+        <h2><span class="step-badge">3</span> Promptları AI'a Ver</h2>
+
+        <div class="card">
+            <p>Şimdi eğlenceli kısım! AI asistanına promptları sırayla vereceksin.</p>
+
+            <h3>📋 Nasıl Çalışır?</h3>
+            <ol>
+                <li>Prompt dosyasını aç</li>
+                <li>İçindeki metni <strong>kopyala</strong></li>
+                <li>AI asistanına <strong>yapıştır</strong></li>
+                <li>Eğer farklı bir platform istiyorsan ekle: <em>"Bunu [Kotlin/React/Python] ile yap"</em></li>
+                <li>AI'ın oluşturduğu kodu projeye ekle</li>
+                <li>Sonraki prompta geç</li>
+            </ol>
+
+            <h3>� Prompt Sırası</h3>
+            <div class="prompt-list">
+                <div class="prompt-item">
+                    <span class="prompt-number">1</span>
+                    <span class="prompt-name">02_TEMA_VE_MODELS.md</span>
+                    <span class="prompt-desc">Veri yapıları</span>
+                </div>
+                <div class="prompt-item">
+                    <span class="prompt-number">2</span>
+                    <span class="prompt-name">11_VERI_CEKME.md</span>
+                    <span class="prompt-desc">API servisleri</span>
+                </div>
+                <div class="prompt-item">
+                    <span class="prompt-number">3</span>
+                    <span class="prompt-name">04_ORION_TEKNIK_ANALIZ.md</span>
+                    <span class="prompt-desc">RSI, MACD, SMA formülleri</span>
+                </div>
+                <div class="prompt-item">
+                    <span class="prompt-number">4</span>
+                    <span class="prompt-name">03_ATLAS_TEMEL_ANALIZ.md</span>
+                    <span class="prompt-desc">Temel analiz skorlama</span>
+                </div>
+                <div class="prompt-item">
+                    <span class="prompt-number">5</span>
+                    <span class="prompt-name">05_AETHER_MAKRO.md</span>
+                    <span class="prompt-desc">Makro göstergeler</span>
+                </div>
+                <div class="prompt-item">
+                    <span class="prompt-number">6</span>
+                    <span class="prompt-name">06_HERMES_HABER.md</span>
+                    <span class="prompt-desc">Haber analizi</span>
+                </div>
+                <div class="prompt-item">
+                    <span class="prompt-number">7</span>
+                    <span class="prompt-name">07_PHOENIX_STRATEJI.md</span>
+                    <span class="prompt-desc">Sinyal üretimi</span>
+                </div>
+                <div class="prompt-item">
+                    <span class="prompt-number">8</span>
+                    <span class="prompt-name">08_COUNCIL_KONSEY.md</span>
+                    <span class="prompt-desc">Oylama matematiği</span>
+                </div>
+                <div class="prompt-item">
+                    <span class="prompt-number">9</span>
+                    <span class="prompt-name">09_UI_EKRANLAR.md</span>
+                    <span class="prompt-desc">Arayüz tasarımı</span>
+                </div>
+                <div class="prompt-item">
+                    <span class="prompt-number">10</span>
+                    <span class="prompt-name">10_CHIRON_OGRENME.md</span>
+                    <span class="prompt-desc">Ağırlık optimizasyonu</span>
+                </div>
+            </div>
+
+            <div class="success-box">
+                ✅ <strong>İpucu:</strong> Her prompt sonrası projeyi çalıştır ve test et. Hata varsa AI'a hatayı
+                yapıştır, "düzelt" de.
+            </div>
+        </div>
+
+        <!-- ADIM 4: API KEYS -->
+        <h2><span class="step-badge">4</span> API Anahtarlarını Al</h2>
+
+        <div class="card">
+            <p>Uygulama verilerini internetten çekecek. Tüm API'ler <strong>ücretsiz</strong>.</p>
+
+            <table>
+                <tr>
+                    <th>API</th>
+                    <th>Ne İçin</th>
+                    <th>Link</th>
+                </tr>
+                <tr>
+                    <td>🔑 FRED</td>
+                    <td>Makro veriler (CPI, İşsizlik)</td>
+                    <td><a href="https://fred.stlouisfed.org" target="_blank">fred.stlouisfed.org</a></td>
+                </tr>
+                <tr>
+                    <td>🔑 FMP</td>
+                    <td>Hisse verileri</td>
+                    <td><a href="https://financialmodelingprep.com" target="_blank">financialmodelingprep.com</a></td>
+                </tr>
+                <tr>
+                    <td>🔑 Groq (opsiyonel)</td>
+                    <td>AI haber analizi</td>
+                    <td><a href="https://console.groq.com" target="_blank">console.groq.com</a></td>
+                </tr>
+            </table>
+
+            <p style="margin-top: 20px;">Her sitede:</p>
+            <ol>
+                <li>Ücretsiz kayıt ol</li>
+                <li>E-posta doğrula</li>
+                <li>API key al ve kopyala</li>
+                <li>Projeye ekle (AI'a "API key'imi şuraya ekle" de)</li>
+            </ol>
+        </div>
+
+        <!-- ADIM 5: ÇALIŞTIR -->
+        <h2><span class="step-badge">5</span> Çalıştır ve Test Et</h2>
+
+        <div class="card">
+            <table>
+                <tr>
+                    <th>Platform</th>
+                    <th>Nasıl Çalıştırılır</th>
+                </tr>
+                <tr>
+                    <td>iPhone (Xcode)</td>
+                    <td>Simulator seç → <code>Cmd+R</code></td>
+                </tr>
+                <tr>
+                    <td>Android</td>
+                    <td>Emulator seç → Run butonu</td>
+                </tr>
+                <tr>
+                    <td>Web</td>
+                    <td><code>npm run dev</code> veya <code>yarn dev</code></td>
+                </tr>
+                <tr>
+                    <td>Python</td>
+                    <td><code>python main.py</code> veya <code>streamlit run app.py</code></td>
+                </tr>
+                <tr>
+                    <td>Flutter</td>
+                    <td><code>flutter run</code></td>
+                </tr>
+            </table>
+
+            <div class="success-box">
+                🎊 <strong>Tebrikler!</strong> Argus Terminal çalışıyor!
+            </div>
+        </div>
+
+        <!-- SORUN GİDERME -->
+        <h2><span class="step-badge">?</span> Sorun mu Var?</h2>
+
+        <div class="card">
+            <table>
+                <tr>
+                    <th>Sorun</th>
+                    <th>Çözüm</th>
+                </tr>
+                <tr>
+                    <td>Build/derleme hatası</td>
+                    <td>Hatayı AI'a yapıştır → "Bu hatayı düzelt"</td>
+                </tr>
+                <tr>
+                    <td>Veri gelmiyor</td>
+                    <td>API key doğru mu kontrol et</td>
+                </tr>
+                <tr>
+                    <td>Ekran boş</td>
+                    <td>Console/log'a bak, hata mesajını AI'a sor</td>
+                </tr>
+                <tr>
+                    <td>Farklı dile çevirmek istiyorum</td>
+                    <td>AI'a: "Bu Swift kodunu Python'a çevir"</td>
+                </tr>
+            </table>
+
+            <p style="margin-top: 20px;">Detaylı hata çözümleri: <code>12_HATA_AYIKLAMA.md</code></p>
+        </div>
+
+        <!-- YASAL UYARI -->
+        <div class="legal-section">
+            <h2>⚖️ Yasal Uyarı</h2>
+
+            <div class="warning-box">
+                <p><strong>Bu uygulama bir EĞİTİM aracıdır.</strong></p>
+
+                <ul style="margin: 20px 0 20px 20px;">
+                    <li>Yatırım tavsiyesi <strong>değildir</strong></li>
+                    <li>Finansal danışmanlık <strong>değildir</strong></li>
+                    <li>Kar garantisi <strong>vermez</strong></li>
+                </ul>
+
+                <p><strong>Risk:</strong> Finansal piyasalarda işlem yüksek risk içerir.
+                    Kaybetmeyi göze alamayacağınız parayla işlem yapmayın.</p>
+
+                <p style="margin-top: 15px;">Tüm yatırım kararlarınızdan ve kayıplarınızdan <strong>kendiniz
+                        sorumlusunuz</strong>.</p>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            <p style="font-size: 1.3em; margin-bottom: 15px;">📱 Argus Terminal</p>
+            <p style="color: #666;">Eğitim Amaçlı | Tüm Platformlar | 2024</p>
+            <p style="margin-top: 20px; color: #888;">İyi kodlamalar! 🚀</p>
+        </div>
+    </div>
+</body>
+
+</html>

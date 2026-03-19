@@ -1,0 +1,809 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXContainerItemProxy section */
+		D96F62B32EDF565F00406CF0 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D96F629D2EDF565C00406CF0 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D96F62A42EDF565C00406CF0;
+			remoteInfo = "Algo-Trading";
+		};
+		D96F62BD2EDF565F00406CF0 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D96F629D2EDF565C00406CF0 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D96F62A42EDF565C00406CF0;
+			remoteInfo = "Algo-Trading";
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		1E6893B02F23B695006AE86A /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = /usr/share/man/man1/;
+			dstSubfolderSpec = 0;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 1;
+		};
+		1E774E0A2F2506E4001A8F0F /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = /usr/share/man/man1/;
+			dstSubfolderSpec = 0;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 1;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		1E6893B22F23B695006AE86A /* ArgusRunner */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = ArgusRunner; sourceTree = BUILT_PRODUCTS_DIR; };
+		1E774E0C2F2506E4001A8F0F /* ArgusRunnerCLI2 */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = ArgusRunnerCLI2; sourceTree = BUILT_PRODUCTS_DIR; };
+		D96F62A52EDF565D00406CF0 /* Algo-Trading.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Algo-Trading.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		D96F62B22EDF565F00406CF0 /* Algo-TradingTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Algo-TradingTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		D96F62BC2EDF565F00406CF0 /* Algo-TradingUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Algo-TradingUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		1E774E192F25090E001A8F0F /* Exceptions for "ArgusRunner" folder in "ArgusRunnerCLI2" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				AegeanIndicator.swift,
+				"Algo-Trading/Models/Models.swift",
+				"Algo-Trading/Services/Risk/PortfolioRiskService.swift",
+				ArgusTime.swift,
+				BinanceClient.swift,
+				Candle.swift,
+				DataStore.swift,
+				main.swift,
+				RiskEnngine.swift,
+			);
+			target = 1E774E0B2F2506E4001A8F0F /* ArgusRunnerCLI2 */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		1E7747782F24E800001A8F0F /* ArgusRunner */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				1E774E192F25090E001A8F0F /* Exceptions for "ArgusRunner" folder in "ArgusRunnerCLI2" target */,
+			);
+			path = ArgusRunner;
+			sourceTree = "<group>";
+		};
+		1E774E0D2F2506E4001A8F0F /* ArgusRunnerCLI2 */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = ArgusRunnerCLI2;
+			sourceTree = "<group>";
+		};
+		D96F62A72EDF565D00406CF0 /* Algo-Trading */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "Algo-Trading";
+			sourceTree = "<group>";
+		};
+		D96F62B52EDF565F00406CF0 /* Algo-TradingTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "Algo-TradingTests";
+			sourceTree = "<group>";
+		};
+		D96F62BF2EDF565F00406CF0 /* Algo-TradingUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "Algo-TradingUITests";
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		1E6893AF2F23B695006AE86A /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		1E774E092F2506E4001A8F0F /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D96F62A22EDF565C00406CF0 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D96F62AF2EDF565F00406CF0 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D96F62B92EDF565F00406CF0 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		1E77477F2F24E911001A8F0F /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		D96F629C2EDF565C00406CF0 = {
+			isa = PBXGroup;
+			children = (
+				D96F62A72EDF565D00406CF0 /* Algo-Trading */,
+				D96F62B52EDF565F00406CF0 /* Algo-TradingTests */,
+				D96F62BF2EDF565F00406CF0 /* Algo-TradingUITests */,
+				1E7747782F24E800001A8F0F /* ArgusRunner */,
+				1E774E0D2F2506E4001A8F0F /* ArgusRunnerCLI2 */,
+				1E77477F2F24E911001A8F0F /* Frameworks */,
+				D96F62A62EDF565D00406CF0 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		D96F62A62EDF565D00406CF0 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				D96F62A52EDF565D00406CF0 /* Algo-Trading.app */,
+				D96F62B22EDF565F00406CF0 /* Algo-TradingTests.xctest */,
+				D96F62BC2EDF565F00406CF0 /* Algo-TradingUITests.xctest */,
+				1E6893B22F23B695006AE86A /* ArgusRunner */,
+				1E774E0C2F2506E4001A8F0F /* ArgusRunnerCLI2 */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		1E6893B12F23B695006AE86A /* ArgusRunner */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1E6893B82F23B695006AE86A /* Build configuration list for PBXNativeTarget "ArgusRunner" */;
+			buildPhases = (
+				1E6893AF2F23B695006AE86A /* Frameworks */,
+				1E6893B02F23B695006AE86A /* CopyFiles */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				1E7747782F24E800001A8F0F /* ArgusRunner */,
+			);
+			name = ArgusRunner;
+			packageProductDependencies = (
+			);
+			productName = ArgusRunner;
+			productReference = 1E6893B22F23B695006AE86A /* ArgusRunner */;
+			productType = "com.apple.product-type.tool";
+		};
+		1E774E0B2F2506E4001A8F0F /* ArgusRunnerCLI2 */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1E774E102F2506E4001A8F0F /* Build configuration list for PBXNativeTarget "ArgusRunnerCLI2" */;
+			buildPhases = (
+				1E774E082F2506E4001A8F0F /* Sources */,
+				1E774E092F2506E4001A8F0F /* Frameworks */,
+				1E774E0A2F2506E4001A8F0F /* CopyFiles */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				1E774E0D2F2506E4001A8F0F /* ArgusRunnerCLI2 */,
+			);
+			name = ArgusRunnerCLI2;
+			packageProductDependencies = (
+			);
+			productName = ArgusRunnerCLI2;
+			productReference = 1E774E0C2F2506E4001A8F0F /* ArgusRunnerCLI2 */;
+			productType = "com.apple.product-type.tool";
+		};
+		D96F62A42EDF565C00406CF0 /* Algo-Trading */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D96F62C62EDF565F00406CF0 /* Build configuration list for PBXNativeTarget "Algo-Trading" */;
+			buildPhases = (
+				D96F62A12EDF565C00406CF0 /* Sources */,
+				D96F62A22EDF565C00406CF0 /* Frameworks */,
+				D96F62A32EDF565C00406CF0 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				D96F62A72EDF565D00406CF0 /* Algo-Trading */,
+			);
+			name = "Algo-Trading";
+			packageProductDependencies = (
+			);
+			productName = "Algo-Trading";
+			productReference = D96F62A52EDF565D00406CF0 /* Algo-Trading.app */;
+			productType = "com.apple.product-type.application";
+		};
+		D96F62B12EDF565F00406CF0 /* Algo-TradingTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D96F62C92EDF565F00406CF0 /* Build configuration list for PBXNativeTarget "Algo-TradingTests" */;
+			buildPhases = (
+				D96F62AE2EDF565F00406CF0 /* Sources */,
+				D96F62AF2EDF565F00406CF0 /* Frameworks */,
+				D96F62B02EDF565F00406CF0 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D96F62B42EDF565F00406CF0 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				D96F62B52EDF565F00406CF0 /* Algo-TradingTests */,
+			);
+			name = "Algo-TradingTests";
+			packageProductDependencies = (
+			);
+			productName = "Algo-TradingTests";
+			productReference = D96F62B22EDF565F00406CF0 /* Algo-TradingTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		D96F62BB2EDF565F00406CF0 /* Algo-TradingUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D96F62CC2EDF565F00406CF0 /* Build configuration list for PBXNativeTarget "Algo-TradingUITests" */;
+			buildPhases = (
+				D96F62B82EDF565F00406CF0 /* Sources */,
+				D96F62B92EDF565F00406CF0 /* Frameworks */,
+				D96F62BA2EDF565F00406CF0 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D96F62BE2EDF565F00406CF0 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				D96F62BF2EDF565F00406CF0 /* Algo-TradingUITests */,
+			);
+			name = "Algo-TradingUITests";
+			packageProductDependencies = (
+			);
+			productName = "Algo-TradingUITests";
+			productReference = D96F62BC2EDF565F00406CF0 /* Algo-TradingUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		D96F629D2EDF565C00406CF0 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2620;
+				LastUpgradeCheck = 2620;
+				TargetAttributes = {
+					1E6893B12F23B695006AE86A = {
+						CreatedOnToolsVersion = 26.2;
+					};
+					1E774E0B2F2506E4001A8F0F = {
+						CreatedOnToolsVersion = 26.2;
+					};
+					D96F62A42EDF565C00406CF0 = {
+						CreatedOnToolsVersion = 26.1.1;
+					};
+					D96F62B12EDF565F00406CF0 = {
+						CreatedOnToolsVersion = 26.1.1;
+						TestTargetID = D96F62A42EDF565C00406CF0;
+					};
+					D96F62BB2EDF565F00406CF0 = {
+						CreatedOnToolsVersion = 26.1.1;
+						TestTargetID = D96F62A42EDF565C00406CF0;
+					};
+				};
+			};
+			buildConfigurationList = D96F62A02EDF565C00406CF0 /* Build configuration list for PBXProject "Algo-Trading" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = D96F629C2EDF565C00406CF0;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				D966DBC02EEE1A37008EDE9A /* XCRemoteSwiftPackageReference "SwiftRateLimiter" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = D96F62A62EDF565D00406CF0 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				D96F62A42EDF565C00406CF0 /* Algo-Trading */,
+				D96F62B12EDF565F00406CF0 /* Algo-TradingTests */,
+				D96F62BB2EDF565F00406CF0 /* Algo-TradingUITests */,
+				1E6893B12F23B695006AE86A /* ArgusRunner */,
+				1E774E0B2F2506E4001A8F0F /* ArgusRunnerCLI2 */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		D96F62A32EDF565C00406CF0 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D96F62B02EDF565F00406CF0 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D96F62BA2EDF565F00406CF0 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		1E774E082F2506E4001A8F0F /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D96F62A12EDF565C00406CF0 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D96F62AE2EDF565F00406CF0 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D96F62B82EDF565F00406CF0 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		D96F62B42EDF565F00406CF0 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D96F62A42EDF565C00406CF0 /* Algo-Trading */;
+			targetProxy = D96F62B32EDF565F00406CF0 /* PBXContainerItemProxy */;
+		};
+		D96F62BE2EDF565F00406CF0 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D96F62A42EDF565C00406CF0 /* Algo-Trading */;
+			targetProxy = D96F62BD2EDF565F00406CF0 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		1E6893B62F23B695006AE86A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		1E6893B72F23B695006AE86A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		1E774E112F2506E4001A8F0F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		1E774E122F2506E4001A8F0F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		D96F62C42EDF565F00406CF0 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		D96F62C52EDF565F00406CF0 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		D96F62C72EDF565F00406CF0 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 366VVLKN2U;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Argus;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "Project.com.Algo-Trading";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		D96F62C82EDF565F00406CF0 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 366VVLKN2U;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Argus;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "Project.com.Algo-Trading";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		D96F62CA2EDF565F00406CF0 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "Project.com.Algo-TradingTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Algo-Trading.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Algo-Trading";
+			};
+			name = Debug;
+		};
+		D96F62CB2EDF565F00406CF0 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.1;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "Project.com.Algo-TradingTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Algo-Trading.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Algo-Trading";
+			};
+			name = Release;
+		};
+		D96F62CD2EDF565F00406CF0 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Info.plist;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "Project.com.Algo-TradingUITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = "Algo-Trading";
+			};
+			name = Debug;
+		};
+		D96F62CE2EDF565F00406CF0 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Info.plist;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "Project.com.Algo-TradingUITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = "Algo-Trading";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		1E6893B82F23B695006AE86A /* Build configuration list for PBXNativeTarget "ArgusRunner" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1E6893B62F23B695006AE86A /* Debug */,
+				1E6893B72F23B695006AE86A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		1E774E102F2506E4001A8F0F /* Build configuration list for PBXNativeTarget "ArgusRunnerCLI2" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1E774E112F2506E4001A8F0F /* Debug */,
+				1E774E122F2506E4001A8F0F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D96F62A02EDF565C00406CF0 /* Build configuration list for PBXProject "Algo-Trading" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D96F62C42EDF565F00406CF0 /* Debug */,
+				D96F62C52EDF565F00406CF0 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D96F62C62EDF565F00406CF0 /* Build configuration list for PBXNativeTarget "Algo-Trading" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D96F62C72EDF565F00406CF0 /* Debug */,
+				D96F62C82EDF565F00406CF0 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D96F62C92EDF565F00406CF0 /* Build configuration list for PBXNativeTarget "Algo-TradingTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D96F62CA2EDF565F00406CF0 /* Debug */,
+				D96F62CB2EDF565F00406CF0 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D96F62CC2EDF565F00406CF0 /* Build configuration list for PBXNativeTarget "Algo-TradingUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D96F62CD2EDF565F00406CF0 /* Debug */,
+				D96F62CE2EDF565F00406CF0 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		D966DBC02EEE1A37008EDE9A /* XCRemoteSwiftPackageReference "SwiftRateLimiter" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/nuclearace/SwiftRateLimiter";
+			requirement = {
+				branch = master;
+				kind = branch;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+	};
+	rootObject = D96F629D2EDF565C00406CF0 /* Project object */;
+}

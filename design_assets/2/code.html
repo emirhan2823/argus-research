@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="tr"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Portföy Ekranı</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "primary": "#135bec",
+              "background-light": "#f6f6f8",
+              "background-dark": "#101622",
+            },
+            fontFamily: {
+              "display": ["Manrope"]
+            },
+            borderRadius: {"DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px"},
+          },
+        },
+      }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background-light dark:bg-background-dark font-display">
+<div class="relative flex h-auto min-h-screen w-full flex-col overflow-x-hidden">
+<!-- TopAppBar -->
+<div class="flex items-center bg-background-light dark:bg-background-dark p-4 pb-2 justify-between sticky top-0 z-10">
+<div class="text-white flex size-12 shrink-0 items-center justify-start">
+<span class="material-symbols-outlined text-gray-400 dark:text-gray-500">menu</span>
+</div>
+<h2 class="text-gray-900 dark:text-white text-lg font-bold leading-tight tracking-[-0.015em] flex-1 text-center">Portföy</h2>
+<div class="text-white flex size-12 shrink-0 items-center justify-end">
+<span class="material-symbols-outlined text-gray-400 dark:text-gray-500">notifications</span>
+</div>
+</div>
+<!-- BodyText for Total Assets Label -->
+<p class="text-gray-500 dark:text-gray-400 text-base font-normal leading-normal pt-1 px-4">Toplam Varlık</p>
+<!-- HeadlineText for Total Assets Value -->
+<h1 class="text-gray-900 dark:text-white tracking-tight text-[32px] font-bold leading-tight px-4 text-left pb-3">₺124,530.75</h1>
+<!-- Stats Section -->
+<div class="flex flex-wrap gap-4 p-4">
+<div class="flex min-w-[158px] flex-1 flex-col gap-2 rounded-xl p-4 border border-gray-200 dark:border-gray-800 bg-white/50 dark:bg-white/5">
+<p class="text-gray-600 dark:text-gray-400 text-base font-medium leading-normal">Bakiye</p>
+<p class="text-gray-900 dark:text-white tracking-tight text-2xl font-bold leading-tight">₺15,280.00</p>
+</div>
+<div class="flex min-w-[158px] flex-1 flex-col gap-2 rounded-xl p-4 border border-gray-200 dark:border-gray-800 bg-white/50 dark:bg-white/5">
+<p class="text-gray-600 dark:text-gray-400 text-base font-medium leading-normal">Günlük Kar/Zarar</p>
+<p class="text-gray-900 dark:text-white tracking-tight text-2xl font-bold leading-tight">₺1,240.15</p>
+<p class="text-green-500 dark:text-green-400 text-base font-medium leading-normal">+2.15%</p>
+</div>
+<div class="flex w-full flex-col gap-2 rounded-xl p-4 border border-gray-200 dark:border-gray-800 bg-white/50 dark:bg-white/5">
+<p class="text-gray-600 dark:text-gray-400 text-base font-medium leading-normal">Toplam Kar</p>
+<p class="text-gray-900 dark:text-white tracking-tight text-2xl font-bold leading-tight">₺24,530.75</p>
+</div>
+</div>
+<!-- SegmentedButtons -->
+<div class="flex px-4 py-3 sticky top-[72px] bg-background-light dark:bg-background-dark z-10">
+<div class="flex h-10 flex-1 items-center justify-center rounded-lg bg-gray-200 dark:bg-gray-800 p-1">
+<label class="flex cursor-pointer h-full grow items-center justify-center overflow-hidden rounded-lg px-2 has-[:checked]:bg-white has-[:checked]:dark:bg-gray-700 has-[:checked]:shadow-sm has-[:checked]:text-gray-900 has-[:checked]:dark:text-white text-gray-500 dark:text-gray-400 text-sm font-medium leading-normal transition-colors">
+<span class="truncate">İşlemler</span>
+<input checked="" class="invisible w-0" name="portfolio-segment" type="radio" value="İşlemler"/>
+</label>
+<label class="flex cursor-pointer h-full grow items-center justify-center overflow-hidden rounded-lg px-2 has-[:checked]:bg-white has-[:checked]:dark:bg-gray-700 has-[:checked]:shadow-sm has-[:checked]:text-gray-900 has-[:checked]:dark:text-white text-gray-500 dark:text-gray-400 text-sm font-medium leading-normal transition-colors">
+<span class="truncate">Geçmiş</span>
+<input class="invisible w-0" name="portfolio-segment" type="radio" value="Geçmiş"/>
+</label>
+</div>
+</div>
+<!-- Asset List -->
+<div class="flex flex-col gap-3 px-4 pb-4">
+<!-- List Item 1 -->
+<div class="flex items-center gap-4 rounded-xl p-3 border border-transparent hover:bg-gray-100 dark:hover:bg-gray-800/50">
+<div class="flex h-12 w-12 items-center justify-center rounded-full bg-gray-200 dark:bg-gray-700">
+<span class="text-xl font-bold text-gray-800 dark:text-white">T</span>
+</div>
+<div class="flex-1">
+<p class="font-bold text-base text-gray-900 dark:text-white">THYAO</p>
+<p class="text-sm text-gray-500 dark:text-gray-400">Türk Hava Yolları</p>
+</div>
+<div class="text-right">
+<p class="font-bold text-base text-gray-900 dark:text-white">₺28,500.50</p>
+<div class="flex items-center justify-end gap-1">
+<span class="material-symbols-outlined text-sm text-green-500">arrow_upward</span>
+<p class="text-sm font-medium text-green-500 dark:text-green-400">+1.75%</p>
+</div>
+</div>
+</div>
+<!-- List Item 2 -->
+<div class="flex items-center gap-4 rounded-xl p-3 border border-transparent hover:bg-gray-100 dark:hover:bg-gray-800/50">
+<div class="flex h-12 w-12 items-center justify-center rounded-full bg-blue-500/20 dark:bg-blue-500/20">
+<span class="text-xl font-bold text-blue-600 dark:text-blue-300">F</span>
+</div>
+<div class="flex-1">
+<p class="font-bold text-base text-gray-900 dark:text-white">FROTO</p>
+<p class="text-sm text-gray-500 dark:text-gray-400">Ford Otosan</p>
+</div>
+<div class="text-right">
+<p class="font-bold text-base text-gray-900 dark:text-white">₺19,230.00</p>
+<div class="flex items-center justify-end gap-1">
+<span class="material-symbols-outlined text-sm text-red-500">arrow_downward</span>
+<p class="text-sm font-medium text-red-500 dark:text-red-400">-0.42%</p>
+</div>
+</div>
+</div>
+<!-- List Item 3 -->
+<div class="flex items-center gap-4 rounded-xl p-3 border border-transparent hover:bg-gray-100 dark:hover:bg-gray-800/50">
+<div class="flex h-12 w-12 items-center justify-center rounded-full bg-yellow-500/20 dark:bg-yellow-500/20">
+<span class="text-xl font-bold text-yellow-600 dark:text-yellow-300">A</span>
+</div>
+<div class="flex-1">
+<p class="font-bold text-base text-gray-900 dark:text-white">ARCLK</p>
+<p class="text-sm text-gray-500 dark:text-gray-400">Arçelik</p>
+</div>
+<div class="text-right">
+<p class="font-bold text-base text-gray-900 dark:text-white">₺15,840.25</p>
+<div class="flex items-center justify-end gap-1">
+<span class="material-symbols-outlined text-sm text-green-500">arrow_upward</span>
+<p class="text-sm font-medium text-green-500 dark:text-green-400">+3.10%</p>
+</div>
+</div>
+</div>
+<!-- List Item 4 -->
+<div class="flex items-center gap-4 rounded-xl p-3 border border-transparent hover:bg-gray-100 dark:hover:bg-gray-800/50">
+<div class="flex h-12 w-12 items-center justify-center rounded-full bg-red-500/20 dark:bg-red-500/20">
+<span class="text-xl font-bold text-red-600 dark:text-red-300">B</span>
+</div>
+<div class="flex-1">
+<p class="font-bold text-base text-gray-900 dark:text-white">BIMAS</p>
+<p class="text-sm text-gray-500 dark:text-gray-400">Bim Mağazalar</p>
+</div>
+<div class="text-right">
+<p class="font-bold text-base text-gray-900 dark:text-white">₺12,300.00</p>
+<div class="flex items-center justify-end gap-1">
+<span class="material-symbols-outlined text-sm text-red-500">arrow_downward</span>
+<p class="text-sm font-medium text-red-500 dark:text-red-400">-1.15%</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+</body></html>

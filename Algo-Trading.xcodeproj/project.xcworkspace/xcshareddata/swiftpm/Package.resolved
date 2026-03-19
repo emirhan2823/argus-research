@@ -1,0 +1,15 @@
+{
+  "originHash" : "f00201391fc587b8e0184beb7d98a2f1cfe5b94cd35b77074feb846add168010",
+  "pins" : [
+    {
+      "identity" : "swiftratelimiter",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/nuclearace/SwiftRateLimiter",
+      "state" : {
+        "branch" : "master",
+        "revision" : "a6d34d5e73eccdfb90f9a3703f321d1db983b64c"
+      }
+    }
+  ],
+  "version" : 3
+}

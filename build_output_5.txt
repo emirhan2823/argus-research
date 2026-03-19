@@ -1,0 +1,1282 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -project Algo-Trading.xcodeproj -scheme Algo-Trading -configuration Debug -sdk iphonesimulator build CODE_SIGN_IDENTITY= CODE_SIGNING_REQUIRED=NO
+
+Build settings from command line:
+    CODE_SIGN_IDENTITY = 
+    CODE_SIGNING_REQUIRED = NO
+    SDKROOT = iphonesimulator26.2
+
+Resolve Package Graph
+
+
+Resolved source packages:
+  SwiftRateLimiter: https://github.com/nuclearace/SwiftRateLimiter @ master (a6d34d5)
+
+2026-01-20 18:44:59.442 xcodebuild[33889:575796] [MT] IDERunDestination: Supported platforms for the buildables in the current scheme is empty.
+--- xcodebuild: WARNING: Using the first of multiple matching destinations:
+{ platform:iOS Simulator, id:dvtdevice-DVTiOSDeviceSimulatorPlaceholder-iphonesimulator:placeholder, name:Any iOS Simulator Device }
+{ platform:iOS Simulator, arch:arm64, id:694DEE87-02EA-49EE-ACB8-334FE33D872A, OS:26.2, name:iPad (A16) }
+{ platform:iOS Simulator, arch:arm64, id:0779E223-A8D7-4C11-BF96-331524EC41E8, OS:26.2, name:iPad Air 11-inch (M3) }
+{ platform:iOS Simulator, arch:arm64, id:BAE9B122-4EEF-468B-9476-C655D6F8AB66, OS:26.2, name:iPad Air 13-inch (M3) }
+{ platform:iOS Simulator, arch:arm64, id:E5BB139F-8DD8-46EE-8FC2-277102CBEC16, OS:26.2, name:iPad Pro 11-inch (M5) }
+{ platform:iOS Simulator, arch:arm64, id:C5F947C6-3D16-4C8A-B9F9-DAEB1B154EB7, OS:26.2, name:iPad Pro 13-inch (M5) }
+{ platform:iOS Simulator, arch:arm64, id:8B0D515C-CFCD-40F8-A0C8-23CAD0B213B1, OS:26.2, name:iPad mini (A17 Pro) }
+{ platform:iOS Simulator, arch:arm64, id:9A661B18-C146-4288-B322-16172511906D, OS:26.2, name:iPhone 16e }
+{ platform:iOS Simulator, arch:arm64, id:B39A0EEB-0AEC-4881-BE77-3879AB17F758, OS:26.2, name:iPhone 17 }
+{ platform:iOS Simulator, arch:arm64, id:D5C6DC36-E943-4EFB-9ACD-BEB363ECDD4E, OS:26.2, name:iPhone 17 Pro }
+{ platform:iOS Simulator, arch:arm64, id:5AAEF51C-D421-47F2-909C-A7D5D1CD32F4, OS:26.2, name:iPhone 17 Pro Max }
+{ platform:iOS Simulator, arch:arm64, id:E0F8BC7E-C9DA-47B4-A71A-58F29BDCBF5F, OS:26.2, name:iPhone Air }
+{ platform:macOS, arch:arm64, variant:Designed for [iPad,iPhone], id:00008132-001209A23CA2401C, name:My Mac }
+{ platform:iOS, id:dvtdevice-DVTiPhonePlaceholder-iphoneos:placeholder, name:Any iOS Device }
+note: Using codesigning identity override: 
+ComputePackagePrebuildTargetDependencyGraph
+
+Prepare packages
+
+CreateBuildRequest
+
+SendProjectDescription
+
+CreateBuildOperation
+
+ComputeTargetDependencyGraph
+note: Building targets in dependency order
+note: Target dependency graph (1 target)
+    Target 'Algo-Trading' in project 'Algo-Trading' (no dependencies)
+
+GatherProvisioningInputs
+
+CreateBuildDescription
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.2.sdk -x c -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/usr/bin/actool --print-asset-tag-combinations --output-format xml1 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Assets.xcassets
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/usr/bin/actool --version --output-format xml1
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc --version
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld -version_details
+
+Build description signature: ba0899d49f9e4c04c1b65a55e9912761
+Build description path: /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/XCBuildData/ba0899d49f9e4c04c1b65a55e9912761.xcbuilddata
+ClangStatCache /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.2.sdk /Users/emirhan/Library/Developer/Xcode/DerivedData/SDKStatCaches.noindex/iphonesimulator26.2-23C53-7d00a8b37fbd7999ea79df8ebc024bf0.sdkstatcache
+    cd /Users/emirhan/deneme2/argus-terminal/Algo-Trading.xcodeproj
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.2.sdk -o /Users/emirhan/Library/Developer/Xcode/DerivedData/SDKStatCaches.noindex/iphonesimulator26.2-23C53-7d00a8b37fbd7999ea79df8ebc024bf0.sdkstatcache
+
+ProcessProductPackaging "" /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Algo-Trading.app-Simulated.xcent (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+    Entitlements:
+    
+    {
+    "application-identifier" = "34TZL8Z8U4.Project.com.Algo-Trading";
+}
+    
+    builtin-productPackagingUtility -entitlements -format xml -o /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Algo-Trading.app-Simulated.xcent
+
+ProcessProductPackagingDER /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Algo-Trading.app-Simulated.xcent /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Algo-Trading.app-Simulated.xcent.der (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    /usr/bin/derq query -f xml -i /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Algo-Trading.app-Simulated.xcent -o /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Algo-Trading.app-Simulated.xcent.der --raw
+
+ProcessInfoPlistFile /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Products/Debug-iphonesimulator/Algo-Trading.app/Info.plist /Users/emirhan/deneme2/argus-terminal/Info.plist (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    builtin-infoPlistUtility /Users/emirhan/deneme2/argus-terminal/Info.plist -producttype com.apple.product-type.application -genpkginfo /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Products/Debug-iphonesimulator/Algo-Trading.app/PkgInfo -expandbuildsettings -format binary -platform iphonesimulator -additionalcontentfile /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/assetcatalog_generated_info.plist -o /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Products/Debug-iphonesimulator/Algo-Trading.app/Info.plist
+
+SwiftDriver Algo-Trading normal arm64 com.apple.xcode.tools.swift.compiler (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    builtin-SwiftDriver -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name Algo_Trading -Onone -enforce-exclusivity\=checked @/Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/Algo-Trading.SwiftFileList -DDEBUG -default-isolation\=MainActor -enable-bare-slash-regex -enable-upcoming-feature DisableOutwardActorInference -enable-upcoming-feature InferSendableFromCaptures -enable-upcoming-feature GlobalActorIsolatedTypesUsability -enable-upcoming-feature MemberImportVisibility -enable-upcoming-feature InferIsolatedConformances -enable-upcoming-feature NonisolatedNonsendingByDefault -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.2.sdk -target arm64-apple-ios26.1-simulator -g -module-cache-path /Users/emirhan/Library/Developer/Xcode/DerivedData/ModuleCache.noindex -Xfrontend -serialize-debugging-options -profile-coverage-mapping -profile-generate -enable-testing -index-store-path /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Index.noindex/DataStore -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -swift-version 5 -I /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Products/Debug-iphonesimulator -F /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Products/Debug-iphonesimulator -emit-localized-strings -emit-localized-strings-path /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64 -c -j10 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /Users/emirhan/Library/Developer/Xcode/DerivedData/SDKStatCaches.noindex/iphonesimulator26.2-23C53-7d00a8b37fbd7999ea79df8ebc024bf0.sdkstatcache -output-file-map /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/Algo-Trading-OutputFileMap.json -use-frontend-parseable-output -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /Users/emirhan/Library/Developer/Xcode/DerivedData/ModuleCache.noindex -sdk-module-cache-path /Users/emirhan/Library/Developer/Xcode/DerivedData/ModuleCache.noindex -serialize-diagnostics -emit-dependencies -emit-module -emit-module-path /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/Algo_Trading.swiftmodule -validate-clang-modules-once -clang-build-session-file /Users/emirhan/Library/Developer/Xcode/DerivedData/ModuleCache.noindex/Session.modulevalidation -Xcc -I/Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/swift-overrides.hmap -emit-const-values -Xfrontend -const-gather-protocols-file -Xfrontend /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/Algo-Trading_const_extract_protocols.json -Xcc -iquote -Xcc /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Algo-Trading-generated-files.hmap -Xcc -I/Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Algo-Trading-own-target-headers.hmap -Xcc -I/Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Algo-Trading-all-target-headers.hmap -Xcc -iquote -Xcc /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Algo-Trading-project-headers.hmap -Xcc -I/Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Products/Debug-iphonesimulator/include -Xcc -I/Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/DerivedSources-normal/arm64 -Xcc -I/Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/DerivedSources/arm64 -Xcc -I/Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/DerivedSources -Xcc -DDEBUG\=1 -emit-objc-header -emit-objc-header-path /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/Algo_Trading-Swift.h -working-directory /Users/emirhan/deneme2/argus-terminal -experimental-emit-module-separately -disable-cmo
+
+SwiftDriver Algo-Trading normal x86_64 com.apple.xcode.tools.swift.compiler (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    builtin-SwiftDriver -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name Algo_Trading -Onone -enforce-exclusivity\=checked @/Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/x86_64/Algo-Trading.SwiftFileList -DDEBUG -default-isolation\=MainActor -enable-bare-slash-regex -enable-upcoming-feature DisableOutwardActorInference -enable-upcoming-feature InferSendableFromCaptures -enable-upcoming-feature GlobalActorIsolatedTypesUsability -enable-upcoming-feature MemberImportVisibility -enable-upcoming-feature InferIsolatedConformances -enable-upcoming-feature NonisolatedNonsendingByDefault -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.2.sdk -target x86_64-apple-ios26.1-simulator -g -module-cache-path /Users/emirhan/Library/Developer/Xcode/DerivedData/ModuleCache.noindex -Xfrontend -serialize-debugging-options -profile-coverage-mapping -profile-generate -enable-testing -index-store-path /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Index.noindex/DataStore -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -swift-version 5 -I /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Products/Debug-iphonesimulator -F /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Products/Debug-iphonesimulator -emit-localized-strings -emit-localized-strings-path /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/x86_64 -c -j10 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /Users/emirhan/Library/Developer/Xcode/DerivedData/SDKStatCaches.noindex/iphonesimulator26.2-23C53-7d00a8b37fbd7999ea79df8ebc024bf0.sdkstatcache -output-file-map /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/x86_64/Algo-Trading-OutputFileMap.json -use-frontend-parseable-output -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /Users/emirhan/Library/Developer/Xcode/DerivedData/ModuleCache.noindex -sdk-module-cache-path /Users/emirhan/Library/Developer/Xcode/DerivedData/ModuleCache.noindex -serialize-diagnostics -emit-dependencies -emit-module -emit-module-path /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/x86_64/Algo_Trading.swiftmodule -validate-clang-modules-once -clang-build-session-file /Users/emirhan/Library/Developer/Xcode/DerivedData/ModuleCache.noindex/Session.modulevalidation -Xcc -I/Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/swift-overrides.hmap -emit-const-values -Xfrontend -const-gather-protocols-file -Xfrontend /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/x86_64/Algo-Trading_const_extract_protocols.json -Xcc -iquote -Xcc /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Algo-Trading-generated-files.hmap -Xcc -I/Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Algo-Trading-own-target-headers.hmap -Xcc -I/Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Algo-Trading-all-target-headers.hmap -Xcc -iquote -Xcc /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Algo-Trading-project-headers.hmap -Xcc -I/Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Products/Debug-iphonesimulator/include -Xcc -I/Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/DerivedSources-normal/x86_64 -Xcc -I/Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/DerivedSources/x86_64 -Xcc -I/Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/DerivedSources -Xcc -DDEBUG\=1 -emit-objc-header -emit-objc-header-path /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/x86_64/Algo_Trading-Swift.h -working-directory /Users/emirhan/deneme2/argus-terminal -experimental-emit-module-separately -disable-cmo
+
+SwiftExplicitDependencyGeneratePcm x86_64 /Users/emirhan/Library/Developer/Xcode/DerivedData/ModuleCache.noindex/SwiftUI-BWYWWKJRRQZA4TV6T13VZA2A0.pcm
+
+SwiftCompile normal arm64 Compiling\ ChironCouncilLearningService.swift,\ CouncilAdvisorGenerator.swift,\ HermesCouncil.swift,\ HermesCouncilMembers.swift,\ HermesCouncilProtocol.swift,\ MomentumMasterEngine.swift,\ OrionCouncil.swift,\ OrionCouncilProtocol.swift,\ PatternMasterEngine.swift,\ PriceMasterEngine.swift,\ StructureMasterEngine.swift,\ TrendMasterEngine.swift,\ FundamentalsStore.swift,\ MacroStore.swift,\ MarketDataStore.swift,\ FredProvider.swift,\ LocalMarketScannerProvider.swift,\ LocalScannerAdapter.swift,\ DemeterEngine.swift,\ DemeterLabor.swift,\ SectorMap.swift,\ ArgusExecutionCore.swift,\ ExecutionModels.swift,\ AetherManifest.swift,\ AetherScoringConfig.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Council/ChironCouncilLearningService.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Council/CouncilAdvisorGenerator.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Council/HermesCouncil.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Council/HermesCouncilMembers.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Council/HermesCouncilProtocol.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Council/MomentumMasterEngine.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Council/OrionCouncil.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Council/OrionCouncilProtocol.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Council/PatternMasterEngine.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Council/PriceMasterEngine.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Council/StructureMasterEngine.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Council/TrendMasterEngine.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/DataLayer/FundamentalsStore.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/DataLayer/MacroStore.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/DataLayer/MarketDataStore.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/DataProviders/FredProvider.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/DataProviders/LocalMarketScannerProvider.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/DataProviders/LocalScannerAdapter.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Demeter/DemeterEngine.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Demeter/DemeterLabor.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Demeter/SectorMap.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Execution/ArgusExecutionCore.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Execution/ExecutionModels.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Heimdall/AetherManifest.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Heimdall/AetherScoringConfig.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Council/ChironCouncilLearningService.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Council/CouncilAdvisorGenerator.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Council/HermesCouncil.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Council/HermesCouncilMembers.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Council/HermesCouncilProtocol.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Council/MomentumMasterEngine.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Council/OrionCouncil.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Council/OrionCouncilProtocol.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Council/PatternMasterEngine.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Council/PriceMasterEngine.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Council/StructureMasterEngine.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Council/TrendMasterEngine.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/DataLayer/FundamentalsStore.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/DataLayer/MacroStore.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/DataLayer/MarketDataStore.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/DataProviders/FredProvider.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/DataProviders/LocalMarketScannerProvider.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/DataProviders/LocalScannerAdapter.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Demeter/DemeterEngine.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Demeter/DemeterLabor.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Demeter/SectorMap.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Execution/ArgusExecutionCore.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Execution/ExecutionModels.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Heimdall/AetherManifest.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Heimdall/AetherScoringConfig.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 Compiling\ ArgusAutoPilot.swift,\ ArgusAutoPilotEngine.swift,\ ArgusAutoPilotEngine+Safety.swift,\ ArgusAutoPilotInterfaces.swift,\ ArgusBacktestEngine.swift,\ ArgusBacktestEngine_Chiron.swift,\ ArgusCoreCombiner.swift,\ ArgusCorseEngine.swift,\ ArgusDataStore.swift,\ ArgusDecisionEngine.swift,\ ArgusEtfEngine.swift,\ ArgusExplanationService.swift,\ ArgusFeedbackLoopService.swift,\ ArgusLabEngine.swift,\ ArgusLabStore.swift,\ ArgusProviderStatsStore.swift,\ ArgusPulseEngine.swift,\ ArgusScoutService.swift,\ ArgusShieldEngine.swift,\ ArgusStorage.swift,\ AthenaEngine+Intelligence.swift,\ AthenaFactorService.swift,\ AtlasEngine.swift,\ AutoPilotExecutionManager.swift,\ AutoPilotLogger.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusAutoPilot.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusAutoPilotEngine.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusAutoPilotEngine+Safety.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusAutoPilotInterfaces.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine_Chiron.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusCoreCombiner.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusCorseEngine.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusDataStore.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusDecisionEngine.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusEtfEngine.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusExplanationService.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusFeedbackLoopService.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusLabEngine.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusLabStore.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusProviderStatsStore.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusPulseEngine.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusScoutService.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusShieldEngine.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusStorage.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/AthenaEngine+Intelligence.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/AthenaFactorService.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/AtlasEngine.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/AutoPilotExecutionManager.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/AutoPilotLogger.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+Failed frontend command:
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swift-frontend -frontend -c -filelist /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/sources-1 -primary-file /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusAutoPilot.swift -primary-file /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusAutoPilotEngine.swift -primary-file /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusAutoPilotEngine+Safety.swift -primary-file /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusAutoPilotInterfaces.swift -primary-file /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine.swift -primary-file /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine_Chiron.swift -primary-file /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusCoreCombiner.swift -primary-file /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusCorseEngine.swift -primary-file /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusDataStore.swift -primary-file /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusDecisionEngine.swift -primary-file /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusEtfEngine.swift -primary-file /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusExplanationService.swift -primary-file /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusFeedbackLoopService.swift -primary-file /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusLabEngine.swift -primary-file /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusLabStore.swift -primary-file /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusProviderStatsStore.swift -primary-file /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusPulseEngine.swift -primary-file /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusScoutService.swift -primary-file /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusShieldEngine.swift -primary-file /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusStorage.swift -primary-file /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/AthenaEngine+Intelligence.swift -primary-file /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/AthenaFactorService.swift -primary-file /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/AtlasEngine.swift -primary-file /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/AutoPilotExecutionManager.swift -primary-file /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/AutoPilotLogger.swift -supplementary-output-file-map /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/supplementaryOutputs-16 -emit-localized-strings -emit-localized-strings-path /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64 -target arm64-apple-ios26.1-simulator -module-can-import-version DeveloperToolsSupport 23.0.4 23.0.4 -module-can-import-version SwiftUI 7.2.5.1 7.2.5 -module-can-import-version UIKit 9126.2.4.1 9126.2.4 -disable-cross-import-overlay-search -swift-module-cross-import SwiftData /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.2.sdk/System/Library/Frameworks/SwiftData.framework/Modules/SwiftData.swiftcrossimport/CoreData.swiftoverlay -swift-module-cross-import SwiftData /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.2.sdk/System/Library/Frameworks/SwiftData.framework/Modules/SwiftData.swiftcrossimport/SwiftUI.swiftoverlay -load-resolved-plugin /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/lib/swift/host/plugins/libAppIntentsMacros.dylib\#/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/swift-plugin-server\#AppIntentsMacros -load-resolved-plugin /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/lib/swift/host/plugins/libFoundationMacros.dylib\#/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/swift-plugin-server\#FoundationMacros -load-resolved-plugin /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/lib/swift/host/plugins/libObservationMacros.dylib\#/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/swift-plugin-server\#ObservationMacros -load-resolved-plugin /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/lib/swift/host/plugins/libPreviewsMacros.dylib\#/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/swift-plugin-server\#PreviewsMacros -load-resolved-plugin /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/lib/swift/host/plugins/libSwiftDataMacros.dylib\#/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/swift-plugin-server\#SwiftDataMacros -load-resolved-plugin /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/lib/swift/host/plugins/libSwiftMacros.dylib\#/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/swift-plugin-server\#SwiftMacros -load-resolved-plugin /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/lib/swift/host/plugins/libSwiftUIMacros.dylib\#/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/swift-plugin-server\#SwiftUIMacros -disable-implicit-swift-modules -Xcc -fno-implicit-modules -Xcc -fno-implicit-module-maps -explicit-swift-module-map-file /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/Algo_Trading-dependencies-2.json -Xllvm -aarch64-use-tbi -enable-objc-interop -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.2.sdk -I /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Products/Debug-iphonesimulator -F /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Products/Debug-iphonesimulator -no-color-diagnostics -Xcc -fno-color-diagnostics -enable-testing -g -debug-info-format\=dwarf -dwarf-version\=5 -module-cache-path /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -profile-generate -profile-coverage-mapping -swift-version 5 -enforce-exclusivity\=checked -Onone -D DEBUG -serialize-debugging-options -const-gather-protocols-file /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/Algo-Trading_const_extract_protocols.json -enable-upcoming-feature DisableOutwardActorInference -enable-upcoming-feature InferSendableFromCaptures -enable-upcoming-feature GlobalActorIsolatedTypesUsability -enable-upcoming-feature MemberImportVisibility -enable-upcoming-feature InferIsolatedConformances -enable-upcoming-feature NonisolatedNonsendingByDefault -enable-experimental-feature DebugDescriptionMacro -enable-bare-slash-regex -default-isolation\=MainActor -empty-abi-descriptor -validate-clang-modules-once -clang-build-session-file /Users/emirhan/Library/Developer/Xcode/DerivedData/ModuleCache.noindex/Session.modulevalidation -Xcc -working-directory -Xcc /Users/emirhan/deneme2/argus-terminal -enable-anonymous-context-mangled-names -file-compilation-dir /Users/emirhan/deneme2/argus-terminal -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -Xcc -ivfsstatcache -Xcc /Users/emirhan/Library/Developer/Xcode/DerivedData/SDKStatCaches.noindex/iphonesimulator26.2-23C53-7d00a8b37fbd7999ea79df8ebc024bf0.sdkstatcache -Xcc -I/Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/swift-overrides.hmap -Xcc -iquote -Xcc /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Algo-Trading-generated-files.hmap -Xcc -I/Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Algo-Trading-own-target-headers.hmap -Xcc -I/Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Algo-Trading-all-target-headers.hmap -Xcc -iquote -Xcc /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Algo-Trading-project-headers.hmap -Xcc -I/Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Products/Debug-iphonesimulator/include -Xcc -I/Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/DerivedSources-normal/arm64 -Xcc -I/Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/DerivedSources/arm64 -Xcc -I/Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/DerivedSources -Xcc -DDEBUG\=1 -no-auto-bridging-header-chaining -module-name Algo_Trading -frontend-parseable-output -disable-clang-spi -target-sdk-version 26.2 -target-sdk-name iphonesimulator26.2 -clang-target arm64-apple-ios26.2-simulator -in-process-plugin-server-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/libSwiftInProcPluginServer.dylib -o /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/ArgusAutoPilot.o -o /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/ArgusAutoPilotEngine.o -o /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/ArgusAutoPilotEngine+Safety.o -o /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/ArgusAutoPilotInterfaces.o -o /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/ArgusBacktestEngine.o -o /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/ArgusBacktestEngine_Chiron.o -o /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/ArgusCoreCombiner.o -o /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/ArgusCorseEngine.o -o /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/ArgusDataStore.o -o /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/ArgusDecisionEngine.o -o /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/ArgusEtfEngine.o -o /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/ArgusExplanationService.o -o /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/ArgusFeedbackLoopService.o -o /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/ArgusLabEngine.o -o /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/ArgusLabStore.o -o /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/ArgusProviderStatsStore.o -o /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/ArgusPulseEngine.o -o /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/ArgusScoutService.o -o /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/ArgusShieldEngine.o -o /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/ArgusStorage.o -o /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/AthenaEngine+Intelligence.o -o /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/AthenaFactorService.o -o /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/AtlasEngine.o -o /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/AutoPilotExecutionManager.o -o /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/AutoPilotLogger.o -index-unit-output-path /Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/ArgusAutoPilot.o -index-unit-output-path /Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/ArgusAutoPilotEngine.o -index-unit-output-path /Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/ArgusAutoPilotEngine+Safety.o -index-unit-output-path /Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/ArgusAutoPilotInterfaces.o -index-unit-output-path /Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/ArgusBacktestEngine.o -index-unit-output-path /Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/ArgusBacktestEngine_Chiron.o -index-unit-output-path /Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/ArgusCoreCombiner.o -index-unit-output-path /Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/ArgusCorseEngine.o -index-unit-output-path /Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/ArgusDataStore.o -index-unit-output-path /Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/ArgusDecisionEngine.o -index-unit-output-path /Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/ArgusEtfEngine.o -index-unit-output-path /Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/ArgusExplanationService.o -index-unit-output-path /Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/ArgusFeedbackLoopService.o -index-unit-output-path /Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/ArgusLabEngine.o -index-unit-output-path /Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/ArgusLabStore.o -index-unit-output-path /Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/ArgusProviderStatsStore.o -index-unit-output-path /Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/ArgusPulseEngine.o -index-unit-output-path /Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/ArgusScoutService.o -index-unit-output-path /Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/ArgusShieldEngine.o -index-unit-output-path /Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/ArgusStorage.o -index-unit-output-path /Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/AthenaEngine+Intelligence.o -index-unit-output-path /Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/AthenaFactorService.o -index-unit-output-path /Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/AtlasEngine.o -index-unit-output-path /Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/AutoPilotExecutionManager.o -index-unit-output-path /Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/Objects-normal/arm64/AutoPilotLogger.o -index-store-path /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Index.noindex/DataStore -index-system-modules
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusAutoPilot.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusAutoPilotEngine.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusAutoPilotEngine.swift:125:17: warning: immutable value 'evaluatingEngine' was never used; consider replacing with '_' or removing it
+            let evaluatingEngine: AutoPilotEngine = portfolioState[symbol]?.engine ?? .pulse
+                ^~~~~~~~~~~~~~~~
+                _
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusAutoPilotEngine.swift:288:13: warning: initialization of immutable value 'dqScore' was never used; consider replacing with assignment to '_' or removing it
+        let dqScore = calculateDataQuality(symbol: symbol, candles: candles, atlas: atlasScore, aether: aetherRating, hermes: hermesInsight)
+        ~~~~^~~~~~~
+        _
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusAutoPilotEngine.swift:296:13: warning: variable 'argusMultiplier' was never used; consider replacing with '_' or removing it
+        var argusMultiplier: Double = 1.0 // Default Aggressive (Legacy behavior)
+            ^~~~~~~~~~~~~~~
+            _
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusAutoPilotEngine+Safety.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusAutoPilotInterfaces.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Models/BacktestModels.swift:16:49: warning: main actor-isolated static property 'realistic' can not be referenced from a nonisolated context
+        executionModel: ExecutionModelConfig = .realistic
+                                                ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Models/BacktestModels.swift:82:16: note: static property declared here
+    static var realistic: ExecutionModelConfig { ExecutionModelConfig(slippagePct: 0.03, commissionPct: 0.10, fixedCommission: 0) }
+               ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine.swift:51:21: warning: call to main actor-isolated initializer 'init(symbol:config:finalCapital:totalReturn:trades:winRate:candles:maxDrawdown:equityCurve:logs:totalSlippage:totalCommission:)' in a synchronous actor-isolated context
+             return BacktestResult(
+                    ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Models/BacktestModels.swift:136:5: note: calls to initializer 'init(symbol:config:finalCapital:totalReturn:trades:winRate:candles:maxDrawdown:equityCurve:logs:totalSlippage:totalCommission:)' from outside of its actor context are implicitly asynchronous
+    init(symbol: String, config: BacktestConfig, finalCapital: Double, totalReturn: Double, trades: [BacktestTrade], winRate: Double, candles: [Candle], maxDrawdown: Double, equityCurve: [EquityPoint], logs: [BacktestDayLog], totalSlippage: Double = 0, totalCommission: Double = 0) {
+    ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine.swift:67:42: warning: call to main actor-isolated static method 'calculateRSI(values:period:)' in a synchronous actor-isolated context
+            rsiValues = IndicatorService.calculateRSI(values: prices)
+                                         ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/IndicatorService.swift:22:17: note: calls to static method 'calculateRSI(values:period:)' from outside of its actor context are implicitly asynchronous
+    static func calculateRSI(values: [Double], period: Int = 14) -> [Double?] {
+                ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine.swift:69:44: warning: call to main actor-isolated static method 'calculateSMA(values:period:)' in a synchronous actor-isolated context
+            sma50Values = IndicatorService.calculateSMA(values: prices, period: 50)
+                                           ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/IndicatorService.swift:9:17: note: calls to static method 'calculateSMA(values:period:)' from outside of its actor context are implicitly asynchronous
+    static func calculateSMA(values: [Double], period: Int) -> [Double?] {
+                ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine.swift:70:45: warning: call to main actor-isolated static method 'calculateSMA(values:period:)' in a synchronous actor-isolated context
+            sma200Values = IndicatorService.calculateSMA(values: prices, period: 200)
+                                            ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/IndicatorService.swift:9:17: note: calls to static method 'calculateSMA(values:period:)' from outside of its actor context are implicitly asynchronous
+    static func calculateSMA(values: [Double], period: Int) -> [Double?] {
+                ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine.swift:72:41: warning: call to main actor-isolated static method 'calculateBollingerBands(values:period:stdDevMultiplier:)' in a synchronous actor-isolated context
+            bbValues = IndicatorService.calculateBollingerBands(values: prices)
+                                        ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/IndicatorService.swift:132:17: note: calls to static method 'calculateBollingerBands(values:period:stdDevMultiplier:)' from outside of its actor context are implicitly asynchronous
+    static func calculateBollingerBands(values: [Double], period: Int = 20, stdDevMultiplier: Double = 2.0) -> (upper: [Double?], middle: [Double?], lower: [Double?]) {
+                ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine.swift:74:42: warning: call to main actor-isolated static method 'calculateSAR(candles:acceleration:maximum:)' in a synchronous actor-isolated context
+            sarValues = IndicatorService.calculateSAR(candles: candles)
+                                         ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/IndicatorService.swift:253:17: note: calls to static method 'calculateSAR(candles:acceleration:maximum:)' from outside of its actor context are implicitly asynchronous
+    static func calculateSAR(candles: [Candle], acceleration: Double = 0.02, maximum: Double = 0.2) -> [Double?] {
+                ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine.swift:96:69: warning: call to main actor-isolated instance method 'calculateOrionScore(symbol:candles:spyCandles:)' in a synchronous actor-isolated context
+                guard let orionResult = OrionAnalysisService.shared.calculateOrionScore(symbol: symbol, candles: slice) else { continue }
+                                                                    ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/OrionAnalysisService.swift:50:10: note: calls to instance method 'calculateOrionScore(symbol:candles:spyCandles:)' from outside of its actor context are implicitly asynchronous
+    func calculateOrionScore(symbol: String, candles: [Candle], spyCandles: [Candle]? = nil) -> OrionScoreResult? {
+         ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine.swift:96:62: warning: main actor-isolated static property 'shared' can not be referenced on a nonisolated actor instance
+                guard let orionResult = OrionAnalysisService.shared.calculateOrionScore(symbol: symbol, candles: slice) else { continue }
+                                                             ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/OrionAnalysisService.swift:4:16: note: static property declared here
+    static let shared = OrionAnalysisService()
+               ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine.swift:101:59: warning: call to main actor-isolated instance method 'makeDecision(symbol:assetType:atlas:orion:orionDetails:aether:hermes:cronos:athena:phoenixAdvice:demeterScore:marketData:traceContext:portfolioContext:config:candidateSource:)' in a synchronous actor-isolated context
+                let decision = ArgusDecisionEngine.shared.makeDecision(
+                                                          ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusDecisionEngine.swift:13:10: note: calls to instance method 'makeDecision(symbol:assetType:atlas:orion:orionDetails:aether:hermes:cronos:athena:phoenixAdvice:demeterScore:marketData:traceContext:portfolioContext:config:candidateSource:)' from outside of its actor context are implicitly asynchronous
+    func makeDecision(
+         ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine.swift:101:52: warning: main actor-isolated static property 'shared' can not be referenced on a nonisolated actor instance
+                let decision = ArgusDecisionEngine.shared.makeDecision(
+                                                   ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusDecisionEngine.swift:5:16: note: static property declared here
+    static let shared = ArgusDecisionEngine()
+               ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine.swift:138:32: warning: main actor-isolated conformance of 'BacktestAction' to 'Equatable' cannot be used in actor-isolated context; this is an error in the Swift 6 language mode
+                else if action == .buy && reason == "" { reason = "Argus Signal" }
+                               ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine.swift:144:69: warning: call to main actor-isolated instance method 'calculateOrionScore(symbol:candles:spyCandles:)' in a synchronous actor-isolated context
+                guard let orionResult = OrionAnalysisService.shared.calculateOrionScore(symbol: symbol, candles: slice) else { continue }
+                                                                    ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/OrionAnalysisService.swift:50:10: note: calls to instance method 'calculateOrionScore(symbol:candles:spyCandles:)' from outside of its actor context are implicitly asynchronous
+    func calculateOrionScore(symbol: String, candles: [Candle], spyCandles: [Candle]? = nil) -> OrionScoreResult? {
+         ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine.swift:144:62: warning: main actor-isolated static property 'shared' can not be referenced on a nonisolated actor instance
+                guard let orionResult = OrionAnalysisService.shared.calculateOrionScore(symbol: symbol, candles: slice) else { continue }
+                                                             ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/OrionAnalysisService.swift:4:16: note: static property declared here
+    static let shared = OrionAnalysisService()
+               ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine.swift:286:47: warning: call to main actor-isolated static method 'analyze(candles:symbol:timeframe:config:)' in a synchronous actor-isolated context
+                    let advice = PhoenixLogic.analyze(
+                                              ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/PhoenixLogic.swift:14:17: note: calls to static method 'analyze(candles:symbol:timeframe:config:)' from outside of its actor context are implicitly asynchronous
+    static func analyze(
+                ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine.swift:389:23: warning: main actor-isolated conformance of 'BacktestAction' to 'Equatable' cannot be used in actor-isolated context; this is an error in the Swift 6 language mode
+            if action == .buy { actionString = "BUY" }
+                      ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine.swift:392:25: warning: call to main actor-isolated initializer 'init(date:price:score:action:details:)' in a synchronous actor-isolated context
+            logs.append(BacktestDayLog(
+                        ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Models/BacktestModels.swift:107:5: note: calls to initializer 'init(date:price:score:action:details:)' from outside of its actor context are implicitly asynchronous
+    init(date: Date, price: Double, score: Double, action: String, details: String) {
+    ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine.swift:401:23: warning: main actor-isolated conformance of 'BacktestAction' to 'Equatable' cannot be used in actor-isolated context; this is an error in the Swift 6 language mode
+            if action == .buy && shares == 0 {
+                      ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine.swift:405:31: warning: call to main actor-isolated initializer 'init(entryDate:exitDate:entryPrice:exitPrice:quantity:type:exitReason:slippage:commission:)' in a synchronous actor-isolated context
+                activeTrade = BacktestTrade(
+                              ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Models/BacktestModels.swift:209:5: note: calls to initializer 'init(entryDate:exitDate:entryPrice:exitPrice:quantity:type:exitReason:slippage:commission:)' from outside of its actor context are implicitly asynchronous
+    init(entryDate: Date, exitDate: Date, entryPrice: Double, exitPrice: Double, quantity: Double, type: TradeType, exitReason: String, slippage: Double = 0, commission: Double = 0) {
+    ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine.swift:425:33: warning: call to main actor-isolated initializer 'init(entryDate:exitDate:entryPrice:exitPrice:quantity:type:exitReason:slippage:commission:)' in a synchronous actor-isolated context
+                let completed = BacktestTrade(
+                                ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Models/BacktestModels.swift:209:5: note: calls to initializer 'init(entryDate:exitDate:entryPrice:exitPrice:quantity:type:exitReason:slippage:commission:)' from outside of its actor context are implicitly asynchronous
+    init(entryDate: Date, exitDate: Date, entryPrice: Double, exitPrice: Double, quantity: Double, type: TradeType, exitReason: String, slippage: Double = 0, commission: Double = 0) {
+    ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine.swift:442:35: warning: call to main actor-isolated initializer 'init(entryDate:exitDate:entryPrice:exitPrice:quantity:type:exitReason:slippage:commission:)' in a synchronous actor-isolated context
+                    activeTrade = BacktestTrade(
+                                  ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Models/BacktestModels.swift:209:5: note: calls to initializer 'init(entryDate:exitDate:entryPrice:exitPrice:quantity:type:exitReason:slippage:commission:)' from outside of its actor context are implicitly asynchronous
+    init(entryDate: Date, exitDate: Date, entryPrice: Double, exitPrice: Double, quantity: Double, type: TradeType, exitReason: String, slippage: Double = 0, commission: Double = 0) {
+    ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine.swift:466:28: warning: call to main actor-isolated initializer 'init(entryDate:exitDate:entryPrice:exitPrice:quantity:type:exitReason:slippage:commission:)' in a synchronous actor-isolated context
+           let completed = BacktestTrade(
+                           ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Models/BacktestModels.swift:209:5: note: calls to initializer 'init(entryDate:exitDate:entryPrice:exitPrice:quantity:type:exitReason:slippage:commission:)' from outside of its actor context are implicitly asynchronous
+    init(entryDate: Date, exitDate: Date, entryPrice: Double, exitPrice: Double, quantity: Double, type: TradeType, exitReason: String, slippage: Double = 0, commission: Double = 0) {
+    ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine.swift:479:39: warning: main actor-isolated property 'pnl' can not be referenced from a nonisolated context
+        let wins = trades.filter { $0.pnl > 0 }.count
+                                      ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Models/BacktestModels.swift:225:9: note: property declared here
+    var pnl: Double {
+        ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine.swift:482:16: warning: call to main actor-isolated initializer 'init(symbol:config:finalCapital:totalReturn:trades:winRate:candles:maxDrawdown:equityCurve:logs:totalSlippage:totalCommission:)' in a synchronous actor-isolated context
+        return BacktestResult(
+               ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Models/BacktestModels.swift:136:5: note: calls to initializer 'init(symbol:config:finalCapital:totalReturn:trades:winRate:candles:maxDrawdown:equityCurve:logs:totalSlippage:totalCommission:)' from outside of its actor context are implicitly asynchronous
+    init(symbol: String, config: BacktestConfig, finalCapital: Double, totalReturn: Double, trades: [BacktestTrade], winRate: Double, candles: [Candle], maxDrawdown: Double, equityCurve: [EquityPoint], logs: [BacktestDayLog], totalSlippage: Double = 0, totalCommission: Double = 0) {
+    ^
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine_Chiron.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine_Chiron.swift:138:64: warning: left side of nil coalescing operator '??' has non-optional type 'Double', so the right side is never used
+                aether: optimized.newArgusWeights.pulse.aether ?? 0.1,
+                        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~
+                                                              
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine_Chiron.swift:22:29: warning: expression is 'async' but is not marked with 'await'; this is an error in the Swift 6 language mode
+            moduleResults = PerformanceLog.ModuleResults(
+                            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                            await 
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine_Chiron.swift:22:29: note: calls to initializer 'init(atlas:orion:phoenix:aether:hermes:)' from outside of its actor context are implicitly asynchronous
+            moduleResults = PerformanceLog.ModuleResults(
+                            ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine_Chiron.swift:23:24: note: property access is 'async'
+                atlas: .empty,
+                       ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine_Chiron.swift:32:29: warning: expression is 'async' but is not marked with 'await'; this is an error in the Swift 6 language mode
+            moduleResults = PerformanceLog.ModuleResults(
+                            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                            await 
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine_Chiron.swift:32:29: note: calls to initializer 'init(atlas:orion:phoenix:aether:hermes:)' from outside of its actor context are implicitly asynchronous
+            moduleResults = PerformanceLog.ModuleResults(
+                            ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine_Chiron.swift:33:24: note: property access is 'async'
+                atlas: .empty,
+                       ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine_Chiron.swift:34:24: note: property access is 'async'
+                orion: .empty,
+                       ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine_Chiron.swift:43:29: warning: expression is 'async' but is not marked with 'await'; this is an error in the Swift 6 language mode
+            moduleResults = PerformanceLog.ModuleResults(
+                            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                            await 
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine_Chiron.swift:43:29: note: calls to initializer 'init(atlas:orion:phoenix:aether:hermes:)' from outside of its actor context are implicitly asynchronous
+            moduleResults = PerformanceLog.ModuleResults(
+                            ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine_Chiron.swift:44:24: note: property access is 'async'
+                atlas: .empty,
+                       ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine_Chiron.swift:45:24: note: property access is 'async'
+                orion: .empty,
+                       ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine_Chiron.swift:54:44: warning: main actor-isolated initializer 'init(atlas:orion:phoenix:aether:hermes:)' cannot be called from outside of the actor; this is an error in the Swift 6 language mode
+            moduleResults = PerformanceLog.ModuleResults(
+                            ~~~~~~~~~~~~~~~^~~~~~~~~~~~~~
+                            await 
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine_Chiron.swift:65:29: warning: expression is 'async' but is not marked with 'await'; this is an error in the Swift 6 language mode
+            moduleResults = PerformanceLog.ModuleResults(
+                            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                            await 
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine_Chiron.swift:65:29: note: calls to initializer 'init(atlas:orion:phoenix:aether:hermes:)' from outside of its actor context are implicitly asynchronous
+            moduleResults = PerformanceLog.ModuleResults(
+                            ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine_Chiron.swift:66:24: note: property access is 'async'
+                atlas: .empty,
+                       ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine_Chiron.swift:88:29: warning: expression is 'async' but is not marked with 'await'; this is an error in the Swift 6 language mode
+        let currentResult = ChironRegimeEngine.shared.evaluate(context: ChironContext(
+                            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                            await 
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine_Chiron.swift:88:29: note: calls to instance method 'evaluate(context:)' from outside of its actor context are implicitly asynchronous
+        let currentResult = ChironRegimeEngine.shared.evaluate(context: ChironContext(
+                            ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine_Chiron.swift:88:29: note: property access is 'async'
+        let currentResult = ChironRegimeEngine.shared.evaluate(context: ChironContext(
+                            ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine_Chiron.swift:156:21: warning: main actor-isolated static property 'empty' can not be referenced on a nonisolated actor instance
+            return .empty
+                    ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Models/ChironOptimizationModels.swift:79:20: note: static property declared here
+        static let empty = ModuleStats(trades: 0, winRate: 0, avgR: 0, pnlPercent: 0, maxDrawdown: 0)
+                   ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine_Chiron.swift:159:39: warning: main actor-isolated property 'pnl' can not be referenced from a nonisolated context
+        let wins = trades.filter { $0.pnl > 0 }.count
+                                      ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Models/BacktestModels.swift:225:9: note: property declared here
+    var pnl: Double {
+        ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine_Chiron.swift:166:53: warning: main actor-isolated property 'pnl' can not be referenced from a nonisolated context
+        let totalPnL = trades.reduce(0.0) { $0 + $1.pnl }
+                                                    ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Models/BacktestModels.swift:225:9: note: property declared here
+    var pnl: Double {
+        ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine_Chiron.swift:197:26: warning: main actor-isolated property 'pnl' can not be referenced on a nonisolated actor instance
+                if trade.pnl > 0 {
+                         ^
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Models/BacktestModels.swift:225:9: note: property declared here
+    var pnl: Double {
+        ^
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusCoreCombiner.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusCorseEngine.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusDataStore.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusDecisionEngine.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusEtfEngine.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusExplanationService.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusExplanationService.swift:101:77: error: value of type 'GroqClient' has no member 'generateJSON'
+            var explanation: ArgusExplanation = try await GroqClient.shared.generateJSON(messages: messages)
+                                                          ~~~~~~~~~~~~~~~~~ ^~~~~~~~~~~~
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusFeedbackLoopService.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusLabEngine.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusLabStore.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusProviderStatsStore.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusPulseEngine.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusScoutService.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusScoutService.swift:132:94: warning: left side of nil coalescing operator '??' has non-optional type 'String', so the right side is never used
+                ScoutHighlight(type: .structure, value: orionResult.components.structureDesc ?? "Yapı", score: orionResult.components.structure),
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusScoutService.swift:133:86: warning: left side of nil coalescing operator '??' has non-optional type 'String', so the right side is never used
+                ScoutHighlight(type: .trend, value: orionResult.components.trendDesc ?? "Trend", score: orionResult.components.trend),
+                                                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~
+                                                                                    
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusScoutService.swift:134:92: warning: left side of nil coalescing operator '??' has non-optional type 'String', so the right side is never used
+                ScoutHighlight(type: .momentum, value: orionResult.components.momentumDesc ?? "Momentum", score: orionResult.components.momentum),
+                                                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~
+                                                                                          
+/Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusScoutService.swift:135:90: warning: left side of nil coalescing operator '??' has non-optional type 'String', so the right side is never used
+                ScoutHighlight(type: .pattern, value: orionResult.components.patternDesc ?? "Pattern", score: orionResult.components.pattern)
+                                                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~
+                                                                                        
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusShieldEngine.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusStorage.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/AthenaEngine+Intelligence.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/AthenaFactorService.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/AtlasEngine.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/AutoPilotExecutionManager.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/AutoPilotLogger.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftEmitModule normal arm64 Emitting\ module\ for\ Algo_Trading (in target 'Algo-Trading' from project 'Algo-Trading')
+
+EmitSwiftModule normal arm64 (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 Compiling\ PhoenixScenarioEngine.swift,\ PoseidonService.swift,\ RadarService.swift,\ RiskManagementService.swift,\ RiskMetricService.swift,\ RSSNewsProvider.swift,\ SafeUniverseService.swift,\ ScoutUniverse.swift,\ Secrets.swift,\ SecurityService.swift,\ ServiceHealthMonitor.swift,\ ShadowService.swift,\ SignalTrackerService.swift,\ StrategyEvaluatorService.swift,\ TimeSeriesModelService.swift,\ WidgetDataService.swift,\ YahooFallbackProvider.swift,\ YahooFinanceNewsProvider.swift,\ QuotaGovernorTests.swift,\ HeimdallDataPlaneTests.swift,\ Haptics.swift,\ WidgetUsageReference.swift,\ ChatViewModel.swift,\ OrionLabViewModel.swift,\ SettingsViewModel.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/PhoenixScenarioEngine.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/PoseidonService.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/RadarService.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/RiskManagementService.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/RiskMetricService.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/RSSNewsProvider.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/SafeUniverseService.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ScoutUniverse.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Secrets.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/SecurityService.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ServiceHealthMonitor.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ShadowService.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/SignalTrackerService.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/StrategyEvaluatorService.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/TimeSeriesModelService.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/WidgetDataService.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/YahooFallbackProvider.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/YahooFinanceNewsProvider.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Tests/MimirTests/QuotaGovernorTests.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Tests/HeimdallDataPlaneTests.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Utilities/Haptics.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Utils/WidgetUsageReference.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/ViewModels/ChatViewModel.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/ViewModels/OrionLabViewModel.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/ViewModels/SettingsViewModel.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/PhoenixScenarioEngine.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/PoseidonService.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/RadarService.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/RiskManagementService.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/RiskMetricService.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/RSSNewsProvider.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/SafeUniverseService.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ScoutUniverse.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Secrets.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/SecurityService.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ServiceHealthMonitor.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ShadowService.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/SignalTrackerService.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/StrategyEvaluatorService.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/TimeSeriesModelService.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/WidgetDataService.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/YahooFallbackProvider.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/YahooFinanceNewsProvider.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Tests/MimirTests/QuotaGovernorTests.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Tests/HeimdallDataPlaneTests.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Utilities/Haptics.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Utils/WidgetUsageReference.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/ViewModels/ChatViewModel.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/ViewModels/OrionLabViewModel.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/ViewModels/SettingsViewModel.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 Compiling\ TradingViewModel.swift,\ TradingViewModel+Argus.swift,\ TradingViewModel+AutoPilot.swift,\ TradingViewModel+Backtest.swift,\ TradingViewModel+Bootstrap.swift,\ TradingViewModel+Hermes.swift,\ TradingViewModel+MarketData.swift,\ TradingViewModel+Persistence.swift,\ TradingViewModel+Reports.swift,\ TradingViewModelScanner.swift,\ HeimdallDashboardView.swift,\ ArgusFlightRecorderView.swift,\ NeuralPulseView.swift,\ AetherDashboardCard.swift,\ AgoraDebateSheet.swift,\ ArgusAdvisorsView.swift,\ ArgusAthenaSheet.swift,\ ArgusBadge.swift,\ ArgusDecisionCardView.swift,\ ArgusDetailSheets.swift,\ ArgusEyeLiveView.swift,\ ArgusEyeView.swift,\ ArgusHeroPanel.swift,\ ArgusModuleBar.swift,\ ArgusRadarChart.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/ViewModels/TradingViewModel.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/ViewModels/TradingViewModel+Argus.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/ViewModels/TradingViewModel+AutoPilot.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/ViewModels/TradingViewModel+Backtest.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/ViewModels/TradingViewModel+Bootstrap.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/ViewModels/TradingViewModel+Hermes.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/ViewModels/TradingViewModel+MarketData.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/ViewModels/TradingViewModel+Persistence.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/ViewModels/TradingViewModel+Reports.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/ViewModels/TradingViewModelScanner.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Admin/HeimdallDashboardView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/ArgusLab/ArgusFlightRecorderView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Components/Animations/NeuralPulseView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Components/AetherDashboardCard.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Components/AgoraDebateSheet.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Components/ArgusAdvisorsView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Components/ArgusAthenaSheet.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Components/ArgusBadge.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Components/ArgusDecisionCardView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Components/ArgusDetailSheets.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Components/ArgusEyeLiveView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Components/ArgusEyeView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Components/ArgusHeroPanel.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Components/ArgusModuleBar.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Components/ArgusRadarChart.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/ViewModels/TradingViewModel.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/ViewModels/TradingViewModel+Argus.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/ViewModels/TradingViewModel+AutoPilot.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/ViewModels/TradingViewModel+Backtest.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/ViewModels/TradingViewModel+Bootstrap.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/ViewModels/TradingViewModel+Hermes.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/ViewModels/TradingViewModel+MarketData.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/ViewModels/TradingViewModel+Persistence.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/ViewModels/TradingViewModel+Reports.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/ViewModels/TradingViewModelScanner.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Admin/HeimdallDashboardView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/ArgusLab/ArgusFlightRecorderView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Components/Animations/NeuralPulseView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Components/AetherDashboardCard.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Components/AgoraDebateSheet.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Components/ArgusAdvisorsView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Components/ArgusAthenaSheet.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Components/ArgusBadge.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Components/ArgusDecisionCardView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Components/ArgusDetailSheets.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Components/ArgusEyeLiveView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Components/ArgusEyeView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Components/ArgusHeroPanel.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Components/ArgusModuleBar.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Components/ArgusRadarChart.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 Compiling\ WalkForwardEngine.swift,\ BrokerProtocol.swift,\ PaperBroker.swift,\ BacktestCacheService.swift,\ ChironBacktestCache.swift,\ DiskCacheService.swift,\ FundamentalsCache.swift,\ MacroCache.swift,\ NewsCache.swift,\ QuoteCache.swift,\ ChironConfig.swift,\ ChironJournalService.swift,\ ChironTypes.swift,\ ClusterMap.swift,\ ExecutionGovernor.swift,\ RiskBudgetService.swift,\ TradeJournal.swift,\ ArgusScheduler.swift,\ AetherCouncil.swift,\ AetherCouncilMembers.swift,\ AetherCouncilProtocol.swift,\ ArgusGrandCouncil.swift,\ AtlasCouncil.swift,\ AtlasCouncilMembers.swift,\ AtlasCouncilProtocol.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Backtest/WalkForwardEngine.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Broker/BrokerProtocol.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Broker/PaperBroker.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Cache/BacktestCacheService.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Cache/ChironBacktestCache.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Cache/DiskCacheService.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Cache/FundamentalsCache.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Cache/MacroCache.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Cache/NewsCache.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Cache/QuoteCache.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Chiron/ChironConfig.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Chiron/ChironJournalService.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Chiron/ChironTypes.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Chiron/ClusterMap.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Chiron/ExecutionGovernor.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Chiron/RiskBudgetService.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Chiron/TradeJournal.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Core/ArgusScheduler.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Council/AetherCouncil.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Council/AetherCouncilMembers.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Council/AetherCouncilProtocol.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Council/ArgusGrandCouncil.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Council/AtlasCouncil.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Council/AtlasCouncilMembers.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Council/AtlasCouncilProtocol.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Backtest/WalkForwardEngine.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Broker/BrokerProtocol.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Broker/PaperBroker.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Cache/BacktestCacheService.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Cache/ChironBacktestCache.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Cache/DiskCacheService.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Cache/FundamentalsCache.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Cache/MacroCache.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Cache/NewsCache.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Cache/QuoteCache.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Chiron/ChironConfig.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Chiron/ChironJournalService.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Chiron/ChironTypes.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Chiron/ClusterMap.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Chiron/ExecutionGovernor.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Chiron/RiskBudgetService.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Chiron/TradeJournal.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Core/ArgusScheduler.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Council/AetherCouncil.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Council/AetherCouncilMembers.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Council/AetherCouncilProtocol.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Council/ArgusGrandCouncil.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Council/AtlasCouncil.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Council/AtlasCouncilMembers.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Council/AtlasCouncilProtocol.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 Compiling\ TerminalGlitchEffect.swift,\ TopLosersView.swift,\ DemeterComponents.swift,\ SectorDetailView.swift,\ ArgusFloatingTabBar.swift,\ ArgusGlobalBackground.swift,\ AssetChipView.swift,\ GlassCard.swift,\ HolographicBalanceCard.swift,\ ModelInfoCard.swift,\ DebateSimulatorView.swift,\ RadarCardView.swift,\ HeimdallKeysView.swift,\ ArgusBacktestView.swift,\ AthenaLabView.swift,\ AtlasLabView.swift,\ BacktestResultDetailsView.swift,\ OrionBacktestView.swift,\ StrategyLabView.swift,\ TuningResultSheet.swift,\ NotificationsView.swift,\ ChronosDetailView.swift,\ PortfolioReportsView.swift,\ PortfolioView.swift,\ TradeDetailSheet.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Components/TerminalGlitchEffect.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Components/TopLosersView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Demeter/DemeterComponents.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Demeter/SectorDetailView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/DesignSystem/ArgusFloatingTabBar.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/DesignSystem/ArgusGlobalBackground.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/DesignSystem/AssetChipView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/DesignSystem/GlassCard.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/DesignSystem/HolographicBalanceCard.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/DesignSystem/ModelInfoCard.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/DetailResults/DebateSimulatorView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Discovery/RadarCardView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Heimdall/HeimdallKeysView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Labs/ArgusBacktestView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Labs/AthenaLabView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Labs/AtlasLabView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Labs/BacktestResultDetailsView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Labs/OrionBacktestView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Labs/StrategyLabView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Labs/TuningResultSheet.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Notifications/NotificationsView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Portfolio/ChronosDetailView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Portfolio/PortfolioReportsView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Portfolio/PortfolioView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Portfolio/TradeDetailSheet.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Components/TerminalGlitchEffect.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Components/TopLosersView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Demeter/DemeterComponents.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Demeter/SectorDetailView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/DesignSystem/ArgusFloatingTabBar.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/DesignSystem/ArgusGlobalBackground.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/DesignSystem/AssetChipView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/DesignSystem/GlassCard.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/DesignSystem/HolographicBalanceCard.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/DesignSystem/ModelInfoCard.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/DetailResults/DebateSimulatorView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Discovery/RadarCardView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Heimdall/HeimdallKeysView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Labs/ArgusBacktestView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Labs/AthenaLabView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Labs/AtlasLabView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Labs/BacktestResultDetailsView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Labs/OrionBacktestView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Labs/StrategyLabView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Labs/TuningResultSheet.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Notifications/NotificationsView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Portfolio/ChronosDetailView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Portfolio/PortfolioReportsView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Portfolio/PortfolioView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Portfolio/TradeDetailSheet.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 Compiling\ ArgusCouncilViews.swift,\ ArgusEtfDetailView.swift,\ ArgusSanctumView.swift,\ ChironDetailView.swift,\ Components.swift,\ DisclaimerView.swift,\ DiscoverView.swift,\ ExpectationsEntryView.swift,\ HermesFeedView.swift,\ InteractiveCandleChart.swift,\ MarketReportView.swift,\ OrionDetailView.swift,\ OrionLabView.swift,\ PhoenixDetailView.swift,\ PhoenixRadarCard.swift,\ PhoenixView.swift,\ PoseidonView.swift,\ SettingsView.swift,\ SplashScreenView.swift,\ StockDetailView.swift,\ Theme.swift,\ TitanComponents.swift,\ Algo_TradingApp.swift,\ ContentView.swift,\ GeneratedAssetSymbols.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/ArgusCouncilViews.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/ArgusEtfDetailView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/ArgusSanctumView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/ChironDetailView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Components.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/DisclaimerView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/DiscoverView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/ExpectationsEntryView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/HermesFeedView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/InteractiveCandleChart.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/MarketReportView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/OrionDetailView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/OrionLabView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/PhoenixDetailView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/PhoenixRadarCard.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/PhoenixView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/PoseidonView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/SettingsView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/SplashScreenView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/StockDetailView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Theme.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/TitanComponents.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Algo_TradingApp.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/ContentView.swift /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/DerivedSources/GeneratedAssetSymbols.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/ArgusCouncilViews.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/ArgusEtfDetailView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/ArgusSanctumView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/ChironDetailView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Components.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/DisclaimerView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/DiscoverView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/ExpectationsEntryView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/HermesFeedView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/InteractiveCandleChart.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/MarketReportView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/OrionDetailView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/OrionLabView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/PhoenixDetailView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/PhoenixRadarCard.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/PhoenixView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/PoseidonView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/SettingsView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/SplashScreenView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/StockDetailView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Theme.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/TitanComponents.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Algo_TradingApp.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/ContentView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/Library/Developer/Xcode/DerivedData/Algo-Trading-apelhkcghvtmpeeqhyocqvzddfmq/Build/Intermediates.noindex/Algo-Trading.build/Debug-iphonesimulator/Algo-Trading.build/DerivedSources/GeneratedAssetSymbols.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 Compiling\ ArgusCockpitView.swift,\ AlgorithmTestView.swift,\ ArgusDataHealthView.swift,\ ArgusGuideView.swift,\ ArgusLabView.swift,\ ArgusSimulatorView.swift,\ ArgusVoiceView.swift,\ DebugPersistenceView.swift,\ PriceAlertSettingsView.swift,\ ServiceHealthView.swift,\ SettingsSignalsView.swift,\ WidgetListSettingsView.swift,\ SignalsView.swift,\ IntelligenceCardsView.swift,\ StockDetailCards.swift,\ ArgusScoreSystem.swift,\ RoadmapView.swift,\ SignalJournalView.swift,\ AetherHUDView.swift,\ CrystalWatchlistRow.swift,\ SmartTickerStrip.swift,\ ArgusAetherDetailView.swift,\ ArgusInfoSheet.swift,\ MarketView.swift,\ AgoraDetailPanel.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Radar/ArgusCockpitView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Settings/AlgorithmTestView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Settings/ArgusDataHealthView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Settings/ArgusGuideView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Settings/ArgusLabView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Settings/ArgusSimulatorView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Settings/ArgusVoiceView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Settings/DebugPersistenceView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Settings/PriceAlertSettingsView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Settings/ServiceHealthView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Settings/SettingsSignalsView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Settings/WidgetListSettingsView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Signals/SignalsView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/StockDetail/IntelligenceCardsView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/StockDetail/StockDetailCards.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Theme/ArgusScoreSystem.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Tools/RoadmapView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Tools/SignalJournalView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Watchlist/Components/AetherHUDView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Watchlist/Components/CrystalWatchlistRow.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Watchlist/Components/SmartTickerStrip.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Watchlist/ArgusAetherDetailView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Watchlist/ArgusInfoSheet.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Watchlist/MarketView.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/AgoraDetailPanel.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Radar/ArgusCockpitView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Settings/AlgorithmTestView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Settings/ArgusDataHealthView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Settings/ArgusGuideView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Settings/ArgusLabView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Settings/ArgusSimulatorView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Settings/ArgusVoiceView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Settings/DebugPersistenceView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Settings/PriceAlertSettingsView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Settings/ServiceHealthView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Settings/SettingsSignalsView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Settings/WidgetListSettingsView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Signals/SignalsView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/StockDetail/IntelligenceCardsView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/StockDetail/StockDetailCards.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Theme/ArgusScoreSystem.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Tools/RoadmapView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Tools/SignalJournalView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Watchlist/Components/AetherHUDView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Watchlist/Components/CrystalWatchlistRow.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Watchlist/Components/SmartTickerStrip.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Watchlist/ArgusAetherDetailView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Watchlist/ArgusInfoSheet.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/Watchlist/MarketView.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Views/AgoraDetailPanel.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 Compiling\ FMPProvider.swift,\ MarketStackProvider.swift,\ TiingoProvider.swift,\ TwelveDataService.swift,\ YahooAuthenticationService.swift,\ YahooCandleAdapter.swift,\ YahooChartURLBuilder.swift,\ YahooFinanceProvider.swift,\ ReportEngine.swift,\ PortfolioRiskService.swift,\ ExecutionModel.swift,\ UniverseEngine.swift,\ HeimdallResilienceVerifier.swift,\ InstrumentResolverVerifier.swift,\ ProviderSelector.swift,\ SignalHasher.swift,\ SignpostLogger.swift,\ SymbolMapper.swift,\ AetherAllocationEngine.swift,\ AgoraExecutionGovernor.swift,\ AISignalService.swift,\ AlertManager.swift,\ AnalysisService.swift,\ APIKeyStore.swift,\ APIService.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Providers/FMPProvider.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Providers/MarketStackProvider.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Providers/TiingoProvider.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Providers/TwelveDataService.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Providers/YahooAuthenticationService.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Providers/YahooCandleAdapter.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Providers/YahooChartURLBuilder.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Providers/YahooFinanceProvider.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Reporting/ReportEngine.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Risk/PortfolioRiskService.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Trading/ExecutionModel.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Universe/UniverseEngine.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Utilities/HeimdallResilienceVerifier.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Utilities/InstrumentResolverVerifier.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Utilities/ProviderSelector.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Utilities/SignalHasher.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Utilities/SignpostLogger.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Utilities/SymbolMapper.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/AetherAllocationEngine.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/AgoraExecutionGovernor.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/AISignalService.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/AlertManager.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/AnalysisService.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/APIKeyStore.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/APIService.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Providers/FMPProvider.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Providers/MarketStackProvider.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Providers/TiingoProvider.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Providers/TwelveDataService.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Providers/YahooAuthenticationService.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Providers/YahooCandleAdapter.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Providers/YahooChartURLBuilder.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Providers/YahooFinanceProvider.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Reporting/ReportEngine.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Risk/PortfolioRiskService.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Trading/ExecutionModel.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Universe/UniverseEngine.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Utilities/HeimdallResilienceVerifier.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Utilities/InstrumentResolverVerifier.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Utilities/ProviderSelector.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Utilities/SignalHasher.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Utilities/SignpostLogger.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/Utilities/SymbolMapper.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/AetherAllocationEngine.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/AgoraExecutionGovernor.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/AISignalService.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/AlertManager.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/AnalysisService.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/APIKeyStore.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/APIService.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+    cd /Users/emirhan/deneme2/argus-terminal
+    
+
+SwiftEmitModule normal x86_64 Emitting\ module\ for\ Algo_Trading (in target 'Algo-Trading' from project 'Algo-Trading')
+
+** BUILD FAILED **
+
+
+The following build commands failed:
+	SwiftCompile normal arm64 Compiling\ ArgusAutoPilot.swift,\ ArgusAutoPilotEngine.swift,\ ArgusAutoPilotEngine+Safety.swift,\ ArgusAutoPilotInterfaces.swift,\ ArgusBacktestEngine.swift,\ ArgusBacktestEngine_Chiron.swift,\ ArgusCoreCombiner.swift,\ ArgusCorseEngine.swift,\ ArgusDataStore.swift,\ ArgusDecisionEngine.swift,\ ArgusEtfEngine.swift,\ ArgusExplanationService.swift,\ ArgusFeedbackLoopService.swift,\ ArgusLabEngine.swift,\ ArgusLabStore.swift,\ ArgusProviderStatsStore.swift,\ ArgusPulseEngine.swift,\ ArgusScoutService.swift,\ ArgusShieldEngine.swift,\ ArgusStorage.swift,\ AthenaEngine+Intelligence.swift,\ AthenaFactorService.swift,\ AtlasEngine.swift,\ AutoPilotExecutionManager.swift,\ AutoPilotLogger.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusAutoPilot.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusAutoPilotEngine.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusAutoPilotEngine+Safety.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusAutoPilotInterfaces.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusBacktestEngine_Chiron.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusCoreCombiner.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusCorseEngine.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusDataStore.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusDecisionEngine.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusEtfEngine.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusExplanationService.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusFeedbackLoopService.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusLabEngine.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusLabStore.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusProviderStatsStore.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusPulseEngine.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusScoutService.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusShieldEngine.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusStorage.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/AthenaEngine+Intelligence.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/AthenaFactorService.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/AtlasEngine.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/AutoPilotExecutionManager.swift /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/AutoPilotLogger.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+	SwiftCompile normal arm64 /Users/emirhan/deneme2/argus-terminal/Algo-Trading/Services/ArgusExplanationService.swift (in target 'Algo-Trading' from project 'Algo-Trading')
+	Building project Algo-Trading with scheme Algo-Trading and configuration Debug
+(3 failures)

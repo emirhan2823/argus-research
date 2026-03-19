@@ -1,0 +1,43 @@
+system:
+  name: "argus"
+  version: "2.5.0"
+  mode: "paper"
+  log_level: "INFO"
+
+asset_classes:
+  crypto:
+    enabled: true
+    execution_mode: "auto"
+    exchange: "bingx"
+    symbols: ["BTCUSDT", "ETHUSDT", "SOLUSDT", "DOGEUSDT", "AVAXUSDT", "LINKUSDT", "ARBUSDT", "MATICUSDT"]
+  us_equity:
+    enabled: true
+    execution_mode: "auto"
+    exchange: "bingx"
+    symbols: ["AAPL", "TSLA", "NVDA", "MSFT", "AMZN", "GOOGL", "META"]
+  commodity:
+    enabled: true
+    execution_mode: "auto"
+    exchange: "bingx"
+    symbols: ["XAUUSD", "XAGUSD"]
+  index:
+    enabled: true
+    execution_mode: "auto"
+    exchange: "bingx"
+    symbols: ["NAS100", "SPX500"]
+  bist:
+    enabled: false
+    execution_mode: "advisory"
+    exchange: null
+    symbols: ["THYAO", "ASELS", "SISE"]
+
+timeframes:
+  primary: "1h"
+  scalp: "15m"
+  micro: "5m"
+  confirmation: "4h"
+  direction: "1d"
+
+exchanges:
+  primary: "bingx"
+  fallback: "binance"

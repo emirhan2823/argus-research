@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="tr"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Piyasa Ekranı</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@200;300;400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "primary": "#135bec",
+              "background-light": "#f6f6f8",
+              "background-dark": "#101622",
+            },
+            fontFamily: {
+              "display": ["Manrope", "sans-serif"]
+            },
+            borderRadius: {"DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px"},
+          },
+        },
+      }
+    </script>
+<style>
+      .material-symbols-outlined {
+        font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background-light dark:bg-background-dark font-display">
+<div class="relative flex min-h-screen w-full flex-col bg-background-light dark:bg-background-dark group/design-root overflow-x-hidden">
+<!-- Top App Bar -->
+<div class="sticky top-0 z-10 flex items-center bg-background-light dark:bg-background-dark px-4 pt-4 pb-2 justify-between">
+<div class="flex size-12 shrink-0 items-center justify-start">
+<button class="flex items-center justify-center rounded-full h-10 w-10 text-slate-900 dark:text-white">
+<span class="material-symbols-outlined text-2xl">menu</span>
+</button>
+</div>
+<h1 class="text-slate-900 dark:text-white text-lg font-bold leading-tight tracking-[-0.015em]">Piyasa Ekranı</h1>
+<div class="flex w-12 items-center justify-end">
+<button class="flex items-center justify-center rounded-full h-10 w-10 text-slate-900 dark:text-white">
+<span class="material-symbols-outlined text-2xl">notifications</span>
+</button>
+</div>
+</div>
+<!-- Search Bar -->
+<div class="sticky top-[72px] z-10 bg-background-light dark:bg-background-dark px-4 py-3">
+<label class="flex flex-col min-w-40 h-12 w-full">
+<div class="flex w-full flex-1 items-stretch rounded-xl h-full">
+<div class="text-slate-400 dark:text-[#92a4c9] flex border-none bg-slate-200 dark:bg-[#232f48] items-center justify-center pl-4 rounded-l-xl border-r-0">
+<span class="material-symbols-outlined text-2xl">search</span>
+</div>
+<input class="form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-r-xl text-slate-900 dark:text-white focus:outline-0 focus:ring-0 border-none bg-slate-200 dark:bg-[#232f48] focus:border-none h-full placeholder:text-slate-400 dark:placeholder:text-[#92a4c9] px-4 pl-2 text-base font-normal leading-normal" placeholder="Hisse Senedi Ara..." value=""/>
+</div>
+</label>
+</div>
+<!-- Tabs -->
+<div class="sticky top-[132px] z-10 bg-background-light dark:bg-background-dark pb-3">
+<div class="flex border-b border-slate-200 dark:border-[#324467] px-4 gap-8">
+<a class="flex flex-col items-center justify-center border-b-[3px] border-b-primary text-primary pb-[13px] pt-4" href="#">
+<p class="text-sm font-bold leading-normal tracking-[0.015em]">İzleme Listem</p>
+</a>
+<a class="flex flex-col items-center justify-center border-b-[3px] border-b-transparent text-slate-500 dark:text-[#92a4c9] pb-[13px] pt-4" href="#">
+<p class="text-sm font-bold leading-normal tracking-[0.015em]">En Hareketliler</p>
+</a>
+<a class="flex flex-col items-center justify-center border-b-[3px] border-b-transparent text-slate-500 dark:text-[#92a4c9] pb-[13px] pt-4" href="#">
+<p class="text-sm font-bold leading-normal tracking-[0.015em]">Endeksler</p>
+</a>
+</div>
+</div>
+<!-- Stock List -->
+<div class="flex-grow px-4 pb-24">
+<!-- List Item 1 -->
+<div class="flex items-center gap-4 min-h-[72px] py-3 justify-between">
+<div class="flex items-center gap-4">
+<img class="rounded-full size-12" data-alt="Apple Inc. logo" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAQtw-k_E-_v7F6qXNn-k4aQOPzHTXf7PwjmcP9l8p7Gj0u8R3RdqHFI9QTxtWFlBUcxz7DquHGjtlG6EjvNGEpoBJxqP2oNu2jGA444HceIgoJRcH5RKXhLNd9ICOQn36guPgEvQxd65scpALO5cgnDFtkrrK9-CjBoQNLiWq2OHDkvjzfXAjBzZn6-xuyapFgFfS9-vgMmdu8NLJJel0lGu4U0jARK6cKqvwFe8UCnhnV91DPbIIEgce4VATskJfusYwR2wKZEAY"/>
+<div class="flex flex-col justify-center">
+<p class="text-slate-900 dark:text-white text-base font-medium leading-normal">AAPL</p>
+<p class="text-slate-500 dark:text-[#92a4c9] text-sm font-normal leading-normal">Apple Inc.</p>
+</div>
+</div>
+<div class="w-20 shrink-0">
+<svg class="w-full h-auto" viewbox="0 0 100 30" xmlns="http://www.w3.org/2000/svg">
+<polyline fill="none" points="0,20 10,15 20,25 30,10 40,18 50,12 60,22 70,8 80,15 90,5 100,10" stroke="#28C76F" stroke-width="2"></polyline>
+</svg>
+</div>
+<div class="flex flex-col items-end shrink-0">
+<p class="text-slate-900 dark:text-white text-base font-medium leading-normal">$190.45</p>
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-sm text-green-500">arrow_drop_up</span>
+<p class="text-green-500 text-sm font-medium leading-normal">+1.25 (0.66%)</p>
+</div>
+</div>
+</div>
+<!-- List Item 2 -->
+<div class="flex items-center gap-4 min-h-[72px] py-3 justify-between">
+<div class="flex items-center gap-4">
+<img class="rounded-full size-12" data-alt="Alphabet Inc. logo" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBfV2xEELMesV67dG9Ypv7e2ZjqyMgSZcmdG59-vyKvxknaXZ1yoKCqf3IuBGdA7arGaVCtdHVYvGLqV68wbjaxicUf-CQqHKFjbATO76TlALq48H3sQaVWbR_a0PmJo_fFTNoXPITazIwwvmEpYyixjqSqPcmvubfTzYxi9rFiyeAOuYtlO5i5fvRgDNML5oeE5ivFYHzB8Uliyz9ND9uMxYIs-CoGGrpjYKTNfkvEimZme3HIIQFGZyZzEk74t1XfHZ_ASn--7mc"/>
+<div class="flex flex-col justify-center">
+<p class="text-slate-900 dark:text-white text-base font-medium leading-normal">GOOGL</p>
+<p class="text-slate-500 dark:text-[#92a4c9] text-sm font-normal leading-normal">Alphabet Inc.</p>
+</div>
+</div>
+<div class="w-20 shrink-0">
+<svg class="w-full h-auto" viewbox="0 0 100 30" xmlns="http://www.w3.org/2000/svg">
+<polyline fill="none" points="0,10 10,15 20,5 30,20 40,12 50,18 60,8 70,22 80,15 90,25 100,20" stroke="#EA5455" stroke-width="2"></polyline>
+</svg>
+</div>
+<div class="flex flex-col items-end shrink-0">
+<p class="text-slate-900 dark:text-white text-base font-medium leading-normal">$177.95</p>
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-sm text-red-500">arrow_drop_down</span>
+<p class="text-red-500 text-sm font-medium leading-normal">-0.82 (0.46%)</p>
+</div>
+</div>
+</div>
+<!-- List Item 3 -->
+<div class="flex items-center gap-4 min-h-[72px] py-3 justify-between">
+<div class="flex items-center gap-4">
+<img class="rounded-full size-12" data-alt="Microsoft Corporation logo" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBGcqbjDF2eS7vrNpx_VY6IiOkkTT8QrDZ4PIY_TxF96-vgZo6BGnCKHAARzw1ripyX7GBofNBvOj69KNn2QD8spdj87cD9Mx0g4KuR45vJxoUWHXDKlXIKFwUN90x3sM6sZ8dt9u57uUk7Z_q6xlBEIcBHUM5somLNFmZ4qOFPAZ78Rp9WaJaC3SXKcxzA7fkm4XTq3yZv8G-wLF83tSyImBEoOvoMAVKn66vKMplDsm6wEBFDVCjGQXNfZjaFnnU69mkC-um-mNY"/>
+<div class="flex flex-col justify-center">
+<p class="text-slate-900 dark:text-white text-base font-medium leading-normal">MSFT</p>
+<p class="text-slate-500 dark:text-[#92a4c9] text-sm font-normal leading-normal">Microsoft Corp.</p>
+</div>
+</div>
+<div class="w-20 shrink-0">
+<svg class="w-full h-auto" viewbox="0 0 100 30" xmlns="http://www.w3.org/2000/svg">
+<polyline fill="none" points="0,15 10,10 20,18 30,12 40,20 50,25 60,20 70,15 80,18 90,12 100,10" stroke="#28C76F" stroke-width="2"></polyline>
+</svg>
+</div>
+<div class="flex flex-col items-end shrink-0">
+<p class="text-slate-900 dark:text-white text-base font-medium leading-normal">$449.78</p>
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-sm text-green-500">arrow_drop_up</span>
+<p class="text-green-500 text-sm font-medium leading-normal">+4.97 (1.12%)</p>
+</div>
+</div>
+</div>
+<!-- List Item 4 -->
+<div class="flex items-center gap-4 min-h-[72px] py-3 justify-between">
+<div class="flex items-center gap-4">
+<img class="rounded-full size-12" data-alt="Amazon.com Inc. logo" src="https://lh3.googleusercontent.com/aida-public/AB6AXuB7ZYX76ZEOpGvZppObzxanpHEGZp0zdsiPzAqCcjgRsmr_lT5acUmyj4qFAeTR9rwy_53zlBLcz0Psm7eHqRhyMHZpWM0oUjyJTFm7IXp-UPM4gfjPraN-2kU8thGLmp-Bx9aEe9RYW5uV-WLmwkyzIfG_oSltPg4iSSLn24ObkJcvnDQKZspSUyMIspd75G84Ik0DHGdbYHuDVIML6n9T12nRdEQApyXtjvJjeUxEt7Fyznm9ECilVvop9_YozOwNdxQUfnf4r1M"/>
+<div class="flex flex-col justify-center">
+<p class="text-slate-900 dark:text-white text-base font-medium leading-normal">AMZN</p>
+<p class="text-slate-500 dark:text-[#92a4c9] text-sm font-normal leading-normal">Amazon.com, Inc.</p>
+</div>
+</div>
+<div class="w-20 shrink-0">
+<svg class="w-full h-auto" viewbox="0 0 100 30" xmlns="http://www.w3.org/2000/svg">
+<polyline fill="none" points="0,20 10,25 20,15 30,18 40,12 50,15 60,10 70,18 80,22 90,25 100,28" stroke="#EA5455" stroke-width="2"></polyline>
+</svg>
+</div>
+<div class="flex flex-col items-end shrink-0">
+<p class="text-slate-900 dark:text-white text-base font-medium leading-normal">$183.66</p>
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-sm text-red-500">arrow_drop_down</span>
+<p class="text-red-500 text-sm font-medium leading-normal">-2.14 (1.16%)</p>
+</div>
+</div>
+</div>
+<!-- List Item 5 -->
+<div class="flex items-center gap-4 min-h-[72px] py-3 justify-between">
+<div class="flex items-center gap-4">
+<img class="rounded-full size-12" data-alt="Tesla Inc. logo" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDvzaJuEqAIITK6XGTiVOxl9h-T4E6kzDCFSMguUQk7jAZdF462p8mO-kLy_HDsw5-xAlWmgD5jJyTvPDpHJRCdgDEW0208W-OeoOU2NmwnNy9Y5p_MFsc0t-lYR7HowbKpHCTxS6AjMq2Q_Y_PEICRv_2m2R0bCfzAmjo9MXQUUo1DwTfv1uEraN0qokLflz_xqJ_Uduldfe947ig4oiFNZ89Dnnys_f_LcbdJWLjZyPGbisAgbhHN7akfYVyRSxscb6J9BA-1GHM"/>
+<div class="flex flex-col justify-center">
+<p class="text-slate-900 dark:text-white text-base font-medium leading-normal">TSLA</p>
+<p class="text-slate-500 dark:text-[#92a4c9] text-sm font-normal leading-normal">Tesla, Inc.</p>
+</div>
+</div>
+<div class="w-20 shrink-0">
+<svg class="w-full h-auto" viewbox="0 0 100 30" xmlns="http://www.w3.org/2000/svg">
+<polyline fill="none" points="0,25 10,20 20,18 30,22 40,15 50,10 60,12 70,8 80,10 90,5 100,2" stroke="#28C76F" stroke-width="2"></polyline>
+</svg>
+</div>
+<div class="flex flex-col items-end shrink-0">
+<p class="text-slate-900 dark:text-white text-base font-medium leading-normal">$183.01</p>
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-sm text-green-500">arrow_drop_up</span>
+<p class="text-green-500 text-sm font-medium leading-normal">+5.74 (3.24%)</p>
+</div>
+</div>
+</div>
+</div>
+<!-- Floating Action Button -->
+<div class="fixed bottom-6 right-6 z-20">
+<button class="flex items-center justify-center w-14 h-14 bg-primary text-white rounded-full shadow-lg">
+<span class="material-symbols-outlined text-3xl">add</span>
+</button>
+</div>
+</div>
+</body></html>

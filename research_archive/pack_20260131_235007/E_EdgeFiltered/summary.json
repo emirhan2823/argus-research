@@ -1,0 +1,27 @@
+{
+    "start_balance": 10000.0,
+    "final_equity": 9983.399355868736,
+    "total_return_pct": -0.1660064413126383,
+    "max_drawdown_pct": 12.803372049716998,
+    "total_trades": 6,
+    "win_rate": 0.3333333333333333,
+    "profit_factor": 0.8077411978684916,
+    "total_pnl": -11.917028559096622,
+    "total_fees": 9.465210500865489,
+    "trade_counts": {
+        "open": 6,
+        "close": 6
+    },
+    "signals": {
+        "total_go": 731,
+        "go_trend": 692,
+        "go_chop": 39
+    },
+    "data_summary": {
+        "bars": 5761,
+        "start_date": "2024-01-01 00:00:00",
+        "end_date": "2024-01-05 00:00:00",
+        "min_price": 40887.99,
+        "max_price": 45874.92
+    }
+}

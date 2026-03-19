@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="tr"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Ayarlar Ekranı</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              "primary": "#135bec",
+              "background-light": "#f6f6f8",
+              "background-dark": "#101622",
+              "card-light": "#ffffff",
+              "card-dark": "#19202e",
+              "text-light-primary": "#101622",
+              "text-dark-primary": "#ffffff",
+              "text-light-secondary": "#6a7385",
+              "text-dark-secondary": "#9aa4b8",
+              "icon-bg-light": "#eef0f4",
+              "icon-bg-dark": "#232f48",
+            },
+            fontFamily: {
+              "display": ["Manrope", "sans-serif"]
+            },
+            borderRadius: {"DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px"},
+          },
+        },
+      }
+    </script>
+<style>
+      .material-symbols-outlined {
+        font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        font-size: 24px;
+      }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-background-light dark:bg-background-dark font-display">
+<div class="relative flex h-auto min-h-screen w-full flex-col bg-background-light dark:bg-background-dark group/design-root overflow-x-hidden">
+<div class="flex items-center bg-card-light dark:bg-card-dark p-4 pb-3 justify-between sticky top-0 z-10 border-b border-white/5">
+<div class="flex size-10 shrink-0 items-center justify-start text-text-light-primary dark:text-text-dark-primary">
+<span class="material-symbols-outlined">arrow_back_ios_new</span>
+</div>
+<h1 class="text-text-light-primary dark:text-text-dark-primary text-xl font-bold leading-tight tracking-[-0.015em] flex-1 text-center">Ayarlar</h1>
+<div class="flex size-10 shrink-0 items-center justify-end"></div>
+</div>
+<div class="p-4 space-y-8">
+<section>
+<h2 class="text-text-light-secondary dark:text-text-dark-secondary text-sm font-bold uppercase tracking-wider px-4 pb-2">Genel</h2>
+<div class="bg-card-light dark:bg-card-dark rounded-xl overflow-hidden">
+<div class="flex items-center gap-4 p-4 justify-between border-b border-background-light dark:border-background-dark">
+<div class="flex items-center gap-4">
+<div class="flex items-center justify-center rounded-lg bg-icon-bg-light dark:bg-icon-bg-dark shrink-0 size-10 text-text-light-primary dark:text-text-dark-primary">
+<span class="material-symbols-outlined">language</span>
+</div>
+<p class="text-text-light-primary dark:text-text-dark-primary text-base font-normal leading-normal">Dil</p>
+</div>
+<div class="flex items-center gap-2">
+<p class="text-text-light-secondary dark:text-text-dark-secondary text-base font-normal leading-normal">Türkçe</p>
+<div class="shrink-0 text-text-light-secondary dark:text-text-dark-secondary">
+<span class="material-symbols-outlined text-lg">arrow_forward_ios</span>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-4 p-4 justify-between border-b border-background-light dark:border-background-dark">
+<div class="flex items-center gap-4">
+<div class="flex items-center justify-center rounded-lg bg-icon-bg-light dark:bg-icon-bg-dark shrink-0 size-10 text-text-light-primary dark:text-text-dark-primary">
+<span class="material-symbols-outlined">dark_mode</span>
+</div>
+<p class="text-text-light-primary dark:text-text-dark-primary text-base font-normal leading-normal">Karanlık Mod</p>
+</div>
+<div class="shrink-0">
+<label class="relative flex h-[31px] w-[51px] cursor-pointer items-center rounded-full border-none bg-icon-bg-light dark:bg-icon-bg-dark p-0.5 has-[:checked]:justify-end has-[:checked]:bg-primary">
+<div class="h-full w-[27px] rounded-full bg-white transition-transform" style="box-shadow: rgba(0, 0, 0, 0.15) 0px 3px 8px, rgba(0, 0, 0, 0.06) 0px 3px 1px;"></div>
+<input checked="" class="invisible absolute" type="checkbox"/>
+</label>
+</div>
+</div>
+<div class="flex items-center gap-4 p-4 justify-between border-b border-background-light dark:border-background-dark">
+<div class="flex items-center gap-4">
+<div class="flex items-center justify-center rounded-lg bg-icon-bg-light dark:bg-icon-bg-dark shrink-0 size-10 text-text-light-primary dark:text-text-dark-primary">
+<span class="material-symbols-outlined">payments</span>
+</div>
+<p class="text-text-light-primary dark:text-text-dark-primary text-base font-normal leading-normal">Para Birimi</p>
+</div>
+<div class="shrink-0 flex items-center gap-2">
+<p class="text-text-light-secondary dark:text-text-dark-secondary text-base font-normal leading-normal">USD</p>
+<div class="shrink-0 text-text-light-secondary dark:text-text-dark-secondary">
+<span class="material-symbols-outlined text-lg">arrow_forward_ios</span>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-4 p-4 justify-between">
+<div class="flex items-center gap-4">
+<div class="flex items-center justify-center rounded-lg bg-icon-bg-light dark:bg-icon-bg-dark shrink-0 size-10 text-text-light-primary dark:text-text-dark-primary">
+<span class="material-symbols-outlined">functions</span>
+</div>
+<p class="text-text-light-primary dark:text-text-dark-primary text-base font-normal leading-normal">Varsayılan İşlem Tutarı</p>
+</div>
+<div class="shrink-0">
+<p class="text-text-light-secondary dark:text-text-dark-secondary text-base font-normal leading-normal">$100.00</p>
+</div>
+</div>
+</div>
+</section>
+<section>
+<h2 class="text-text-light-secondary dark:text-text-dark-secondary text-sm font-bold uppercase tracking-wider px-4 pb-2">Bildirimler</h2>
+<div class="bg-card-light dark:bg-card-dark rounded-xl overflow-hidden">
+<div class="flex items-center gap-4 p-4 justify-between border-b border-background-light dark:border-background-dark">
+<div class="flex items-center gap-4">
+<div class="flex items-center justify-center rounded-lg bg-icon-bg-light dark:bg-icon-bg-dark shrink-0 size-10 text-text-light-primary dark:text-text-dark-primary">
+<span class="material-symbols-outlined">notifications</span>
+</div>
+<p class="text-text-light-primary dark:text-text-dark-primary text-base font-normal leading-normal">Tüm Bildirimler</p>
+</div>
+<div class="shrink-0">
+<label class="relative flex h-[31px] w-[51px] cursor-pointer items-center rounded-full border-none bg-icon-bg-light dark:bg-icon-bg-dark p-0.5 has-[:checked]:justify-end has-[:checked]:bg-primary">
+<div class="h-full w-[27px] rounded-full bg-white transition-transform" style="box-shadow: rgba(0, 0, 0, 0.15) 0px 3px 8px, rgba(0, 0, 0, 0.06) 0px 3px 1px;"></div>
+<input checked="" class="invisible absolute" type="checkbox"/>
+</label>
+</div>
+</div>
+<div class="flex items-center gap-4 p-4 justify-between">
+<div class="flex items-center gap-4">
+<div class="flex items-center justify-center rounded-lg bg-icon-bg-light dark:bg-icon-bg-dark shrink-0 size-10 text-text-light-primary dark:text-text-dark-primary">
+<span class="material-symbols-outlined">price_check</span>
+</div>
+<p class="text-text-light-primary dark:text-text-dark-primary text-base font-normal leading-normal">Fiyat Alarmları</p>
+</div>
+<div class="shrink-0 text-text-light-secondary dark:text-text-dark-secondary">
+<span class="material-symbols-outlined text-lg">arrow_forward_ios</span>
+</div>
+</div>
+</div>
+</section>
+<section>
+<h2 class="text-text-light-secondary dark:text-text-dark-secondary text-sm font-bold uppercase tracking-wider px-4 pb-2">Güvenlik</h2>
+<div class="bg-card-light dark:bg-card-dark rounded-xl overflow-hidden">
+<div class="flex items-center gap-4 p-4 justify-between border-b border-background-light dark:border-background-dark">
+<div class="flex items-center gap-4">
+<div class="flex items-center justify-center rounded-lg bg-icon-bg-light dark:bg-icon-bg-dark shrink-0 size-10 text-text-light-primary dark:text-text-dark-primary">
+<span class="material-symbols-outlined">face</span>
+</div>
+<p class="text-text-light-primary dark:text-text-dark-primary text-base font-normal leading-normal">Face ID</p>
+</div>
+<div class="shrink-0">
+<label class="relative flex h-[31px] w-[51px] cursor-pointer items-center rounded-full border-none bg-icon-bg-light dark:bg-icon-bg-dark p-0.5 has-[:checked]:justify-end has-[:checked]:bg-primary">
+<div class="h-full w-[27px] rounded-full bg-white transition-transform" style="box-shadow: rgba(0, 0, 0, 0.15) 0px 3px 8px, rgba(0, 0, 0, 0.06) 0px 3px 1px;"></div>
+<input class="invisible absolute" type="checkbox"/>
+</label>
+</div>
+</div>
+<div class="flex items-center gap-4 p-4 justify-between border-b border-background-light dark:border-background-dark">
+<div class="flex items-center gap-4">
+<div class="flex items-center justify-center rounded-lg bg-icon-bg-light dark:bg-icon-bg-dark shrink-0 size-10 text-text-light-primary dark:text-text-dark-primary">
+<span class="material-symbols-outlined">password</span>
+</div>
+<p class="text-text-light-primary dark:text-text-dark-primary text-base font-normal leading-normal">Şifre Değiştir</p>
+</div>
+<div class="shrink-0 text-text-light-secondary dark:text-text-dark-secondary">
+<span class="material-symbols-outlined text-lg">arrow_forward_ios</span>
+</div>
+</div>
+<div class="flex items-center gap-4 p-4 justify-between">
+<div class="flex items-center gap-4">
+<div class="flex items-center justify-center rounded-lg bg-icon-bg-light dark:bg-icon-bg-dark shrink-0 size-10 text-text-light-primary dark:text-text-dark-primary">
+<span class="material-symbols-outlined">privacy_tip</span>
+</div>
+<p class="text-text-light-primary dark:text-text-dark-primary text-base font-normal leading-normal">Gizlilik Politikası</p>
+</div>
+<div class="shrink-0 text-text-light-secondary dark:text-text-dark-secondary">
+<span class="material-symbols-outlined text-lg">arrow_forward_ios</span>
+</div>
+</div>
+</div>
+</section>
+<section>
+<div class="bg-card-light dark:bg-card-dark rounded-xl overflow-hidden">
+<div class="flex items-center gap-4 p-4 justify-center">
+<div class="flex items-center gap-3">
+<div class="flex items-center justify-center shrink-0 text-red-500">
+<span class="material-symbols-outlined">logout</span>
+</div>
+<p class="text-red-500 text-base font-bold leading-normal">Çıkış Yap</p>
+</div>
+</div>
+</div>
+<p class="text-center text-xs text-text-light-secondary dark:text-text-dark-secondary mt-4">Uygulama Versiyonu 1.2.3</p>
+</section>
+</div>
+</div>
+</body></html>
