@@ -19,7 +19,7 @@ class TestTitanDefaults:
         from src.core.config import TitanConfig
         from src.engines.titan.engine import TitanEngine
 
-        assert TitanConfig().min_adx == TitanEngine().min_adx == 35.0
+        assert TitanConfig().min_adx == TitanEngine().min_adx == 28.0
 
     def test_min_confidence_matches(self) -> None:
         from src.core.config import TitanConfig

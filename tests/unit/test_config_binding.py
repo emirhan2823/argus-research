@@ -32,7 +32,7 @@ class TestConfigLoading:
     def test_titan_config_parsed(self, cfg: ArgusConfig) -> None:
         t = cfg.engines.titan
         assert isinstance(t, TitanConfig)
-        assert t.min_adx == 35.0
+        assert t.min_adx == 28.0
         assert t.min_confidence == 0.55
         assert t.max_concurrent == 3
         assert t.continuation_min_volume == 0.8

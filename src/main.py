@@ -404,6 +404,12 @@ class ArgusPipeline:
             atr_trail_mult=float(_titan_tf.get("atr_trail_mult", 2.5)),
             min_confidence=_titan_cfg.min_confidence,
             pullback_atr_tolerance=float(_titan_tf.get("pullback_atr_tolerance", 1.2)),
+            # Config-driven params (previously hardcoded)
+            swing_window=_titan_cfg.swing_window,
+            min_atr_pctl=_titan_cfg.min_atr_pctl,
+            breakdown_volume_mult=_titan_cfg.breakdown_volume_mult,
+            bb_proximity_pct=_titan_cfg.bb_proximity_pct,
+            target_rr=_titan_cfg.target_rr,
         )
 
         _hyd_cfg = self.config.engines.hydra
@@ -1052,7 +1058,14 @@ class ArgusPipeline:
                 # MR engines (POSEIDON, NAUTILUS, HYDRA) are exempt — they
                 # trade against the trend by design.
                 _MR_ENGINES_DB = {ENGINE_POSEIDON, ENGINE_NAUTILUS, ENGINE_HYDRA}
-                if signal is not None and getattr(self, '_enable_directional_bias', True) and signal.engine not in _MR_ENGINES_DB:
+                # TITAN continuation already verifies EMA21>EMA55 + price>MA200 internally
+                # Double-checking via directional bias is redundant and kills valid signals
+                _titan_continuation_exempt = (
+                    signal is not None
+                    and signal.engine == ENGINE_TITAN
+                    and "continuation" in (signal.sub_strategy or "")
+                )
+                if signal is not None and getattr(self, '_enable_directional_bias', True) and signal.engine not in _MR_ENGINES_DB and not _titan_continuation_exempt:
                     _macro_bullish = fv.ema_21_vs_55 > 0 and fv.price_vs_ma200 > 0
                     _macro_bearish = fv.ema_21_vs_55 < 0 and fv.price_vs_ma200 < 0
                     # Also detect moderate trends (only one condition met)
@@ -1360,6 +1373,14 @@ class ArgusPipeline:
                             min_factors_required=2,
                             min_confluence_score=0.35,
                             counter_trend_penalty=0.05,
+                        )
+                    elif signal.engine == ENGINE_TITAN:
+                        # TITAN's internal funnel already verifies trend+structure+volume+pullback
+                        # External confluence should verify, not double-gate
+                        _cf_config = ConfluenceConfig(
+                            min_factors_required=3,
+                            min_confluence_score=0.48,
+                            counter_trend_penalty=0.10,
                         )
                     else:
                         _cf_config = self._confluence_config_default

@@ -170,6 +170,7 @@ def assess_signal_quality(
         bias=bias,
         volume_ratio=volume_ratio,
         adx_14=adx_14,
+        engine=engine,
     )
     if toxic_penalty < 0:
         conf_adj += toxic_penalty
@@ -385,6 +386,7 @@ def _toxic_pattern_penalty(
     bias: str,
     volume_ratio: float,
     adx_14: float,
+    engine: str = "",
 ) -> float:
     """Apply confidence penalty for backtest-proven toxic conditions.
 
@@ -416,7 +418,8 @@ def _toxic_pattern_penalty(
         penalty -= 0.10
 
     # Pattern 5: short + ADX 25-40 = medium trend, MR short fails
-    if bias == "short" and 25 <= adx_14 <= 40:
+    # TITAN exempt: it's a trend engine — high ADX is its operating zone
+    if bias == "short" and 25 <= adx_14 <= 40 and engine != "TITAN":
         penalty -= 0.08
 
     return penalty

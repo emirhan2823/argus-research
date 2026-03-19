@@ -147,22 +147,22 @@ class TitanEngine:
     rsi_exhaustion_high: float = 70.0
     rsi_exhaustion_low: float = 30.0
     exhaustion_lookback: int = 20
-    bb_proximity_pct: float = 0.95
+    bb_proximity_pct: float = 0.90   # config-driven (was 0.95)
     atr_expansion_pctl: float = 0.65
 
     # --- CONTINUATION setup: trend confirmation ---
-    min_adx: float = 35.0  # YAML single source of truth (config/engines.yaml)
+    min_adx: float = 28.0  # YAML single source of truth (config/engines.yaml)
     adx_rising_bars: int = 1  # YAML single source of truth
-    min_atr_pctl: float = 0.55
+    min_atr_pctl: float = 0.40  # config-driven (was 0.55)
     min_volume_expansion: float = 0.8  # YAML single source of truth
 
     # --- Shared ---
-    swing_window: int = 5
-    breakdown_volume_mult: float = 1.5
+    swing_window: int = 8  # config-driven (was 5)
+    breakdown_volume_mult: float = 1.3  # config-driven (was 1.5)
     pullback_atr_tolerance: float = 1.2  # YAML single source of truth
 
     # --- Risk ---
-    target_rr: float = 3.0
+    target_rr: float = 2.5  # config-driven (was 3.0)
     atr_trail_mult: float = 2.5
     min_confidence: float = 0.55
     max_stop_pct: float = 0.05
@@ -518,7 +518,7 @@ class TitanEngine:
         atr_bonus = _clamp(atr_pctl, 0.0, 1.0)
 
         conf = _clamp(
-            0.58
+            0.62  # raised from 0.58 — continuation already passed 7+ filters
             + (features.adx_14 / 100.0) * 0.15
             + strength * 0.12
             + volume_bonus * 0.10
@@ -591,7 +591,7 @@ class TitanEngine:
 
         hh = swing_highs[-1].price > swing_highs[-2].price
         hl = swing_lows[-1].price > swing_lows[-2].price
-        if not (hh and hl):
+        if not (hh or hl):  # Relaxed: either HH or HL suffices
             self._diag["cont_long_fail_structure"] += 1
             return False, 0.0
 
@@ -608,7 +608,9 @@ class TitanEngine:
 
         self._diag["cont_long_pass"] += 1
         strength = self._count_bullish_structure(swing_highs, swing_lows)
-        norm_strength = _clamp(strength / 4.0, 0.0, 1.0)
+        # Both HH+HL = full strength, single = half
+        structure_mult = 1.0 if (hh and hl) else 0.5
+        norm_strength = _clamp((strength / 4.0) * structure_mult, 0.0, 1.0)
 
         return True, norm_strength
 
@@ -654,7 +656,7 @@ class TitanEngine:
 
         ll = swing_lows[-1].price < swing_lows[-2].price
         lh = swing_highs[-1].price < swing_highs[-2].price
-        if not (ll and lh):
+        if not (ll or lh):  # Relaxed: either LL or LH suffices
             self._diag["cont_short_fail_structure"] += 1
             return False, 0.0
 
@@ -669,7 +671,9 @@ class TitanEngine:
 
         self._diag["cont_short_pass"] += 1
         strength = self._count_bearish_structure(swing_highs, swing_lows)
-        norm_strength = _clamp(strength / 4.0, 0.0, 1.0)
+        # Both LL+LH = full strength, single = half
+        structure_mult = 1.0 if (ll and lh) else 0.5
+        norm_strength = _clamp((strength / 4.0) * structure_mult, 0.0, 1.0)
 
         return True, norm_strength
 

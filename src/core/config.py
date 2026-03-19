@@ -107,11 +107,17 @@ class TitanExitConfig(BaseModel):
 
 class TitanConfig(BaseModel):
     active_regimes: list[str] = Field(default_factory=lambda: ["TRENDING"])
-    min_adx: float = 35.0
+    min_adx: float = 28.0
     min_confidence: float = 0.55
     max_concurrent: int = 3
     continuation_min_volume: float = 0.8
     adx_rising_bars: int = 1
+    # Config-driven engine internals (previously hardcoded)
+    swing_window: int = 8
+    min_atr_pctl: float = 0.40
+    breakdown_volume_mult: float = 1.3
+    bb_proximity_pct: float = 0.90
+    target_rr: float = 2.5
     asset_profiles: dict[str, Any] = Field(default_factory=dict)
     trend_follow: dict[str, Any] = Field(default_factory=dict)
     breakout: dict[str, Any] = Field(default_factory=dict)
