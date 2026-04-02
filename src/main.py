@@ -81,6 +81,11 @@ from src.features.market_structure import (
     adjust_sl_tp_for_structure,
     build_market_structure,
 )
+# Hybrid snowball architecture modules
+from src.universe.pair_classifier import PairClassifier
+from src.regime.hybrid_regime import HybridRegimeClassifier, HybridRegimeInput
+from src.portfolio.admission_allocator import AdmissionAllocator, SlotConfig, SlotRegistry, engine_to_type
+from src.risk.hybrid_sizing_policy import HybridSizingPolicy
 from src.risk.breakeven_lock import BreakevenConfig, check_breakeven_trigger
 from src.risk.dynamic_risk_manager import (
     RiskConfig as DRMConfig,
@@ -322,6 +327,14 @@ class ArgusPipeline:
         self.rule_classifier = self._init_regime_classifier()
         self.consensus = RegimeConsensus()
         self.state_machines: dict[str, RegimeStateMachine] = {}
+
+        # ── Hybrid snowball modules ───────────────────────────────────────
+        self._pair_classifier = PairClassifier()
+        self._pair_class_cache: dict[str, str] = {}  # symbol → "CORE"/"MOVER"
+        self._hybrid_regime_clf = HybridRegimeClassifier()
+        self._admission_allocator = AdmissionAllocator()
+        self._slot_registry = SlotRegistry()
+        self._hybrid_sizing_policy = HybridSizingPolicy()
 
         # v6 Multi-Regime Orchestration
         self._regime_validator = RegimeValidator(min_hold=4, cooldown=4)
@@ -629,6 +642,11 @@ class ArgusPipeline:
                     self._forward_processed_ts[symbol] = candle_ts
 
                 last_close = float(candles["close"].iloc[-1])
+                # Hybrid snowball: pair class (cached per symbol)
+                if symbol not in self._pair_class_cache:
+                    self._pair_class_cache[symbol] = self._pair_classifier.classify(symbol).value
+                _pair_class = self._pair_class_cache[symbol]
+                _hybrid_regime_result = None  # populated after fv is available
 
                 # Feed candle data to NautilusEngine for range detection (micro-reversion)
                 self.nautilus_engine.feed_candles(
@@ -765,6 +783,11 @@ class ArgusPipeline:
                     continue
 
                 # Step 5: regime
+                # vol_multiple: 20-bar MA / 120-bar MA (stable, not single-bar spike)
+                _n = len(candles)
+                _vma20 = float(candles["volume"].tail(20).mean()) if _n >= 20 else 0.0
+                _vma120 = float(candles["volume"].tail(120).mean()) if _n >= 120 else _vma20
+                _vol_multiple = (_vma20 / _vma120) if _vma120 > 0 else 1.0
                 rule_vote = self.rule_classifier.classify(
                     RuleBasedInput(
                         adx_14=fv.adx_14,
@@ -772,7 +795,7 @@ class ArgusPipeline:
                         ema_21_vs_55=fv.ema_21_vs_55,
                         hurst_exponent=fv.hurst_exponent,
                         atr_ratio_5_20=fv.atr_ratio_5_20,
-                        vol_multiple_60d=max(fv.volume_ratio, 0.0),
+                        vol_multiple_60d=_vol_multiple,
                         directional_alignment_candles=24,
                         hermes_urgency=fv.hermes_urgency,
                         hermes_sentiment_score=fv.hermes_sentiment_score,
@@ -790,6 +813,27 @@ class ArgusPipeline:
                     timestamp=cycle_now,
                     hermes_override=consensus.regime if consensus.reason == "hermes_critical_override" else None,
                 )
+
+                # Hybrid snowball: 6-state regime (alongside rule-based, non-blocking)
+                try:
+                    _hybrid_regime_result = self._hybrid_regime_clf.classify(
+                        HybridRegimeInput(
+                            adx_14=fv.adx_14,
+                            price_vs_ma200=fv.price_vs_ma200,
+                            ema_21_vs_55=fv.ema_21_vs_55,
+                            hurst_exponent=fv.hurst_exponent,
+                            atr_ratio_5_20=fv.atr_ratio_5_20,
+                            vol_multiple_60d=_vol_multiple,
+                            price_drop_24h=float(getattr(fv, "price_drop_24h", 0.0) or 0.0),
+                        )
+                    )
+                    self._LOG.debug(
+                        "HybridRegime: %s → %s (conf=%.2f dir=%+d)",
+                        symbol, _hybrid_regime_result.regime.value,
+                        _hybrid_regime_result.confidence, _hybrid_regime_result.direction,
+                    )
+                except Exception as _exc:
+                    self._LOG.debug("HybridRegime classify failed: %s", _exc)
 
                 # ── v6: Regime Validation + Trend Gate + Engine Orchestrator ──
                 _v6_validation = None
@@ -1594,6 +1638,38 @@ class ArgusPipeline:
                     )
                     continue
 
+                # Hybrid snowball: Admission check (slot + heat gate)
+                _hybrid_str = _hybrid_regime_result.regime.value if _hybrid_regime_result else regime_state.regime
+                _portfolio_heat = len(self._open_positions) / max(self._admission_allocator.config.max_total_slots, 1)
+                # Build live slot registry from current open positions (accurate snapshot)
+                _live_registry = SlotRegistry()
+                for _pos in self._open_positions.values():
+                    _live_registry.open_trade(
+                        _pos.get("position_id", str(id(_pos))),
+                        engine_to_type(_pos.get("engine", "")),
+                    )
+                _admission = self._admission_allocator.evaluate(
+                    engine=signal.engine,
+                    signal_score=signal.confidence,
+                    regime=_hybrid_str,
+                    pair_class=_pair_class,
+                    portfolio_heat=_portfolio_heat,
+                    registry=_live_registry,
+                    hybrid_regime_result=_hybrid_regime_result,
+                )
+                if not _admission.admitted:
+                    self._reject(
+                        outputs=outputs,
+                        asset_class=asset_class,
+                        symbol=symbol,
+                        reason=f"admission_rejected:{_admission.reason}",
+                        engine=signal.engine,
+                        action="rejected",
+                        confidence=signal.confidence,
+                        gate_results={"admission_status": _admission.status.value, "pair_class": _pair_class},
+                    )
+                    continue
+
                 # Step 8: risk + sizing
                 runtime_risk = None
                 if self._runtime_risk_reloader is not None and signal is not None:
@@ -1733,6 +1809,25 @@ class ArgusPipeline:
                         symbol, drm_sl * 100, _cal.leverage, _cal.risk_usd,
                     )
 
+                # Hybrid snowball: sizing policy leverage cap
+                if _hybrid_regime_result is not None:
+                    _hs_engine_type = engine_to_type(signal.engine).value
+                    _hs_leverage = self._hybrid_sizing_policy.compute_leverage(
+                        engine_type=_hs_engine_type,
+                        pair_class=_pair_class,
+                        regime=_hybrid_regime_result.regime.value,
+                        signal_score=signal.confidence,
+                        portfolio_heat=_portfolio_heat,
+                        equity=self._account_equity,
+                    )
+                    if _hs_leverage > 0 and _hs_leverage < drm_leverage:
+                        self._LOG.debug(
+                            "HybridSizing: %s %s/%s → cap lev %.1fx→%.1fx",
+                            symbol, _hs_engine_type, _hybrid_regime_result.regime.value,
+                            drm_leverage, _hs_leverage,
+                        )
+                        drm_leverage = _hs_leverage
+
                 # Step 8.3: Market Structure SL Shield + TP Magnet
                 if self._market_structure_config.enabled and drm_decision is not None:
                     try:
@@ -1798,6 +1893,7 @@ class ArgusPipeline:
                     pos_data: dict[str, Any] = {
                         "position_id": pos_id,
                         "symbol": symbol,
+                        "engine": signal.engine,  # for SlotRegistry tracking
                         "side": signal.bias.upper() if hasattr(signal, "bias") else "LONG",
                         "entry_price": last_close,
                         "current_price": last_close,
@@ -2217,7 +2313,7 @@ class ArgusPipeline:
                 ema_21_vs_55=fv.ema_21_vs_55,
                 hurst_exponent=fv.hurst_exponent,
                 atr_ratio_5_20=fv.atr_ratio_5_20,
-                vol_multiple_60d=max(fv.volume_ratio, 0.0),
+                vol_multiple_60d=min(max(fv.volume_ratio, 0.0), 2.0),  # cap: no crisis from single-bar spike
                 directional_alignment_candles=24,
                 hermes_urgency=fv.hermes_urgency,
                 hermes_sentiment_score=fv.hermes_sentiment_score,

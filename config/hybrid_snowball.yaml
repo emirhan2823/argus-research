@@ -1,0 +1,198 @@
+# ── ARGUS Hybrid Snowball Configuration ──────────────────────��──────────────
+# All parameters for the hybrid snowball architecture.
+# This file is for the NEW hybrid layer — it does not override existing engine
+# config in engines.yaml or regime config in regimes.yaml.
+# Both coexist: the hybrid layer wraps and extends the existing pipeline.
+
+# ───────────────────────────��────────────────────────────────────��────────────
+# A) Universe Layer
+# ───────────────────────────────────────────────���─────────────────────────────
+universe:
+  # Volatility ratio threshold: vol(symbol)/vol(BTC) above this → upgrade to MOVER
+  tier1_vol_upgrade_threshold: 3.0   # CORE_TIER1 (BTC, ETH, XRP...)
+  tier2_vol_upgrade_threshold: 1.8   # CORE_TIER2 (ADA, LINK, ATOM...)
+
+  # Static classification overrides (can force CORE or MOVER per symbol)
+  force_core: []
+  force_mover: []
+
+  # Pair class descriptions (documentation only)
+  # CORE: BTC, ETH, XRP, SOL, BNB, ADA, AVAX, DOT, LINK, LTC, BCH, ATOM, TRX, NEAR, MATIC
+  # MOVER: HYPE, WIF, PEPE, BONK, JUP, TIA, INJ, SUI, APT, SEI and new listings
+
+# ─────────────────────────────────────────────────────────────────────────────
+# B) Hybrid Regime Layer
+# ─────────────────────────────────────────────────────────────────────────────
+hybrid_regime:
+  # TREND thresholds (relaxed from base regimes.yaml 32/0.58 for more coverage)
+  trending_min_adx: 26.0
+  trending_min_hurst: 0.52
+  trending_strong_adx: 32.0       # high-confidence trend
+  trending_strong_hurst: 0.58
+
+  # RANGE thresholds
+  range_max_adx: 24.0
+  range_max_hurst: 0.52
+  range_strong_max_adx: 20.0
+
+  # EXPANSION (momentum with expanding vol)
+  expansion_atr_ratio: 1.3        # ATR(5)/ATR(20)
+  expansion_min_adx: 18.0
+  expansion_max_adx: 30.0
+
+  # CHOP detection (high vol + no direction)
+  chop_atr_ratio: 1.4
+  chop_max_adx: 20.0
+
+  # CRISIS thresholds
+  crisis_price_drop_24h: -0.08    # 8% drop in 24h
+  crisis_vol_multiple: 3.0        # vol = 3x the 60d average
+  crisis_atr_ratio: 2.5           # ATR(5) = 2.5x ATR(20)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# C) Engine Routing (which engines are allowed in which hybrid regimes)
+# ─────────────────────────────────────────────────────────────────────────────
+engine_routing:
+  BULLISH_TREND:
+    allowed_engines: [TITAN]
+    primary_engine: TITAN
+    mr_allowed: false
+    direction_bias: long
+    notes: "Strong uptrend — trend continuation only"
+
+  BEARISH_TREND:
+    allowed_engines: [TITAN]
+    primary_engine: TITAN
+    mr_allowed: false
+    direction_bias: short
+    notes: "Strong downtrend — trend continuation only"
+
+  RANGE_MR:
+    allowed_engines: [POSEIDON]
+    primary_engine: POSEIDON
+    mr_allowed: true
+    direction_bias: both
+    notes: "Clean range — MR strategies favored"
+
+  EXPANSION:
+    allowed_engines: [TITAN]
+    primary_engine: TITAN
+    mr_allowed: false
+    direction_bias: both
+    notes: "Volatility expansion — momentum play, both directions"
+
+  CHOP:
+    allowed_engines: []
+    primary_engine: null
+    notes: "High vol, no direction — avoid all new entries"
+
+  CRISIS_DEFENSIVE:
+    allowed_engines: []
+    primary_engine: null
+    notes: "Crash/crisis — no new positions"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# D) Admission / Slot Allocation Layer
+# ─────────────────────────────────────────────────────────────────────────────
+admission:
+  max_trend_slots: 2              # max simultaneous trend positions
+  max_mr_slots: 3                 # max simultaneous MR positions
+  max_hybrid_slots: 1             # max AEGEAN-type positions
+  max_total_slots: 4              # global hard cap
+
+  # Reserve: last N slots reserved for premium signals
+  reserve_premium_slots: 1
+  premium_score_threshold: 0.72   # min score to use reserved slot
+
+  # Minimum signal score for any admission
+  min_score_for_admission: 0.50
+
+  # Portfolio heat gates — calibrated to max_total_slots=4
+  # heat = open_positions / max_total_slots (e.g., 1/4 = 0.25, 2/4 = 0.50)
+  max_heat_for_trend: 0.50        # deny trend when 2+ slots occupied (2/4)
+  max_heat_for_mr: 0.75           # deny MR when 3+ slots occupied (3/4)
+  max_heat_global: 0.75           # deny all when 3+ slots occupied (3/4)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# E) Risk / Sizing / Leverage Policy
+# ─────────────────────────────────────────────────────────────────────────────
+hybrid_sizing:
+  # Score thresholds
+  score_high_threshold: 0.75      # full leverage at this score
+  score_low_threshold: 0.50       # minimum usable score
+
+  # Heat penalty thresholds
+  heat_no_penalty: 0.04           # heat below this: no penalty
+  heat_max_penalty_at: 0.10       # heat at this: 50% leverage reduction
+
+  # Base risk per trade
+  base_risk_pct: 0.020            # 2% of equity per trade
+  min_risk_pct: 0.005             # minimum 0.5%
+  max_risk_pct: 0.045             # maximum 4.5%
+
+  # Leverage matrix (engine_type × pair_class × regime)
+  # See src/risk/hybrid_sizing_policy.py for the full matrix
+  leverage_reference:
+    TITAN_MOVER_EXPANSION: 10.0
+    TITAN_MOVER_BULLISH_TREND: 8.0
+    TITAN_CORE_BULLISH_TREND: 6.0
+    POSEIDON_CORE_RANGE_MR: 5.0
+    POSEIDON_MOVER_RANGE_MR: 4.0
+    POSEIDON_CORE_VOLATILE: 3.5
+    AEGEAN_MOVER_BULLISH_TREND: 5.0
+    AEGEAN_CORE_RANGE_MR: 3.0
+
+# ─────────────────────────────────────────────────────────────────────────────
+# F) Exit Policy
+# ─────────────────────────────────────────────────────────────────────────────
+exit_policy:
+  trend_engine:
+    # Runner exit: partial take + trailing
+    tp1_rr: 1.5             # close 33% at 1.5R
+    tp1_fraction: 0.33
+    runner_trail_mode: structure   # "structure" or "atr"
+    runner_atr_mult: 2.0
+    time_stop_bars: null    # trend trades don't time-stop
+    be_after_tp1: true
+
+  mr_engine:
+    # Faster capture: fixed RR target
+    target_rr: 2.0
+    tp_mode: fixed          # "fixed" or "band_mid"
+    time_stop_bars: 24      # 24h on 1h bars (3h on 15m bars = 12)
+    be_after_tp1: false     # MR: no BE lock (damages WR)
+    trailing_enabled: false  # confirmed: trailing destroys MR WR
+
+# ─────────────────────────────────────────────────────────────────────────────
+# G) Snowball Capital Phases
+# ─────────────────────────────────────────────────────────────────────────────
+snowball_phases:
+  survival:
+    equity_range: [0, 2000]
+    max_leverage: 1.0
+    max_risk_pct: 0.015
+    notes: "Protect capital, focus on quality not quantity"
+
+  foundation:
+    equity_range: [2000, 10000]
+    max_leverage: 1.5
+    max_risk_pct: 0.025
+    notes: "Build track record, unlock leverage slowly"
+
+  growth:
+    equity_range: [10000, 50000]
+    max_leverage: 2.0
+    max_risk_pct: 0.035
+    notes: "Exploit edge more aggressively, compound"
+
+  acceleration:
+    equity_range: [50000, 200000]
+    max_leverage: 2.5
+    max_risk_pct: 0.045
+    notes: "Peak compounding phase"
+
+  compounding:
+    equity_range: [200000, 999999999]
+    max_leverage: 2.0
+    max_risk_pct: 0.035
+    notes: "Capital preservation + moderate growth"
